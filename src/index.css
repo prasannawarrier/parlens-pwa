@@ -1,0 +1,74 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --primary: #007AFF;
+  /* Apple Blue */
+}
+
+body {
+  margin: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  letter-spacing: -0.01em;
+  background-color: #000;
+  color: white;
+}
+
+/* Apple Maps - Pills & Blur */
+@layer components {
+  .apple-pill {
+    @apply rounded-full bg-white/10 backdrop-blur-xl border border-white/10 shadow-lg transition-all active:scale-95;
+  }
+
+  .apple-card {
+    @apply rounded-[2.5rem] bg-white/10 backdrop-blur-2xl border border-white/10 shadow-2xl;
+  }
+
+  .apple-btn-primary {
+    @apply h-14 rounded-full bg-[#007AFF] px-8 font-semibold text-white transition-all active:scale-95 shadow-lg shadow-blue-500/20;
+  }
+
+  .apple-btn-secondary {
+    @apply h-14 rounded-full bg-white/10 backdrop-blur-md px-8 font-semibold text-white transition-all active:scale-95 border border-white/10;
+  }
+
+  .map-overlay-btn {
+    @apply flex h-12 w-12 items-center justify-center rounded-full bg-neutral-900/80 backdrop-blur-md border border-white/10 shadow-lg transition-all active:scale-90;
+  }
+}
+
+.leaflet-container {
+  width: 100%;
+  height: 100vh;
+  z-index: 1;
+  background: #000 !important;
+}
+
+.leaflet-bar a {
+  background-color: rgba(28, 28, 30, 0.8) !important;
+  color: white !important;
+  border-radius: 9999px !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  backdrop-filter: blur(10px);
+  margin-bottom: 8px !important;
+}
+
+/* Animations */
+@keyframes slideUp {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-bottom-sheet {
+  animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
