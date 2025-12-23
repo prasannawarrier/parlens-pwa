@@ -35,15 +35,17 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
             const now = Math.floor(Date.now() / 1000);
             console.log('[Parlens] Searching for open spots - Kind:', KINDS.OPEN_SPOT_BROADCAST, 'Geohashes:', geohashes);
 
+            // Create filter object explicitly
+            const filter = {
+                kinds: [KINDS.OPEN_SPOT_BROADCAST],
+                '#g': geohashes,
+                since: now - 300
+            };
+            console.log('[Parlens] Filter:', JSON.stringify(filter));
+
             const sub = pool.subscribeMany(
                 DEFAULT_RELAYS,
-                [
-                    {
-                        kinds: [KINDS.OPEN_SPOT_BROADCAST],
-                        '#g': geohashes, // Search by geohash (indexed by relays)
-                        since: now - 300 // Last 5 minutes
-                    }
-                ] as any,
+                [filter] as any,
                 {
                     onevent(event) {
                         const currentTime = Math.floor(Date.now() / 1000);
