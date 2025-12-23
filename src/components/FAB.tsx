@@ -29,6 +29,7 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
         if (status === 'search' && location) {
             // Get center + 8 neighboring geohashes for boundary-safe discovery
             const geohashes = getGeohashNeighbors(location[0], location[1], 5);
+            console.log('[Parlens] Searching for spots in geohashes:', geohashes);
 
             const sub = pool.subscribeMany(
                 DEFAULT_RELAYS,
@@ -36,37 +37,50 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
                     {
                         kinds: [KINDS.OPEN_SPOT_BROADCAST],
                         '#g': geohashes, // Search all 9 geohash cells
-                        '#type': [vehicleType],
-                        since: Math.floor(Date.now() / 1000) - 3600
+                        since: Math.floor(Date.now() / 1000) - 3600 // Last hour
                     }
                 ] as any,
                 {
                     onevent(event) {
+                        console.log('[Parlens] Received open spot event:', event.id, event.tags);
                         try {
                             const tags = event.tags;
                             const locTag = tags.find(t => t[0] === 'location');
                             const priceTag = tags.find(t => t[0] === 'hourly_rate');
                             const currencyTag = tags.find(t => t[0] === 'currency');
+                            const typeTag = tags.find(t => t[0] === 'type');
 
                             if (locTag) {
                                 const [lat, lon] = locTag[1].split(',').map(Number);
+                                const spotType = typeTag ? typeTag[1] : 'car';
+
+                                // Only show spots matching current vehicle type
+                                if (spotType !== vehicleType) {
+                                    console.log('[Parlens] Skipping spot - type mismatch:', spotType, 'vs', vehicleType);
+                                    return;
+                                }
+
                                 const spot = {
                                     id: event.id,
                                     lat,
                                     lon,
                                     price: priceTag ? parseFloat(priceTag[1]) : 0,
                                     currency: currencyTag ? currencyTag[1] : 'USD',
-                                    type: vehicleType
+                                    type: spotType
                                 };
+                                console.log('[Parlens] Adding spot to map:', spot);
                                 setOpenSpots((prev: any[]) => {
                                     if (prev.find((p: any) => p.id === spot.id)) return prev;
                                     return [...prev, spot];
                                 });
                             }
                         } catch (e) {
-                            console.warn('Error parsing spot:', e);
+                            console.warn('[Parlens] Error parsing spot:', e);
                         }
                     },
+                    oneose() {
+                        console.log('[Parlens] End of stored events for spot search');
+                    }
                 }
             );
 
@@ -76,6 +90,43 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
             };
         }
     }, [status, location, vehicleType]);
+
+    // Session persistence: restore session on mount
+    useEffect(() => {
+        const savedSession = localStorage.getItem('parlens_session');
+        if (savedSession) {
+            try {
+                const session = JSON.parse(savedSession);
+                if (session.status === 'parked' && session.parkLocation && session.sessionStart) {
+                    console.log('[Parlens] Restoring parked session:', session);
+                    setSessionStart(session.sessionStart);
+                    setParkLocation(session.parkLocation);
+                    setStatus('parked');
+                } else if (session.status === 'search') {
+                    console.log('[Parlens] Restoring search session');
+                    setStatus('search');
+                }
+            } catch (e) {
+                console.warn('[Parlens] Failed to restore session:', e);
+                localStorage.removeItem('parlens_session');
+            }
+        }
+    }, []);
+
+    // Save session state changes to localStorage
+    useEffect(() => {
+        if (status === 'parked' && sessionStart && parkLocation) {
+            localStorage.setItem('parlens_session', JSON.stringify({
+                status: 'parked',
+                sessionStart,
+                parkLocation
+            }));
+        } else if (status === 'search') {
+            localStorage.setItem('parlens_session', JSON.stringify({ status: 'search' }));
+        } else if (status === 'idle') {
+            localStorage.removeItem('parlens_session');
+        }
+    }, [status, sessionStart, parkLocation]);
 
     useEffect(() => {
         const detectCurrency = async () => {

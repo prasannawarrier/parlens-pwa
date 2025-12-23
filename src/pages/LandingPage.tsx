@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { HelpCircle, Compass, Navigation, ChevronDown, X } from 'lucide-react';
-import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { FAB } from '../components/FAB';
 import { ProfileButton } from '../components/ProfileButton';
 import { getCurrencySymbol } from '../lib/currency';
+import { clusterSpots, isCluster, type Cluster, type SpotBase } from '../lib/clustering';
 
 // Fix Leaflet marker icon issue
 import icon from 'leaflet/dist/images/marker-icon.png';
@@ -55,15 +56,15 @@ const ActiveSessionMarker = ({ location, vehicleType }: { location: [number, num
     return <Marker position={location} icon={customIcon} />;
 };
 
-// Marker for Open Spots
+// Marker for Open Spots (Kind 21011) - shows 🅿️
 const SpotMarker = ({ spot }: { spot: any }) => {
     const content = `
         <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 60px;">
              <div style="font-size: 32px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));">
-                ${spot.type === 'bicycle' ? '🚲' : spot.type === 'motorcycle' ? '🏍️' : '🅿️'}
+                🅿️
              </div>
-             <div style="background: white; border-radius: 12px; padding: 2px 8px; font-weight: bold; font-size: 11px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); transform: translateY(-5px); white-space: nowrap; color: black; border: 1px solid rgba(0,0,0,0.1);">
-                ${spot.price > 0 ? `${spot.currency === 'USD' ? '$' : spot.currency}${spot.price.toFixed(2)}` : 'Free'}
+             <div style="background: #34C759; border-radius: 12px; padding: 2px 8px; font-weight: bold; font-size: 11px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); transform: translateY(-5px); white-space: nowrap; color: white;">
+                ${spot.price > 0 ? `${spot.currency === 'USD' ? '$' : spot.currency}${spot.price.toFixed(2)}/hr` : 'Free'}
              </div>
         </div>
     `;
@@ -78,17 +79,17 @@ const SpotMarker = ({ spot }: { spot: any }) => {
     return <Marker position={[spot.lat, spot.lon]} icon={icon} />;
 };
 
-// Marker for History Spots (Purple)
+// Marker for History Spots (Kind 31417) - shows 🅟
 const HistoryMarker = ({ spot }: { spot: any }) => {
     const content = spot.decryptedContent;
     if (!content || !content.lat || !content.lon) return null;
 
     const htmlContent = `
         <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 60px;">
-             <div style="font-size: 32px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3)); grayscale: 100%;">
-                🅿️
+             <div style="font-size: 32px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3)); opacity: 0.7;">
+                🅟
              </div>
-             <div style="background: white; border-radius: 12px; padding: 2px 8px; font-weight: bold; font-size: 11px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); transform: translateY(-5px); white-space: nowrap; color: black; border: 1px solid rgba(0,0,0,0.1);">
+             <div style="background: #8E8E93; border-radius: 12px; padding: 2px 8px; font-weight: bold; font-size: 11px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); transform: translateY(-5px); white-space: nowrap; color: white;">
                 ${content.fee ? `${getCurrencySymbol(content.currency || 'USD')}${content.fee}` : 'Free'}
              </div>
         </div>
@@ -102,6 +103,53 @@ const HistoryMarker = ({ spot }: { spot: any }) => {
     });
 
     return <Marker position={[content.lat, content.lon]} icon={icon} />;
+};
+
+// Cluster marker for grouped spots
+const ClusterMarker = ({ cluster, type }: { cluster: Cluster<SpotBase>, type: 'open' | 'history' }) => {
+    const emoji = type === 'open' ? '🅿️' : '🅟';
+    const bgColor = type === 'open' ? '#34C759' : '#8E8E93';
+    const priceRange = cluster.minPrice === cluster.maxPrice
+        ? (cluster.minPrice > 0 ? `${getCurrencySymbol(cluster.currency)}${cluster.minPrice}` : 'Free')
+        : `${getCurrencySymbol(cluster.currency)}${cluster.minPrice}-${cluster.maxPrice}`;
+
+    const htmlContent = `
+        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 70px;">
+             <div style="font-size: 28px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3)); position: relative;">
+                ${emoji}
+                <div style="position: absolute; top: -5px; right: -5px; background: ${bgColor}; color: white; font-size: 10px; font-weight: bold; border-radius: 50%; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; border: 2px solid white;">
+                    ${cluster.count}
+                </div>
+             </div>
+             <div style="background: ${bgColor}; border-radius: 12px; padding: 2px 8px; font-weight: bold; font-size: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); transform: translateY(-5px); white-space: nowrap; color: white;">
+                ${priceRange}
+             </div>
+        </div>
+    `;
+
+    const icon = L.divIcon({
+        className: 'cluster-marker',
+        html: htmlContent,
+        iconSize: [70, 60],
+        iconAnchor: [35, 45]
+    });
+
+    return <Marker position={[cluster.lat, cluster.lon]} icon={icon} />;
+};
+
+// Component to track zoom level
+const ZoomTracker = ({ onZoomChange }: { onZoomChange: (zoom: number) => void }) => {
+    const map = useMapEvents({
+        zoomend: () => {
+            onZoomChange(map.getZoom());
+        }
+    });
+
+    useEffect(() => {
+        onZoomChange(map.getZoom());
+    }, []);
+
+    return null;
 };
 
 // Controller to handle map centering and rotation
@@ -168,6 +216,7 @@ export const LandingPage: React.FC = () => {
     const [historySpots, setHistorySpots] = useState<any[]>([]);
     const [parkLocation, setParkLocation] = useState<[number, number] | null>(null);
     const [shouldRecenter, setShouldRecenter] = useState(false);
+    const [zoomLevel, setZoomLevel] = useState(16);
 
     // Theme state
     const [isDarkMode, setIsDarkMode] = useState(false);
@@ -285,22 +334,52 @@ export const LandingPage: React.FC = () => {
                         }
                         attribution='&copy; CARTO'
                     />
+                    <ZoomTracker onZoomChange={setZoomLevel} />
                     <UserMarker location={location} bearing={bearing} />
                     {status === 'parked' && parkLocation && (
                         <ActiveSessionMarker location={parkLocation} vehicleType={vehicleType} />
                     )}
-                    {status === 'search' && openSpots.map(spot => (
-                        <SpotMarker key={spot.id} spot={spot} />
-                    ))}
-                    {historySpots.length > 0 && historySpots
-                        .filter(spot => {
-                            // Filter by current vehicle type, matching logic
+                    {/* Open spots (Kind 21011) - only in search mode */}
+                    {status === 'search' && openSpots.length > 0 && (() => {
+                        const spotsForClustering = openSpots.map(s => ({
+                            id: s.id,
+                            lat: s.lat,
+                            lon: s.lon,
+                            price: s.price,
+                            currency: s.currency,
+                            original: s
+                        }));
+                        const clustered = clusterSpots(spotsForClustering, zoomLevel);
+                        return clustered.map(item =>
+                            isCluster(item)
+                                ? <ClusterMarker key={item.id} cluster={item} type="open" />
+                                : <SpotMarker key={item.id} spot={(item as any).original || item} />
+                        );
+                    })()}
+                    {/* History spots (Kind 31417) - always visible */}
+                    {historySpots.length > 0 && (() => {
+                        const filtered = historySpots.filter(spot => {
                             const type = spot.tags?.find((t: string[]) => t[0] === 'type')?.[1] || 'car';
                             return type === vehicleType;
-                        })
-                        .map(spot => (
-                            <HistoryMarker key={spot.id} spot={spot} />
-                        ))}
+                        });
+                        const spotsForClustering = filtered.map(s => {
+                            const content = s.decryptedContent;
+                            return content && content.lat && content.lon ? {
+                                id: s.id,
+                                lat: content.lat,
+                                lon: content.lon,
+                                price: parseFloat(content.fee) || 0,
+                                currency: content.currency || 'USD',
+                                original: s
+                            } : null;
+                        }).filter(Boolean) as any[];
+                        const clustered = clusterSpots(spotsForClustering, zoomLevel);
+                        return clustered.map(item =>
+                            isCluster(item)
+                                ? <ClusterMarker key={item.id} cluster={item} type="history" />
+                                : <HistoryMarker key={item.id} spot={(item as any).original || item} />
+                        );
+                    })()}
                     <MapController
                         location={location}
                         bearing={bearing}
@@ -471,7 +550,7 @@ export const LandingPage: React.FC = () => {
 
             {status === 'search' && (
                 <div className="absolute top-12 left-1/2 z-[1000] -translate-x-1/2 animate-in slide-in-from-top-6 duration-500">
-                    <div className="px-6 py-3 rounded-full bg-white text-black font-bold shadow-xl flex items-center gap-3 border border-black/5">
+                    <div className="px-6 py-3 rounded-full bg-white text-black font-bold shadow-xl flex items-center gap-3 border border-black/5 whitespace-nowrap min-w-max">
                         <div className="w-2 h-2 rounded-full bg-orange-500 animate-pulse" />
                         <span className="text-sm tracking-tight">Searching for spots</span>
                     </div>
