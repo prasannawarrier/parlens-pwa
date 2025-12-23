@@ -27,9 +27,8 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
     // Search for open spots when entering search mode
     useEffect(() => {
         if (status === 'search' && location) {
-            const geohash = encodeGeohash(location[0], location[1]);
-            // Search neighbor geohashes too for better coverage
-            // Simplified for now to just current geohash
+            // Use 6-char geohash (~610m x 610m) for better discovery radius
+            const geohash = encodeGeohash(location[0], location[1], 6);
 
             const sub = pool.subscribeMany(
                 DEFAULT_RELAYS,
@@ -117,7 +116,8 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
 
         const lat = parkLocation ? parkLocation[0] : location[0];
         const lon = parkLocation ? parkLocation[1] : location[1];
-        const geohash = encodeGeohash(lat, lon);
+        // Use 6-char geohash for broadcast to match search radius
+        const geohash = encodeGeohash(lat, lon, 6);
         const endTime = Math.floor(Date.now() / 1000);
         const startTime = sessionStart || endTime;
 
@@ -224,57 +224,57 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
             </div>
 
             {showCostPopup && (
-                <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/60 backdrop-blur-xl animate-in fade-in duration-300 p-6">
-                    <div className="w-full max-w-md bg-white dark:bg-[#1c1c1e] rounded-[2.5rem] shadow-2xl p-10 flex flex-col items-center space-y-8 animate-in zoom-in-95 border border-black/5 dark:border-white/10 transition-colors">
-                        <div className="text-center space-y-2">
-                            <h3 className="text-3xl font-bold tracking-tight text-zinc-900 dark:text-white">End Session</h3>
-                            <p className="text-sm font-medium text-zinc-500 dark:text-white/40">Enter total parking fee, 0 if free parking</p>
+                <div className="fixed inset-0 z-[2000] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-xl animate-in fade-in duration-300 p-4">
+                    <div className="w-full max-w-sm bg-white dark:bg-[#1c1c1e] rounded-[2rem] shadow-2xl p-6 flex flex-col items-center space-y-5 animate-in slide-in-from-bottom-10 sm:zoom-in-95 border border-black/5 dark:border-white/10 transition-colors">
+                        <div className="text-center space-y-1">
+                            <h3 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-white">End Session</h3>
+                            <p className="text-xs font-medium text-zinc-500 dark:text-white/40">Enter total parking fee, 0 if free parking</p>
                         </div>
 
 
-                        <div className="flex items-center gap-6">
+                        <div className="flex items-center gap-4">
                             {/* Currency symbol and amount */}
-                            <div className="flex items-center gap-4 bg-zinc-100 dark:bg-white/5 px-8 py-6 rounded-[2rem] border border-black/5 dark:border-white/5">
-                                <span className="text-4xl font-bold text-blue-500">{symbol}</span>
+                            <div className="flex items-center gap-3 bg-zinc-100 dark:bg-white/5 px-5 py-4 rounded-[1.5rem] border border-black/5 dark:border-white/5">
+                                <span className="text-2xl font-bold text-blue-500">{symbol}</span>
                                 <input
                                     type="number"
                                     value={cost}
                                     onChange={(e) => setCost(e.target.value)}
                                     autoFocus
-                                    className="w-28 bg-transparent text-6xl font-black text-center text-zinc-900 dark:text-white focus:outline-none placeholder:text-zinc-300 dark:placeholder:text-white/10 appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]"
+                                    className="w-20 bg-transparent text-4xl font-black text-center text-zinc-900 dark:text-white focus:outline-none placeholder:text-zinc-300 dark:placeholder:text-white/10 appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]"
                                     min="0"
                                 />
-                                <span className="text-lg font-bold text-zinc-400 dark:text-white/20">{currency}</span>
+                                <span className="text-sm font-bold text-zinc-400 dark:text-white/20">{currency}</span>
                             </div>
 
                             {/* Up/Down buttons */}
-                            <div className="flex flex-col gap-2">
+                            <div className="flex flex-col gap-1.5">
                                 <button
                                     onClick={() => setCost(String(Math.max(0, parseFloat(cost || '0') + 1)))}
-                                    className="h-14 w-14 rounded-2xl bg-zinc-100 hover:bg-zinc-200 dark:bg-white/10 dark:hover:bg-white/20 active:scale-95 transition-all flex items-center justify-center"
+                                    className="h-10 w-10 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-white/10 dark:hover:bg-white/20 active:scale-95 transition-all flex items-center justify-center"
                                 >
-                                    <ChevronUp size={28} className="text-zinc-600 dark:text-white/70" />
+                                    <ChevronUp size={22} className="text-zinc-600 dark:text-white/70" />
                                 </button>
                                 <button
                                     onClick={() => setCost(String(Math.max(0, parseFloat(cost || '0') - 1)))}
-                                    className="h-14 w-14 rounded-2xl bg-zinc-100 hover:bg-zinc-200 dark:bg-white/10 dark:hover:bg-white/20 active:scale-95 transition-all flex items-center justify-center"
+                                    className="h-10 w-10 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-white/10 dark:hover:bg-white/20 active:scale-95 transition-all flex items-center justify-center"
                                 >
-                                    <ChevronDown size={28} className="text-zinc-600 dark:text-white/70" />
+                                    <ChevronDown size={22} className="text-zinc-600 dark:text-white/70" />
                                 </button>
                             </div>
                         </div>
 
-                        <div className="w-full space-y-4 mt-4">
+                        <div className="w-full space-y-3">
                             <button
                                 onClick={handleFinishParking}
-                                className="w-full h-20 rounded-[2rem] bg-[#007AFF] text-white text-xl font-bold flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all"
+                                className="w-full h-14 rounded-[1.5rem] bg-[#007AFF] text-white text-lg font-bold flex items-center justify-center gap-2 shadow-xl active:scale-95 transition-all"
                             >
-                                Log Parking <ArrowRight size={24} />
+                                Log Parking <ArrowRight size={20} />
                             </button>
 
                             <button
                                 onClick={() => setShowCostPopup(false)}
-                                className="w-full text-sm font-bold text-zinc-400 dark:text-white/30 tracking-widest uppercase py-4 hover:text-zinc-600 dark:hover:text-white/50 transition-colors"
+                                className="w-full text-xs font-bold text-zinc-400 dark:text-white/30 tracking-widest uppercase py-3 hover:text-zinc-600 dark:hover:text-white/50 transition-colors"
                             >
                                 Cancel
                             </button>

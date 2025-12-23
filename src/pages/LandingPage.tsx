@@ -319,7 +319,7 @@ export const LandingPage: React.FC = () => {
                     <button
                         onClick={() => handleVehicleChange('bicycle')}
                         className={`p-2.5 rounded-full transition-all ${vehicleType === 'bicycle'
-                            ? 'bg-zinc-200 dark:bg-purple-500 text-black dark:text-white shadow-lg scale-110'
+                            ? 'bg-zinc-200 dark:bg-zinc-700 text-black dark:text-white shadow-lg scale-110'
                             : 'text-black/50 dark:text-white/50 hover:text-black hover:bg-black/5 dark:hover:text-white dark:hover:bg-white/10'}`}
                     >
                         <span className="text-xl">🚲</span>
@@ -327,7 +327,7 @@ export const LandingPage: React.FC = () => {
                     <button
                         onClick={() => handleVehicleChange('motorcycle')}
                         className={`p-2.5 rounded-full transition-all ${vehicleType === 'motorcycle'
-                            ? 'bg-zinc-200 dark:bg-purple-500 text-black dark:text-white shadow-lg scale-110'
+                            ? 'bg-zinc-200 dark:bg-zinc-700 text-black dark:text-white shadow-lg scale-110'
                             : 'text-black/50 dark:text-white/50 hover:text-black hover:bg-black/5 dark:hover:text-white dark:hover:bg-white/10'}`}
                     >
                         <span className="text-xl">🏍️</span>
@@ -335,7 +335,7 @@ export const LandingPage: React.FC = () => {
                     <button
                         onClick={() => handleVehicleChange('car')}
                         className={`p-2.5 rounded-full transition-all ${vehicleType === 'car'
-                            ? 'bg-zinc-200 dark:bg-purple-500 text-black dark:text-white shadow-lg scale-110'
+                            ? 'bg-zinc-200 dark:bg-zinc-700 text-black dark:text-white shadow-lg scale-110'
                             : 'text-black/50 dark:text-white/50 hover:text-black hover:bg-black/5 dark:hover:text-white dark:hover:bg-white/10'}`}
                     >
                         <span className="text-xl">🚗</span>

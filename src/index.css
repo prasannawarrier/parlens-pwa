@@ -54,6 +54,11 @@ body {
   background: #000 !important;
 }
 
+/* Hide Leaflet attribution */
+.leaflet-control-attribution {
+  display: none !important;
+}
+
 .leaflet-bar a {
   background-color: rgba(28, 28, 30, 0.8) !important;
   color: white !important;
