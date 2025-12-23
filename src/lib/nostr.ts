@@ -1,5 +1,5 @@
 export const KINDS = {
-    PARKING_LOG: 31012, // My Parking Log (Parameterized Replaceable for history)
+    PARKING_LOG: 31417, // My Parking Log (Parameterized Replaceable for history)
     OPEN_SPOT_BROADCAST: 21011, // Open Spot Broadcast (Ephemeral)
 };
 
@@ -22,4 +22,5 @@ export interface BroadcastTags {
     location: string;
     g: string;
     client: string;
+    type: 'car' | 'motorcycle' | 'bicycle';
 }

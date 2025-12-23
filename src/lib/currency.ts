@@ -106,3 +106,22 @@ export function getCurrencySymbol(currency: string): string {
         return symbols[currency] || '$';
     }
 }
+
+// Currency to Country Code mapping (primary country)
+const currencyToCountry: { [key: string]: string } = {
+    'INR': 'IN', 'USD': 'US', 'GBP': 'GB', 'EUR': 'EU', 'JPY': 'JP', 'CAD': 'CA', 'AUD': 'AU',
+    'CNY': 'CN', 'AED': 'AE', 'SGD': 'SG', 'HKD': 'HK', 'CHF': 'CH', 'SEK': 'SE', 'NOK': 'NO',
+    'DKK': 'DK', 'NZD': 'NZ', 'MXN': 'MX', 'BRL': 'BR', 'ZAR': 'ZA', 'KRW': 'KR', 'THB': 'TH',
+    'MYR': 'MY', 'PHP': 'PH', 'IDR': 'ID', 'VND': 'VN', 'RUB': 'RU', 'PLN': 'PL', 'TRY': 'TR',
+    'SAR': 'SA', 'EGP': 'EG'
+};
+
+/**
+ * Gets the emoji flag for a currency code.
+ */
+export function getCountryFlag(currency: string): string {
+    const countryCode = currencyToCountry[currency] || 'US';
+    return countryCode
+        .toUpperCase()
+        .replace(/./g, char => String.fromCodePoint(char.charCodeAt(0) + 127397));
+}

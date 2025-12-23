@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Car, MapPin, ArrowRight, ChevronUp, ChevronDown } from 'lucide-react';
+import { Search, MapPin, ArrowRight, ChevronUp, ChevronDown } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { KINDS, DEFAULT_RELAYS } from '../lib/nostr';
 import { encodeGeohash } from '../lib/geo';
@@ -10,16 +10,73 @@ interface FABProps {
     status: 'idle' | 'search' | 'parked';
     setStatus: (s: 'idle' | 'search' | 'parked') => void;
     location: [number, number];
+    vehicleType: 'bicycle' | 'motorcycle' | 'car';
+    setOpenSpots: React.Dispatch<React.SetStateAction<any[]>>;
+    parkLocation: [number, number] | null;
+    setParkLocation: (loc: [number, number] | null) => void;
 }
 
-export const FAB: React.FC<FABProps> = ({ status, setStatus, location }) => {
+export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleType, setOpenSpots, parkLocation, setParkLocation }) => {
     const { pubkey, pool, signEvent } = useAuth();
     const [showCostPopup, setShowCostPopup] = useState(false);
     const [cost, setCost] = useState('0');
     const [currency, setCurrency] = useState('USD');
     const [symbol, setSymbol] = useState('$');
     const [sessionStart, setSessionStart] = useState<number | null>(null);
-    const [parkLocation, setParkLocation] = useState<[number, number] | null>(null);
+
+    // Search for open spots when entering search mode
+    useEffect(() => {
+        if (status === 'search' && location) {
+            const geohash = encodeGeohash(location[0], location[1]);
+            // Search neighbor geohashes too for better coverage
+            // Simplified for now to just current geohash
+
+            const sub = pool.subscribeMany(
+                DEFAULT_RELAYS,
+                [
+                    {
+                        kinds: [KINDS.OPEN_SPOT_BROADCAST],
+                        '#g': [geohash],
+                        '#type': [vehicleType], // Filter by vehicle type
+                        since: Math.floor(Date.now() / 1000) - 3600 // Last hour only
+                    }
+                ] as any,
+                {
+                    onevent(event) {
+                        try {
+                            const tags = event.tags;
+                            const locTag = tags.find(t => t[0] === 'location');
+                            const priceTag = tags.find(t => t[0] === 'hourly_rate');
+                            const currencyTag = tags.find(t => t[0] === 'currency');
+
+                            if (locTag) {
+                                const [lat, lon] = locTag[1].split(',').map(Number);
+                                const spot = {
+                                    id: event.id,
+                                    lat,
+                                    lon,
+                                    price: priceTag ? parseFloat(priceTag[1]) : 0,
+                                    currency: currencyTag ? currencyTag[1] : 'USD',
+                                    type: vehicleType
+                                };
+                                setOpenSpots((prev: any[]) => {
+                                    if (prev.find((p: any) => p.id === spot.id)) return prev;
+                                    return [...prev, spot];
+                                });
+                            }
+                        } catch (e) {
+                            console.warn('Error parsing spot:', e);
+                        }
+                    },
+                }
+            );
+
+            return () => {
+                sub.close();
+                setOpenSpots([]); // Clear spots when leaving search
+            };
+        }
+    }, [status, location, vehicleType]);
 
     useEffect(() => {
         const detectCurrency = async () => {
@@ -87,6 +144,7 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location }) => {
                 tags: [
                     ['g', geohash],
                     ['client', 'parlens'],
+                    ['type', vehicleType],
                     ['d', `session_${startTime}`] // Unique ID for history
                 ],
                 created_at: endTime,
@@ -115,6 +173,7 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location }) => {
                     ['location', `${lat},${lon}`],
                     ['hourly_rate', hourlyRate],
                     ['currency', currency],
+                    ['type', vehicleType],
                     ['client', 'parlens']
                 ],
                 created_at: endTime,
@@ -149,54 +208,58 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location }) => {
 
                 <button
                     onClick={handleClick}
-                    className={`h-20 w-20 flex items-center justify-center rounded-3xl shadow-2xl transition-all active:scale-90 ${status === 'idle' ? 'bg-[#007AFF] text-white shadow-blue-500/20' :
+                    className={`h-20 w-20 flex items-center justify-center rounded-[2.5rem] shadow-2xl transition-all active:scale-90 ${status === 'idle' ? 'bg-[#007AFF] text-white shadow-blue-500/20' :
                         status === 'search' ? 'bg-[#FF9500] text-white shadow-orange-500/20' :
                             'bg-[#34C759] text-white shadow-green-500/20'
                         }`}
                 >
                     {status === 'idle' && <Search size={32} strokeWidth={2.5} />}
                     {status === 'search' && <MapPin size={32} strokeWidth={2.5} className="animate-pulse" />}
-                    {status === 'parked' && <Car size={32} strokeWidth={2.5} />}
+                    {status === 'parked' && (
+                        vehicleType === 'bicycle' ? <span className="text-3xl">🚲</span> :
+                            vehicleType === 'motorcycle' ? <span className="text-3xl">🏍️</span> :
+                                <span className="text-3xl">🚗</span>
+                    )}
                 </button>
             </div>
 
             {showCostPopup && (
                 <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/60 backdrop-blur-xl animate-in fade-in duration-300 p-6">
-                    <div className="w-full max-w-md bg-[#1c1c1e] rounded-[2.5rem] shadow-2xl p-10 flex flex-col items-center space-y-8 animate-in zoom-in-95">
+                    <div className="w-full max-w-md bg-white dark:bg-[#1c1c1e] rounded-[2.5rem] shadow-2xl p-10 flex flex-col items-center space-y-8 animate-in zoom-in-95 border border-black/5 dark:border-white/10 transition-colors">
                         <div className="text-center space-y-2">
-                            <h3 className="text-3xl font-bold tracking-tight">Session Ended</h3>
-                            <p className="text-sm font-medium text-white/40">Enter the total parking fee</p>
+                            <h3 className="text-3xl font-bold tracking-tight text-zinc-900 dark:text-white">End Session</h3>
+                            <p className="text-sm font-medium text-zinc-500 dark:text-white/40">Enter total parking fee, 0 if free parking</p>
                         </div>
 
 
                         <div className="flex items-center gap-6">
                             {/* Currency symbol and amount */}
-                            <div className="flex items-center gap-4 bg-white/5 px-8 py-6 rounded-[2rem] border border-white/5">
+                            <div className="flex items-center gap-4 bg-zinc-100 dark:bg-white/5 px-8 py-6 rounded-[2rem] border border-black/5 dark:border-white/5">
                                 <span className="text-4xl font-bold text-blue-500">{symbol}</span>
                                 <input
                                     type="number"
                                     value={cost}
                                     onChange={(e) => setCost(e.target.value)}
                                     autoFocus
-                                    className="w-28 bg-transparent text-6xl font-black text-center text-white focus:outline-none placeholder:text-white/10 appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]"
+                                    className="w-28 bg-transparent text-6xl font-black text-center text-zinc-900 dark:text-white focus:outline-none placeholder:text-zinc-300 dark:placeholder:text-white/10 appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]"
                                     min="0"
                                 />
-                                <span className="text-lg font-bold text-white/20">{currency}</span>
+                                <span className="text-lg font-bold text-zinc-400 dark:text-white/20">{currency}</span>
                             </div>
 
                             {/* Up/Down buttons */}
                             <div className="flex flex-col gap-2">
                                 <button
                                     onClick={() => setCost(String(Math.max(0, parseFloat(cost || '0') + 1)))}
-                                    className="h-14 w-14 rounded-2xl bg-white/10 hover:bg-white/20 active:scale-95 transition-all flex items-center justify-center"
+                                    className="h-14 w-14 rounded-2xl bg-zinc-100 hover:bg-zinc-200 dark:bg-white/10 dark:hover:bg-white/20 active:scale-95 transition-all flex items-center justify-center"
                                 >
-                                    <ChevronUp size={28} className="text-white/70" />
+                                    <ChevronUp size={28} className="text-zinc-600 dark:text-white/70" />
                                 </button>
                                 <button
                                     onClick={() => setCost(String(Math.max(0, parseFloat(cost || '0') - 1)))}
-                                    className="h-14 w-14 rounded-2xl bg-white/10 hover:bg-white/20 active:scale-95 transition-all flex items-center justify-center"
+                                    className="h-14 w-14 rounded-2xl bg-zinc-100 hover:bg-zinc-200 dark:bg-white/10 dark:hover:bg-white/20 active:scale-95 transition-all flex items-center justify-center"
                                 >
-                                    <ChevronDown size={28} className="text-white/70" />
+                                    <ChevronDown size={28} className="text-zinc-600 dark:text-white/70" />
                                 </button>
                             </div>
                         </div>
@@ -211,7 +274,7 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location }) => {
 
                             <button
                                 onClick={() => setShowCostPopup(false)}
-                                className="w-full text-sm font-bold text-white/30 tracking-widest uppercase py-4"
+                                className="w-full text-sm font-bold text-zinc-400 dark:text-white/30 tracking-widest uppercase py-4 hover:text-zinc-600 dark:hover:text-white/50 transition-colors"
                             >
                                 Cancel
                             </button>

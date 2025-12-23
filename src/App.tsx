@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useAuth } from './contexts/AuthContext';
 import { LandingPage } from './pages/LandingPage';
 import { ShieldCheck, UserPlus, Key } from 'lucide-react';
@@ -8,24 +8,33 @@ const Login: React.FC = () => {
   const [nsec, setNsec] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [view, setView] = useState<'landing' | 'nsec'>('landing');
+  const [view, setView] = useState<'landing' | 'nsec' | 'setup'>('landing');
+  const [newUsername, setNewUsername] = useState('');
 
-  // Request location permission early so it's ready when user logs in
-  useEffect(() => {
-    if ('geolocation' in navigator) {
-      navigator.geolocation.getCurrentPosition(
-        () => console.log('Location permission granted'),
-        (err) => console.log('Location permission status:', err.message),
-        { enableHighAccuracy: true, timeout: 5000 }
-      );
-    }
-  }, []);
-
-  const handleLogin = async (method: 'extension' | 'nsec' | 'create') => {
+  const handleLogin = async (method: 'extension' | 'nsec') => {
     setIsLoading(true);
     setError('');
     try {
       await login(method, method === 'nsec' ? nsec : undefined);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleCreateAccount = () => {
+    setView('setup');
+  };
+
+  const handleFinishSetup = async () => {
+    if (!newUsername.trim()) {
+      setError('Please enter a username');
+      return;
+    }
+    setIsLoading(true);
+    try {
+      await login('create', undefined, newUsername);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -41,24 +50,28 @@ const Login: React.FC = () => {
             <span className="text-5xl font-black text-white">P</span>
           </div>
           <h1 className="text-5xl font-extrabold tracking-tighter">Parlens</h1>
-          <p className="text-sm font-medium text-white/40 tracking-tight">Peer-to-Peer Parking Management</p>
+          <p className="text-sm font-medium text-white/40 tracking-tight">Public Parking Management</p>
         </div>
 
         <div className="space-y-4">
           {view === 'landing' ? (
             <>
               <button
-                onClick={() => handleLogin('create')}
+                onClick={handleCreateAccount}
                 disabled={isLoading}
                 className="w-full h-16 rounded-3xl bg-white text-black font-bold text-lg shadow-xl active:scale-95 transition-all flex items-center justify-center gap-3"
               >
                 {isLoading ? 'Creating...' : (
                   <>
                     <UserPlus size={20} strokeWidth={3} />
-                    Get Started
+                    Create a Nostr Account
                   </>
                 )}
               </button>
+
+              <div className="pt-4 pb-2">
+                <h2 className="text-lg font-bold text-white/50 uppercase tracking-widest text-center">Login</h2>
+              </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <button
@@ -79,6 +92,36 @@ const Login: React.FC = () => {
                 </button>
               </div>
             </>
+          ) : view === 'setup' ? (
+            <div className="space-y-4 pt-4 animate-in slide-in-from-right-4">
+              <div className="text-center pb-2">
+                <h3 className="text-xl font-bold">Pick a Username</h3>
+                <p className="text-white/40 text-sm">This will be your identity on Nostr</p>
+              </div>
+              <input
+                type="text"
+                placeholder="Username"
+                value={newUsername}
+                onChange={(e) => setNewUsername(e.target.value)}
+                className="w-full h-16 rounded-3xl bg-zinc-900 border border-white/10 px-6 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder:text-white/20"
+                autoFocus
+              />
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setView('landing')}
+                  className="h-16 px-6 rounded-3xl bg-zinc-900 text-white font-bold"
+                >
+                  Back
+                </button>
+                <button
+                  onClick={handleFinishSetup}
+                  disabled={isLoading || !newUsername}
+                  className="flex-1 h-16 rounded-3xl bg-blue-500 text-white font-bold shadow-lg active:scale-95 transition-all"
+                >
+                  {isLoading ? 'Creating...' : 'Continue'}
+                </button>
+              </div>
+            </div>
           ) : (
             <div className="space-y-4 pt-4 animate-in slide-in-from-bottom-4">
               <input
@@ -114,7 +157,7 @@ const Login: React.FC = () => {
           )}
         </div>
       </div>
-    </div>
+    </div >
   );
 };
 

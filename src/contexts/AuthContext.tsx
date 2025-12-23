@@ -7,7 +7,7 @@ import React, { createContext, useContext, useState } from 'react';
 
 interface AuthContextType {
     pubkey: string | null;
-    login: (method: 'extension' | 'nsec' | 'bunker' | 'create', value?: string) => Promise<void>;
+    login: (method: 'extension' | 'nsec' | 'bunker' | 'create', value?: string, username?: string) => Promise<void>;
     logout: () => void;
     pool: SimplePool;
     signEvent: (event: any) => Promise<any>;
@@ -19,8 +19,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [pubkey, setPubkey] = useState<string | null>(localStorage.getItem('parlens_pubkey'));
     const [pool] = useState(new SimplePool());
 
-    const login = async (method: 'extension' | 'nsec' | 'bunker' | 'create', value?: string) => {
+    const login = async (method: 'extension' | 'nsec' | 'bunker' | 'create', value?: string, username?: string) => {
         let key = '';
+        let privateKey: Uint8Array | null = null;
 
         if (method === 'extension') {
             if (!(window as any).nostr) {
@@ -31,20 +32,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             try {
                 const decoded = nip19.decode(value);
                 if (decoded.type !== 'nsec') throw new Error('Not an nsec');
-                const privkey = decoded.data as Uint8Array;
-                key = getPublicKey(privkey);
-                localStorage.setItem('parlens_privkey', bytesToHex(privkey));
+                privateKey = decoded.data as Uint8Array;
+                key = getPublicKey(privateKey);
+                localStorage.setItem('parlens_privkey', bytesToHex(privateKey));
             } catch (e) {
                 throw new Error('Invalid nsec format');
             }
         } else if (method === 'create') {
-            const privkey = generateSecretKey();
-            key = getPublicKey(privkey);
-            localStorage.setItem('parlens_privkey', bytesToHex(privkey));
+            privateKey = generateSecretKey();
+            key = getPublicKey(privateKey);
+            localStorage.setItem('parlens_privkey', bytesToHex(privateKey));
         }
 
         setPubkey(key);
         localStorage.setItem('parlens_pubkey', key);
+
+        // Publish metadata if creating account
+        if (method === 'create' && username && privateKey) {
+            try {
+                const event = finalizeEvent({
+                    kind: 0,
+                    created_at: Math.floor(Date.now() / 1000),
+                    tags: [],
+                    content: JSON.stringify({
+                        name: username,
+                        display_name: username,
+                        picture: `https://api.dicebear.com/7.x/bottts/svg?seed=${key}`
+                    }),
+                }, privateKey);
+
+                await Promise.any([
+                    pool.publish(['wss://relay.damus.io', 'wss://nos.lol'], event)
+                ]);
+            } catch (e) {
+                console.warn('Failed to publish metadata:', e);
+            }
+        }
     };
 
     const logout = () => {
