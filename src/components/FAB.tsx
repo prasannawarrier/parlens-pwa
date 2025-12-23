@@ -46,16 +46,20 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
                 ] as any,
                 {
                     onevent(event) {
-                        // Check expiration tag
+                        const currentTime = Math.floor(Date.now() / 1000);
+                        console.log('[Parlens] Received event - ID:', event.id.substring(0, 16), 'Kind:', event.kind);
+
+                        // Check expiration tag (use current time, not stale 'now')
                         const expirationTag = event.tags.find(t => t[0] === 'expiration');
                         if (expirationTag) {
                             const expTime = parseInt(expirationTag[1]);
-                            if (expTime < now) {
-                                console.log('[Parlens] Skipping expired spot:', event.id);
+                            console.log('[Parlens] Expiration check:', expTime, 'vs current:', currentTime, 'expired:', expTime < currentTime);
+                            if (expTime < currentTime) {
+                                console.log('[Parlens] Skipping expired spot');
                                 return;
                             }
                         }
-                        console.log('[Parlens] Received open spot event:', event.id, event.tags);
+
                         try {
                             const tags = event.tags;
                             const locTag = tags.find(t => t[0] === 'location');
@@ -63,14 +67,15 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
                             const currencyTag = tags.find(t => t[0] === 'currency');
                             const typeTag = tags.find(t => t[0] === 'type');
 
+                            console.log('[Parlens] Tags - location:', locTag?.[1], 'type:', typeTag?.[1], 'price:', priceTag?.[1]);
+
                             if (locTag) {
                                 const [lat, lon] = locTag[1].split(',').map(Number);
                                 const spotType = typeTag ? typeTag[1] : 'car';
 
-                                // Only show spots matching current vehicle type
+                                // Log but don't filter by vehicle type for now (debugging)
                                 if (spotType !== vehicleType) {
-                                    console.log('[Parlens] Skipping spot - type mismatch:', spotType, 'vs', vehicleType);
-                                    return;
+                                    console.log('[Parlens] Note: Type mismatch but showing anyway:', spotType, 'vs', vehicleType);
                                 }
 
                                 const spot = {
@@ -81,11 +86,17 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
                                     currency: currencyTag ? currencyTag[1] : 'USD',
                                     type: spotType
                                 };
-                                console.log('[Parlens] Adding spot to map:', spot);
+                                console.log('[Parlens] *** ADDING SPOT TO MAP ***', spot);
                                 setOpenSpots((prev: any[]) => {
-                                    if (prev.find((p: any) => p.id === spot.id)) return prev;
+                                    if (prev.find((p: any) => p.id === spot.id)) {
+                                        console.log('[Parlens] Spot already exists, skipping');
+                                        return prev;
+                                    }
+                                    console.log('[Parlens] New spots array length:', prev.length + 1);
                                     return [...prev, spot];
                                 });
+                            } else {
+                                console.log('[Parlens] No location tag found');
                             }
                         } catch (e) {
                             console.warn('[Parlens] Error parsing spot:', e);
