@@ -224,7 +224,7 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
             await Promise.allSettled(pubs);
             console.log('Log published');
 
-            // Broadcast open spot (Kind 1112) to help other users
+            // Broadcast open spot (Kind 31714 - Addressable) to help other users
             // Use anonymous one-time keypair for privacy
             const anonPrivkey = generateSecretKey();
 
@@ -237,6 +237,7 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
                 kind: KINDS.OPEN_SPOT_BROADCAST,
                 content: '',
                 tags: [
+                    ['d', `spot_${geohash}_${endTime}`], // Unique identifier for addressable event
                     ['g', geohash],
                     ['location', `${lat},${lon}`],
                     ['hourly_rate', hourlyRate],
@@ -251,7 +252,7 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
             // Sign with anonymous key using nostr-tools
             const signedBroadcast = finalizeEvent(broadcastEventTemplate, anonPrivkey);
 
-            console.log('Broadcasting open spot (anonymous):', signedBroadcast.id);
+            console.log('Broadcasting open spot (anonymous, addressable):', signedBroadcast.id, 'pubkey:', signedBroadcast.pubkey);
             pool.publish(DEFAULT_RELAYS, signedBroadcast);
 
             // Reset session tracking

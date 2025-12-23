@@ -1,6 +1,6 @@
 export const KINDS = {
     PARKING_LOG: 31417, // My Parking Log (Parameterized Replaceable for history)
-    OPEN_SPOT_BROADCAST: 1112, // Open Spot Broadcast (Regular with expiration)
+    OPEN_SPOT_BROADCAST: 31714, // Open Spot Broadcast (Addressable/Replaceable with expiration)
 };
 
 export const DEFAULT_RELAYS = [
