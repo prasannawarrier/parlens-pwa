@@ -33,15 +33,15 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
             console.log('[Parlens] Searching for spots in geohashes:', geohashes);
 
             const now = Math.floor(Date.now() / 1000);
-            console.log('[Parlens] Searching for open spots - Kind:', KINDS.OPEN_SPOT_BROADCAST);
+            console.log('[Parlens] Searching for open spots - Kind:', KINDS.OPEN_SPOT_BROADCAST, 'Geohashes:', geohashes);
 
             const sub = pool.subscribeMany(
                 DEFAULT_RELAYS,
                 [
                     {
                         kinds: [KINDS.OPEN_SPOT_BROADCAST],
-                        '#client': ['parlens'], // Search by client tag to debug
-                        since: now - 300 // Last 5 minutes for debugging
+                        '#g': geohashes, // Search by geohash (indexed by relays)
+                        since: now - 300 // Last 5 minutes
                     }
                 ] as any,
                 {
