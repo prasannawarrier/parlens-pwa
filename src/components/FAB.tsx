@@ -263,7 +263,11 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
             // Sign with anonymous key using nostr-tools
             const signedBroadcast = finalizeEvent(broadcastEventTemplate, anonPrivkey);
 
-            console.log('Broadcasting open spot (anonymous, addressable):', signedBroadcast.id, 'pubkey:', signedBroadcast.pubkey);
+            console.log('[Parlens] *** BROADCASTING OPEN SPOT ***');
+            console.log('[Parlens] Geohash:', geohash);
+            console.log('[Parlens] Location:', `${lat},${lon}`);
+            console.log('[Parlens] Event ID:', signedBroadcast.id);
+            console.log('[Parlens] Pubkey:', signedBroadcast.pubkey.substring(0, 20) + '...');
             pool.publish(DEFAULT_RELAYS, signedBroadcast);
 
             // Reset session tracking
