@@ -50,3 +50,34 @@ export function encodeGeohash(lat: number, lng: number, precision: number = 10):
 export function formatCoords(lat: number, lng: number): string {
     return `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
 }
+
+/**
+ * Gets the neighboring geohashes (including center) for boundary-safe searching.
+ * Returns an array of 9 geohashes: center + 8 neighbors.
+ */
+export function getGeohashNeighbors(lat: number, lng: number, precision: number = 5): string[] {
+    const center = encodeGeohash(lat, lng, precision);
+
+    // Approximate offset for a geohash cell at given precision
+    // These are rough estimates that work well enough for our use case
+    const latOffset = precision === 5 ? 0.02 : precision === 6 ? 0.005 : 0.001;
+    const lngOffset = precision === 5 ? 0.04 : precision === 6 ? 0.01 : 0.002;
+
+    const neighbors = new Set<string>();
+    neighbors.add(center);
+
+    // Add 8 neighbors by offsetting lat/lng
+    const offsets = [
+        [-1, -1], [-1, 0], [-1, 1],
+        [0, -1], [0, 1],
+        [1, -1], [1, 0], [1, 1]
+    ];
+
+    for (const [latMult, lngMult] of offsets) {
+        const neighborLat = lat + (latMult * latOffset);
+        const neighborLng = lng + (lngMult * lngOffset);
+        neighbors.add(encodeGeohash(neighborLat, neighborLng, precision));
+    }
+
+    return Array.from(neighbors);
+}

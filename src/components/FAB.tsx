@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Search, MapPin, ArrowRight, ChevronUp, ChevronDown } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { KINDS, DEFAULT_RELAYS } from '../lib/nostr';
-import { encodeGeohash } from '../lib/geo';
+import { encodeGeohash, getGeohashNeighbors } from '../lib/geo';
 import { encryptParkingLog } from '../lib/encryption';
 import { getCurrencyFromLocation, getCurrencySymbol, getLocalCurrency } from '../lib/currency';
 
@@ -27,17 +27,17 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
     // Search for open spots when entering search mode
     useEffect(() => {
         if (status === 'search' && location) {
-            // Use 5-char geohash (~2.4km x 2.4km) for city-wide discovery
-            const geohash = encodeGeohash(location[0], location[1], 5);
+            // Get center + 8 neighboring geohashes for boundary-safe discovery
+            const geohashes = getGeohashNeighbors(location[0], location[1], 5);
 
             const sub = pool.subscribeMany(
                 DEFAULT_RELAYS,
                 [
                     {
                         kinds: [KINDS.OPEN_SPOT_BROADCAST],
-                        '#g': [geohash],
-                        '#type': [vehicleType], // Filter by vehicle type
-                        since: Math.floor(Date.now() / 1000) - 3600 // Last hour only
+                        '#g': geohashes, // Search all 9 geohash cells
+                        '#type': [vehicleType],
+                        since: Math.floor(Date.now() / 1000) - 3600
                     }
                 ] as any,
                 {
