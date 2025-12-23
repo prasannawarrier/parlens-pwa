@@ -35,30 +35,29 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
             const now = Math.floor(Date.now() / 1000);
             console.log('[Parlens] Searching for open spots - Kind:', KINDS.OPEN_SPOT_BROADCAST, 'Geohashes:', geohashes);
 
-            // Create filter object explicitly
-            const filter = {
-                kinds: [KINDS.OPEN_SPOT_BROADCAST],
-                '#g': geohashes,
-                since: now - 300
-            };
-            console.log('[Parlens] Filter:', JSON.stringify(filter));
+            // Use querySync which was proven to work in testing
+            const searchSpots = async () => {
+                try {
+                    console.log('[Parlens] Starting querySync...');
+                    const events = await pool.querySync(
+                        DEFAULT_RELAYS,
+                        { kinds: [KINDS.OPEN_SPOT_BROADCAST], '#g': geohashes, since: now - 300 } as any
+                    );
+                    console.log('[Parlens] querySync returned', events.length, 'events');
 
-            const sub = pool.subscribeMany(
-                DEFAULT_RELAYS,
-                [filter] as any,
-                {
-                    onevent(event) {
-                        const currentTime = Math.floor(Date.now() / 1000);
-                        console.log('[Parlens] Received event - ID:', event.id.substring(0, 16), 'Kind:', event.kind);
+                    const currentTime = Math.floor(Date.now() / 1000);
 
-                        // Check expiration tag (use current time, not stale 'now')
+                    for (const event of events) {
+                        console.log('[Parlens] Processing event - ID:', event.id.substring(0, 16), 'Kind:', event.kind);
+
+                        // Check expiration tag
                         const expirationTag = event.tags.find(t => t[0] === 'expiration');
                         if (expirationTag) {
                             const expTime = parseInt(expirationTag[1]);
                             console.log('[Parlens] Expiration check:', expTime, 'vs current:', currentTime, 'expired:', expTime < currentTime);
                             if (expTime < currentTime) {
                                 console.log('[Parlens] Skipping expired spot');
-                                return;
+                                continue;
                             }
                         }
 
@@ -103,15 +102,23 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
                         } catch (e) {
                             console.warn('[Parlens] Error parsing spot:', e);
                         }
-                    },
-                    oneose() {
-                        console.log('[Parlens] End of stored events for spot search');
                     }
+                } catch (e) {
+                    console.error('[Parlens] querySync error:', e);
                 }
-            );
+            };
+
+            // Run immediately
+            searchSpots();
+
+            // Also refresh every 30 seconds while in search mode
+            const intervalId = setInterval(() => {
+                console.log('[Parlens] Refreshing spot search...');
+                searchSpots();
+            }, 30000);
 
             return () => {
-                sub.close();
+                clearInterval(intervalId);
                 setOpenSpots([]); // Clear spots when leaving search
             };
         }
