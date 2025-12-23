@@ -27,8 +27,8 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
     // Search for open spots when entering search mode
     useEffect(() => {
         if (status === 'search' && location) {
-            // Use 6-char geohash (~610m x 610m) for better discovery radius
-            const geohash = encodeGeohash(location[0], location[1], 6);
+            // Use 5-char geohash (~2.4km x 2.4km) for city-wide discovery
+            const geohash = encodeGeohash(location[0], location[1], 5);
 
             const sub = pool.subscribeMany(
                 DEFAULT_RELAYS,
@@ -116,8 +116,8 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
 
         const lat = parkLocation ? parkLocation[0] : location[0];
         const lon = parkLocation ? parkLocation[1] : location[1];
-        // Use 6-char geohash for broadcast to match search radius
-        const geohash = encodeGeohash(lat, lon, 6);
+        // Use 5-char geohash for broadcast to match search radius
+        const geohash = encodeGeohash(lat, lon, 5);
         const endTime = Math.floor(Date.now() / 1000);
         const startTime = sessionStart || endTime;
 
