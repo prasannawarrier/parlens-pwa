@@ -5,6 +5,7 @@ import { KINDS, DEFAULT_RELAYS } from '../lib/nostr';
 import { encodeGeohash, getGeohashNeighbors } from '../lib/geo';
 import { encryptParkingLog } from '../lib/encryption';
 import { getCurrencyFromLocation, getCurrencySymbol, getLocalCurrency } from '../lib/currency';
+import { generateSecretKey, finalizeEvent } from 'nostr-tools/pure';
 
 interface FABProps {
     status: 'idle' | 'search' | 'parked';
@@ -31,17 +32,27 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
             const geohashes = getGeohashNeighbors(location[0], location[1], 5);
             console.log('[Parlens] Searching for spots in geohashes:', geohashes);
 
+            const now = Math.floor(Date.now() / 1000);
             const sub = pool.subscribeMany(
                 DEFAULT_RELAYS,
                 [
                     {
                         kinds: [KINDS.OPEN_SPOT_BROADCAST],
-                        '#g': geohashes, // Search all 9 geohash cells
-                        since: Math.floor(Date.now() / 1000) - 3600 // Last hour
+                        '#g': geohashes,
+                        since: now - 120 // Last 2 minutes (covers 60s expiration window)
                     }
                 ] as any,
                 {
                     onevent(event) {
+                        // Check expiration tag
+                        const expirationTag = event.tags.find(t => t[0] === 'expiration');
+                        if (expirationTag) {
+                            const expTime = parseInt(expirationTag[1]);
+                            if (expTime < now) {
+                                console.log('[Parlens] Skipping expired spot:', event.id);
+                                return;
+                            }
+                        }
                         console.log('[Parlens] Received open spot event:', event.id, event.tags);
                         try {
                             const tags = event.tags;
@@ -211,12 +222,16 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
             await Promise.allSettled(pubs);
             console.log('Log published');
 
-            // Broadcast open spot (Kind 21011) to help other users
+            // Broadcast open spot (Kind 1112) to help other users
+            // Use anonymous one-time keypair for privacy
+            const anonPrivkey = generateSecretKey();
+
             // Calculate hourly rate based on duration and fee
             const durationHours = Math.max((endTime - startTime) / 3600, 0.1); // Minimum 0.1 hours
             const hourlyRate = (parseFloat(cost) / durationHours).toFixed(2);
+            const expirationTime = endTime + 60; // Expires in 60 seconds
 
-            const broadcastEvent = {
+            const broadcastEventTemplate = {
                 kind: KINDS.OPEN_SPOT_BROADCAST,
                 content: '',
                 tags: [
@@ -225,14 +240,16 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
                     ['hourly_rate', hourlyRate],
                     ['currency', currency],
                     ['type', vehicleType],
+                    ['expiration', String(expirationTime)],
                     ['client', 'parlens']
                 ],
                 created_at: endTime,
-                pubkey: pubkey!,
             };
 
-            const signedBroadcast = await signEvent(broadcastEvent);
-            console.log('Broadcasting open spot:', signedBroadcast.id);
+            // Sign with anonymous key using nostr-tools
+            const signedBroadcast = finalizeEvent(broadcastEventTemplate, anonPrivkey);
+
+            console.log('Broadcasting open spot (anonymous):', signedBroadcast.id);
             pool.publish(DEFAULT_RELAYS, signedBroadcast);
 
             // Reset session tracking
