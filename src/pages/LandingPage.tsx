@@ -342,8 +342,11 @@ export const LandingPage: React.FC = () => {
                     {status === 'parked' && parkLocation && (
                         <ActiveSessionMarker location={parkLocation} vehicleType={vehicleType} />
                     )}
-                    {/* Open spots (Kind 21011) - only in search mode */}
-                    {status === 'search' && openSpots.length > 0 && (() => {
+                    {/* Open spots (Kind 31714) - only in search mode */}
+                    {status === 'search' && (() => {
+                        console.log('[Parlens] Render check - openSpots.length:', openSpots.length);
+                        if (openSpots.length === 0) return null;
+
                         const spotsForClustering = openSpots.map(s => ({
                             id: s.id,
                             lat: s.lat,
@@ -352,6 +355,7 @@ export const LandingPage: React.FC = () => {
                             currency: s.currency,
                             original: s
                         }));
+                        console.log('[Parlens] Rendering', spotsForClustering.length, 'spots on map');
                         const clustered = clusterSpots(spotsForClustering, zoomLevel);
                         return clustered.map(item =>
                             isCluster(item)
