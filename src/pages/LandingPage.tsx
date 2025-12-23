@@ -57,9 +57,10 @@ const ActiveSessionMarker = ({ location, vehicleType }: { location: [number, num
 };
 
 // Marker for Open Spots (Kind 21011) - shows 🅿️
-const SpotMarker = ({ spot }: { spot: any }) => {
+const SpotMarker = ({ spot, bearing, orientationMode }: { spot: any, bearing: number, orientationMode: 'auto' | 'fixed' }) => {
+    const rotation = orientationMode === 'auto' ? bearing : 0;
     const content = `
-        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 60px;">
+        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 60px; transform: rotate(${rotation}deg);">
              <div style="font-size: 32px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));">
                 🅿️
              </div>
@@ -80,12 +81,13 @@ const SpotMarker = ({ spot }: { spot: any }) => {
 };
 
 // Marker for History Spots (Kind 31417) - shows 🅟
-const HistoryMarker = ({ spot }: { spot: any }) => {
+const HistoryMarker = ({ spot, bearing, orientationMode }: { spot: any, bearing: number, orientationMode: 'auto' | 'fixed' }) => {
     const content = spot.decryptedContent;
     if (!content || !content.lat || !content.lon) return null;
 
+    const rotation = orientationMode === 'auto' ? bearing : 0;
     const htmlContent = `
-        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 60px;">
+        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 60px; transform: rotate(${rotation}deg);">
              <div style="font-size: 32px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3)); opacity: 0.7;">
                 🅟
              </div>
@@ -106,15 +108,16 @@ const HistoryMarker = ({ spot }: { spot: any }) => {
 };
 
 // Cluster marker for grouped spots
-const ClusterMarker = ({ cluster, type }: { cluster: Cluster<SpotBase>, type: 'open' | 'history' }) => {
+const ClusterMarker = ({ cluster, type, bearing, orientationMode }: { cluster: Cluster<SpotBase>, type: 'open' | 'history', bearing: number, orientationMode: 'auto' | 'fixed' }) => {
     const emoji = type === 'open' ? '🅿️' : '🅟';
     const bgColor = type === 'open' ? '#34C759' : '#8E8E93';
+    const rotation = orientationMode === 'auto' ? bearing : 0;
     const priceRange = cluster.minPrice === cluster.maxPrice
         ? (cluster.minPrice > 0 ? `${getCurrencySymbol(cluster.currency)}${cluster.minPrice}` : 'Free')
         : `${getCurrencySymbol(cluster.currency)}${cluster.minPrice}-${cluster.maxPrice}`;
 
     const htmlContent = `
-        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 70px;">
+        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 70px; transform: rotate(${rotation}deg);">
              <div style="font-size: 28px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3)); position: relative;">
                 ${emoji}
                 <div style="position: absolute; top: -5px; right: -5px; background: ${bgColor}; color: white; font-size: 10px; font-weight: bold; border-radius: 50%; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; border: 2px solid white;">
@@ -352,8 +355,8 @@ export const LandingPage: React.FC = () => {
                         const clustered = clusterSpots(spotsForClustering, zoomLevel);
                         return clustered.map(item =>
                             isCluster(item)
-                                ? <ClusterMarker key={item.id} cluster={item} type="open" />
-                                : <SpotMarker key={item.id} spot={(item as any).original || item} />
+                                ? <ClusterMarker key={item.id} cluster={item} type="open" bearing={bearing} orientationMode={orientationMode} />
+                                : <SpotMarker key={item.id} spot={(item as any).original || item} bearing={bearing} orientationMode={orientationMode} />
                         );
                     })()}
                     {/* History spots (Kind 31417) - always visible */}
@@ -376,8 +379,8 @@ export const LandingPage: React.FC = () => {
                         const clustered = clusterSpots(spotsForClustering, zoomLevel);
                         return clustered.map(item =>
                             isCluster(item)
-                                ? <ClusterMarker key={item.id} cluster={item} type="history" />
-                                : <HistoryMarker key={item.id} spot={(item as any).original || item} />
+                                ? <ClusterMarker key={item.id} cluster={item} type="history" bearing={bearing} orientationMode={orientationMode} />
+                                : <HistoryMarker key={item.id} spot={(item as any).original || item} bearing={bearing} orientationMode={orientationMode} />
                         );
                     })()}
                     <MapController
@@ -542,6 +545,11 @@ export const LandingPage: React.FC = () => {
                             <p>
                                 <strong className="text-zinc-900 dark:text-white block mb-1">4. View History</strong>
                                 Use the log button (clipboard icon) to see your parking history.
+                            </p>
+
+                            <p>
+                                <strong className="text-zinc-900 dark:text-white block mb-1">5. Secure your keys</strong>
+                                Copy and store your npub (public key) and nsec (secret key) from the profile section. These are your account access keys and cannot be recovered if lost.
                             </p>
                         </div>
                     </div>

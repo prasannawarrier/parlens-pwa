@@ -102,13 +102,13 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots })
             </button>
 
             {isOpen && (
-                <div className="fixed inset-0 z-[2000] flex flex-col items-center justify-end sm:justify-center bg-black/60 backdrop-blur-xl animate-in fade-in duration-300 p-4">
+                <div className="fixed inset-0 z-[2000] flex flex-col items-center justify-start bg-black/60 backdrop-blur-xl animate-in fade-in duration-300 pt-2 px-4 pb-4">
                     <button
                         onClick={() => setIsOpen(false)}
                         className="absolute inset-0 z-0 cursor-default"
                     />
 
-                    <div className="relative z-10 w-full max-w-md bg-white dark:bg-[#1c1c1e] rounded-[2rem] shadow-2xl p-6 flex flex-col gap-6 animate-in slide-in-from-bottom-10 sm:zoom-in-95 duration-300 max-h-[85vh] overflow-y-auto no-scrollbar border border-black/5 dark:border-white/5 transition-colors">
+                    <div className="relative z-10 w-full max-w-md bg-white dark:bg-[#1c1c1e] rounded-[2rem] shadow-2xl p-6 flex flex-col gap-6 animate-in slide-in-from-bottom-10 duration-300 h-[calc(100vh-1.5rem)] overflow-y-auto no-scrollbar border border-black/5 dark:border-white/5 transition-colors">
 
                         {/* Header - Username Only */}
                         <div className="flex items-center justify-between">
@@ -152,8 +152,10 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots })
                                     </>
                                 )}
                             </div>
+                            <p className="text-xs text-zinc-400 dark:text-white/30 mt-2 ml-2 leading-relaxed">
+                                ⚠️ Store your npub and nsec securely. These are your account access keys and cannot be recovered if lost.
+                            </p>
                         </div>
-
 
 
                         <div className="space-y-4">
