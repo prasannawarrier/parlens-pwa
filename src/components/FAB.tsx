@@ -33,13 +33,15 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
             console.log('[Parlens] Searching for spots in geohashes:', geohashes);
 
             const now = Math.floor(Date.now() / 1000);
+            console.log('[Parlens] Searching for open spots - Kind:', KINDS.OPEN_SPOT_BROADCAST);
+
             const sub = pool.subscribeMany(
                 DEFAULT_RELAYS,
                 [
                     {
                         kinds: [KINDS.OPEN_SPOT_BROADCAST],
-                        '#g': geohashes,
-                        since: now - 120 // Last 2 minutes (covers 60s expiration window)
+                        '#client': ['parlens'], // Search by client tag to debug
+                        since: now - 300 // Last 5 minutes for debugging
                     }
                 ] as any,
                 {
