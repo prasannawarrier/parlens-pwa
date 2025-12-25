@@ -1,73 +1,80 @@
-# React + TypeScript + Vite
+# Parlens PWA
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Parlens is a decentralized parking utility app built on the [Nostr](https://nostr.com/) protocol. It allows users to track their parking history, find open parking spots broadcasted by other users, and plan routes with offline capabilities—all without a centralized server holding your data.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- **🚗 Vehicle Types**: Support for Cars, Motorcycles, and Bicycles with custom rates.
+- **🕒 Parking History**: Log where you parked providing a personal history of your spots.
+- **📡 Open Spot Broadcast**: Share vacated spots with the community anonymously.
+- **🗺️ Privacy-First Routing**: Plan routes and save them encrypted to your profile.
+- **📍 Offline Maps**: Saved waypoints become searchable locally, building a personal offline map over time.
+- **🔐 End-to-End Encryption**: All personal data (logs, routes) is encrypted using NIP-44.
+- **📱 PWA Ready**: Installable on iOS and Android for a native app experience.
 
-## React Compiler
+## Technology Stack
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- **Frontend**: [React](https://react.dev/) with [Vite](https://vitejs.dev/)
+- **Language**: TypeScript
+- **Styling**: [Tailwind CSS](https://tailwindcss.com/)
+- **Maps**: [Leaflet](https://leafletjs.com/) with [React Leaflet](https://react-leaflet.js.org/)
+- **Geocoding**: [Nominatim](https://nominatim.org/) (OpenStreetMap)
+- **Routing**: [OSRM](http://project-osrm.org/) (Open Source Routing Machine)
+- **Protocol**: [Nostr](https://github.com/nostr-protocol/nostr) (via `nostr-tools` and `@nostrify/react`)
+- **State Management**: React Context + Nostr Relays
 
-## Expanding the ESLint configuration
+## Nostr Event Kinds
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+Parlens uses specific Nostr event kinds to manage data:
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+| Kind | Name | Description | Encryption |
+|------|------|-------------|------------|
+| **31417** | Parking Log | User's personal parking history. | ✅ NIP-44 |
+| **31714** | Open Spot | Ephemeral broadcast of a vacated spot. | ❌ Public |
+| **34171** | Route Log | User-saved routes and waypoints. | ✅ NIP-44 |
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+## Getting Started
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+### Prerequisites
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+- Node.js (v18 or higher)
+- npm or yarn
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+### Installation
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/yourusername/parlens-pwa.git
+   cd parlens-pwa
+   ```
+
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+
+3. Run the development server:
+   ```bash
+   npm run dev
+   ```
+
+4. Open `http://localhost:5173` in your browser.
+
+## Login Methods
+
+Parlens supports multiple ways to login:
+- **NSEC**: Login with your private key (stored locally encrypted).
+- **Guest**: Create a burner account for testing.
+
+## Attribution
+
+Parlens is built on the shoulders of giants. Special thanks to:
+
+- **OpenStreetMap Contributors**: For map data and geocoding services.
+- **Nostr Protocol**: For the decentralized, censorship-resistant communication layer.
+- **Leaflet & OSRM**: For powerful open-source mapping and routing tools.
+- **Lucide React**: For the beautiful icon set.
+
+## License
+
+This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)**. See the `LICENSE` file for details.

@@ -24,10 +24,17 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
     const [currency, setCurrency] = useState('USD');
     const [symbol, setSymbol] = useState('$');
     const [sessionStart, setSessionStart] = useState<number | null>(null);
+    const prevVehicleTypeRef = React.useRef(vehicleType);
 
     // Search for open spots when entering search mode
     useEffect(() => {
         if (status === 'search' && location) {
+            // Only clear spots when vehicleType changes, not on every refresh
+            if (prevVehicleTypeRef.current !== vehicleType) {
+                setOpenSpots([]);
+                prevVehicleTypeRef.current = vehicleType;
+            }
+
             // Get center + 8 neighboring geohashes for boundary-safe discovery
             const geohashes = getGeohashNeighbors(location[0], location[1], 5);
             console.log('[Parlens] Searching for spots in geohashes:', geohashes);
@@ -74,10 +81,15 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
                                 const [lat, lon] = locTag[1].split(',').map(Number);
                                 const spotType = typeTag ? typeTag[1] : 'car';
 
-                                // Log but don't filter by vehicle type for now (debugging)
+                                // Filter spots by vehicle type - only show matching spots
                                 if (spotType !== vehicleType) {
-                                    console.log('[Parlens] Note: Type mismatch but showing anyway:', spotType, 'vs', vehicleType);
+                                    console.log('[Parlens] Skipping spot - type mismatch:', spotType, 'vs', vehicleType);
+                                    continue;
                                 }
+
+                                // Get expiration from event tags
+                                const expTag = event.tags.find(t => t[0] === 'expiration');
+                                const expiresAt = expTag ? parseInt(expTag[1]) : (Math.floor(Date.now() / 1000) + 300);
 
                                 const spot = {
                                     id: event.id,
@@ -85,16 +97,21 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
                                     lon,
                                     price: priceTag ? parseFloat(priceTag[1]) : 0,
                                     currency: currencyTag ? currencyTag[1] : 'USD',
-                                    type: spotType
+                                    type: spotType,
+                                    expiresAt
                                 };
                                 console.log('[Parlens] *** ADDING SPOT TO MAP ***', spot);
                                 setOpenSpots((prev: any[]) => {
-                                    if (prev.find((p: any) => p.id === spot.id)) {
+                                    // First filter out expired spots
+                                    const now = Math.floor(Date.now() / 1000);
+                                    const active = prev.filter((p: any) => !p.expiresAt || p.expiresAt > now);
+
+                                    if (active.find((p: any) => p.id === spot.id)) {
                                         console.log('[Parlens] Spot already exists, skipping');
-                                        return prev;
+                                        return active;
                                     }
-                                    console.log('[Parlens] New spots array length:', prev.length + 1);
-                                    return [...prev, spot];
+                                    console.log('[Parlens] New spots array length:', active.length + 1);
+                                    return [...active, spot];
                                 });
                             } else {
                                 console.log('[Parlens] No location tag found');
@@ -119,7 +136,7 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
 
             return () => {
                 clearInterval(intervalId);
-                setOpenSpots([]); // Clear spots when leaving search
+                // Don't clear spots - let them persist until expiration
             };
         }
     }, [status, location, vehicleType]);
@@ -154,10 +171,14 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
                 sessionStart,
                 parkLocation
             }));
+            // Clear spots when entering parked state (in case of session restore)
+            setOpenSpots([]);
         } else if (status === 'search') {
             localStorage.setItem('parlens_session', JSON.stringify({ status: 'search' }));
         } else if (status === 'idle') {
             localStorage.removeItem('parlens_session');
+            // Clear spots when returning to idle
+            setOpenSpots([]);
         }
     }, [status, sessionStart, parkLocation]);
 
@@ -188,8 +209,10 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
         } else if (status === 'search') {
             setSessionStart(Math.floor(Date.now() / 1000));
             setParkLocation([location[0], location[1]]);
+            setOpenSpots([]); // Clear spots when starting parking session
             setStatus('parked');
         } else if (status === 'parked') {
+            setCost('0'); // Reset cost to 0 when opening popup
             setShowCostPopup(true);
         }
     };
@@ -208,6 +231,7 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
         try {
             const logContent = {
                 status: 'vacated',
+                type: vehicleType,
                 lat,
                 lon,
                 geohash,
@@ -228,7 +252,6 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
                 tags: [
                     ['g', geohash],
                     ['client', 'parlens'],
-                    ['type', vehicleType],
                     ['d', `session_${startTime}`] // Unique ID for history
                 ],
                 created_at: endTime,
@@ -248,8 +271,9 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
             // Use anonymous one-time keypair for privacy
             const anonPrivkey = generateSecretKey();
 
-            // Calculate hourly rate based on duration and fee
-            const durationHours = Math.max((endTime - startTime) / 3600, 0.1); // Minimum 0.1 hours
+            // Calculate hourly rate based on duration and fee (round up to next hour)
+            const durationSeconds = endTime - startTime;
+            const durationHours = Math.max(Math.ceil(durationSeconds / 3600), 1); // Minimum 1 hour, always round up
             const hourlyRate = (parseFloat(cost) / durationHours).toFixed(2);
             const expirationTime = endTime + 60; // Expires in 60 seconds
 
@@ -294,7 +318,7 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
             <div className="flex items-center gap-4">
                 {status === 'search' && (
                     <button
-                        onClick={() => setStatus('idle')}
+                        onClick={() => { setOpenSpots([]); setStatus('idle'); }}
                         className="h-14 px-8 rounded-full bg-red-500/90 text-white font-bold text-xs tracking-widest shadow-2xl backdrop-blur-md animate-in slide-in-from-left-8"
                     >
                         CANCEL

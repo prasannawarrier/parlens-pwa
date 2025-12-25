@@ -81,3 +81,45 @@ export function getGeohashNeighbors(lat: number, lng: number, precision: number 
 
     return Array.from(neighbors);
 }
+
+/**
+ * Converts a geohash to its bounding box (SW and NE corners).
+ * Returns { sw: [lat, lon], ne: [lat, lon] }
+ */
+export function geohashToBounds(geohash: string): { sw: [number, number], ne: [number, number] } {
+    const BASE32 = '0123456789bcdefghjkmnpqrstuvwxyz';
+
+    let isEven = true;
+    let latMin = -90, latMax = 90;
+    let lngMin = -180, lngMax = 180;
+
+    for (const char of geohash.toLowerCase()) {
+        const idx = BASE32.indexOf(char);
+        if (idx === -1) continue;
+
+        for (let i = 0; i < 5; i++) {
+            const bit = (idx >> (4 - i)) & 1;
+            if (isEven) {
+                const mid = (lngMin + lngMax) / 2;
+                if (bit) {
+                    lngMin = mid;
+                } else {
+                    lngMax = mid;
+                }
+            } else {
+                const mid = (latMin + latMax) / 2;
+                if (bit) {
+                    latMin = mid;
+                } else {
+                    latMax = mid;
+                }
+            }
+            isEven = !isEven;
+        }
+    }
+
+    return {
+        sw: [latMin, lngMin],
+        ne: [latMax, lngMax]
+    };
+}

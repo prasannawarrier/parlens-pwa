@@ -55,7 +55,11 @@ export function clusterSpots<T extends SpotBase>(
     const clusters = new Map<string, Cluster<T>>();
 
     for (const spot of spots) {
-        const hash = encodeGeohash(spot.lat, spot.lon, precision);
+        // At high zoom levels (>=15), use exact coordinates for grouping to catch duplicates
+        // At lower zoom levels, use geohash for broader clustering
+        const hash = zoom >= 15
+            ? `${spot.lat.toFixed(6)},${spot.lon.toFixed(6)}`
+            : encodeGeohash(spot.lat, spot.lon, precision);
 
         if (clusters.has(hash)) {
             const cluster = clusters.get(hash)!;

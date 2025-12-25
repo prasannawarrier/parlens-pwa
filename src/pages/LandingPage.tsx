@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, memo } from 'react';
 import { HelpCircle, Compass, Navigation, ChevronDown, X } from 'lucide-react';
-import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Polyline, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { FAB } from '../components/FAB';
 import { ProfileButton } from '../components/ProfileButton';
+import { RouteButton } from '../components/RouteButton';
 import { getCurrencySymbol } from '../lib/currency';
 import { clusterSpots, isCluster, type Cluster, type SpotBase } from '../lib/clustering';
 
@@ -38,13 +39,14 @@ const UserMarker = ({ location, bearing }: { location: [number, number], bearing
         iconAnchor: [20, 20]
     });
 
-    return <Marker position={location} icon={customIcon} />;
+    return <Marker position={location} icon={customIcon} zIndexOffset={1000} />;
 }
 
 // Marker for the user's currently parked vehicle
-const ActiveSessionMarker = ({ location, vehicleType }: { location: [number, number], vehicleType: string }) => {
+const ActiveSessionMarker = ({ location, vehicleType, bearing, orientationMode }: { location: [number, number], vehicleType: string, bearing: number, orientationMode: 'auto' | 'fixed' }) => {
     const emoji = vehicleType === 'bicycle' ? '🚲' : vehicleType === 'motorcycle' ? '🏍️' : '🚗';
-    const content = `<div style="font-size: 36px; filter: drop-shadow(0 4px 8px rgba(0,0,0,0.4));">${emoji}</div>`;
+    const rotation = orientationMode === 'auto' ? bearing : 0;
+    const content = `<div style="font-size: 36px; filter: drop-shadow(0 4px 8px rgba(0,0,0,0.4)); transform: rotate(${rotation}deg);">${emoji}</div>`;
 
     const customIcon = L.divIcon({
         className: 'active-session-marker',
@@ -56,8 +58,8 @@ const ActiveSessionMarker = ({ location, vehicleType }: { location: [number, num
     return <Marker position={location} icon={customIcon} />;
 };
 
-// Marker for Open Spots (Kind 21011) - shows 🅿️
-const SpotMarker = ({ spot, bearing, orientationMode }: { spot: any, bearing: number, orientationMode: 'auto' | 'fixed' }) => {
+// Marker for Open Spots (Kind 21011) - shows 🅿️ - Memoized to prevent re-renders
+const SpotMarker = memo(({ spot, bearing, orientationMode }: { spot: any, bearing: number, orientationMode: 'auto' | 'fixed' }) => {
     const rotation = orientationMode === 'auto' ? bearing : 0;
     const content = `
         <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 60px; transform: rotate(${rotation}deg);">
@@ -78,7 +80,7 @@ const SpotMarker = ({ spot, bearing, orientationMode }: { spot: any, bearing: nu
     });
 
     return <Marker position={[spot.lat, spot.lon]} icon={icon} />;
-};
+});
 
 // Marker for History Spots (Kind 31417) - shows 🅟
 const HistoryMarker = ({ spot, bearing, orientationMode }: { spot: any, bearing: number, orientationMode: 'auto' | 'fixed' }) => {
@@ -155,15 +157,53 @@ const ZoomTracker = ({ onZoomChange }: { onZoomChange: (zoom: number) => void })
     return null;
 };
 
+// Component to handle drop pin clicks on map
+const DropPinHandler = ({ enabled, onDropPin }: { enabled: boolean, onDropPin: (lat: number, lon: number) => void }) => {
+    useMapEvents({
+        click: (e) => {
+            if (enabled) {
+                onDropPin(e.latlng.lat, e.latlng.lng);
+            }
+        }
+    });
+    return null;
+};
+
 // Controller to handle map centering and rotation
-const MapController = ({ location, bearing, orientationMode, shouldRecenter, setShouldRecenter }: {
+const MapController = ({ location, bearing, orientationMode, shouldRecenter, setShouldRecenter, routeBounds, setRouteBounds }: {
     location: [number, number],
     bearing: number,
     orientationMode: 'auto' | 'fixed',
     shouldRecenter: boolean,
-    setShouldRecenter: (v: boolean) => void
+    setShouldRecenter: (v: boolean) => void,
+    routeBounds: L.LatLngBounds | null,
+    setRouteBounds: (v: L.LatLngBounds | null) => void
 }) => {
     const map = useMap();
+
+    // Force map to recalculate its size on mount (fixes iOS viewport issues)
+    useEffect(() => {
+        // Immediate invalidation
+        map.invalidateSize();
+
+        // Delayed invalidations to catch late layout calculations
+        const timers = [
+            setTimeout(() => map.invalidateSize(), 100),
+            setTimeout(() => map.invalidateSize(), 300),
+            setTimeout(() => map.invalidateSize(), 500),
+            setTimeout(() => map.invalidateSize(), 1000),
+        ];
+
+        return () => timers.forEach(t => clearTimeout(t));
+    }, [map]);
+
+    // Fit to route bounds when a route is created
+    useEffect(() => {
+        if (routeBounds) {
+            map.fitBounds(routeBounds, { padding: [50, 50], animate: true });
+            setRouteBounds(null); // Clear after fitting
+        }
+    }, [routeBounds, map, setRouteBounds]);
 
     useEffect(() => {
         if (shouldRecenter && location) {
@@ -172,54 +212,153 @@ const MapController = ({ location, bearing, orientationMode, shouldRecenter, set
         }
     }, [shouldRecenter, location, map, setShouldRecenter]);
 
+    // Track when user drags the map to enable recenter behavior
     useEffect(() => {
-        if (location) {
-            // Simple logic: if orientationMode is auto, follow the user.
-            if (orientationMode === 'auto') {
-                map.setView(location, map.getZoom(), { animate: true });
-            }
+        const handleDragEnd = () => {
+            // Notify parent that user has panned the map
+            window.dispatchEvent(new CustomEvent('map-user-interaction'));
+        };
+        map.on('dragend', handleDragEnd);
+        return () => {
+            map.off('dragend', handleDragEnd);
+        };
+    }, [map]);
 
-            const mapContainer = map.getContainer();
-            // Using a more stable rotation container trick
-            mapContainer.style.transition = 'transform 0.5s cubic-bezier(0.1, 0, 0.3, 1)';
-            mapContainer.style.transformOrigin = 'center center';
+    // Handle map resize ONLY when orientation mode changes (not on every bearing update)
+    useEffect(() => {
+        const mapContainer = map.getContainer();
 
-            if (orientationMode === 'auto') {
-                mapContainer.style.transform = `rotate(${-bearing}deg)`;
-                // Scaled container to avoid edges - usually 150% is enough for rotation
-                mapContainer.style.width = '200%';
-                mapContainer.style.height = '200%';
-                mapContainer.style.top = '-50%';
-                mapContainer.style.left = '-50%';
-            } else {
-                mapContainer.style.transform = 'rotate(0deg)';
-                mapContainer.style.width = '100%';
-                mapContainer.style.height = '100%';
-                mapContainer.style.top = '0';
-                mapContainer.style.left = '0';
-            }
-            mapContainer.style.position = 'absolute';
-
-            // Crucial for Leaflet to know its size changed
-            map.invalidateSize();
+        if (orientationMode === 'auto') {
+            // Increased buffer to 300% to prevent black edges during rotation
+            mapContainer.style.width = '300%';
+            mapContainer.style.height = '300%';
+            mapContainer.style.top = '-100%';
+            mapContainer.style.left = '-100%';
+        } else {
+            mapContainer.style.transform = 'rotate(0deg)';
+            document.documentElement.style.setProperty('--map-rotation', '0deg');
+            mapContainer.style.width = '100%';
+            mapContainer.style.height = '100%';
+            mapContainer.style.top = '0';
+            mapContainer.style.left = '0';
         }
-    }, [location, bearing, orientationMode, map]);
+        mapContainer.style.position = 'absolute';
+
+        // Only invalidate size when mode changes
+        setTimeout(() => map.invalidateSize(), 50);
+    }, [orientationMode, map]);
+
+    // Handle rotation smoothly without triggering layout recalculations
+    useEffect(() => {
+        if (orientationMode === 'auto') {
+            const mapContainer = map.getContainer();
+            // Use requestAnimationFrame for smoother updates
+            requestAnimationFrame(() => {
+                mapContainer.style.transition = 'transform 0.1s ease-out';
+                mapContainer.style.transformOrigin = 'center center';
+                mapContainer.style.transform = `rotate(${-bearing}deg)`;
+                document.documentElement.style.setProperty('--map-rotation', `${bearing}deg`);
+            });
+        }
+    }, [bearing, orientationMode, map]);
+
+    // Follow user location in auto mode
+    useEffect(() => {
+        if (location && orientationMode === 'auto') {
+            map.setView(location, map.getZoom(), { animate: true, duration: 0.3 });
+        }
+    }, [location, orientationMode, map]);
+
+    // Handle orientation/resize changes to prevent black bars
+    useEffect(() => {
+        const handleResize = () => {
+            // Delay to allow viewport to settle
+            setTimeout(() => {
+                map.invalidateSize();
+            }, 100);
+        };
+
+        window.addEventListener('resize', handleResize);
+        window.addEventListener('orientationchange', handleResize);
+
+        // Also handle visual viewport changes on iOS
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener('resize', handleResize);
+        }
+
+        return () => {
+            window.removeEventListener('resize', handleResize);
+            window.removeEventListener('orientationchange', handleResize);
+            if (window.visualViewport) {
+                window.visualViewport.removeEventListener('resize', handleResize);
+            }
+        };
+    }, [map]);
 
     return null;
 };
 
 export const LandingPage: React.FC = () => {
     const [location, setLocation] = useState<[number, number] | null>(null);
+    const [locationError, setLocationError] = useState<string | null>(null);
     const [bearing, setBearing] = useState(0);
     const [status, setStatus] = useState<'idle' | 'search' | 'parked'>('idle');
-    const [orientationMode, setOrientationMode] = useState<'auto' | 'fixed'>('auto');
+    const [orientationMode, setOrientationMode] = useState<'auto' | 'fixed'>('fixed'); // Default to fixed
     const [showHelp, setShowHelp] = useState(false);
-    const [vehicleType, setVehicleType] = useState<'bicycle' | 'motorcycle' | 'car'>('car');
+    const [vehicleType, setVehicleType] = useState<'bicycle' | 'motorcycle' | 'car'>(() => {
+        const saved = localStorage.getItem('parlens_vehicle_type');
+        return (saved === 'bicycle' || saved === 'motorcycle' || saved === 'car') ? saved : 'car';
+    });
     const [openSpots, setOpenSpots] = useState<any[]>([]);
     const [historySpots, setHistorySpots] = useState<any[]>([]);
     const [parkLocation, setParkLocation] = useState<[number, number] | null>(null);
     const [shouldRecenter, setShouldRecenter] = useState(false);
+    const [needsRecenter, setNeedsRecenter] = useState(false); // Track if user has panned away
     const [zoomLevel, setZoomLevel] = useState(16);
+    const [isProfileOpen, setIsProfileOpen] = useState(false);
+    const [routeCoords, setRouteCoords] = useState<[number, number][] | null>(null);
+    const [alternateRouteCoords, setAlternateRouteCoords] = useState<[number, number][] | null>(null);
+    const [routeWaypoints, setRouteWaypoints] = useState<{ lat: number; lon: number }[] | null>(null);
+    const [showRoute, setShowRoute] = useState(false);
+    const [routeBounds, setRouteBounds] = useState<L.LatLngBounds | null>(null);
+    const [dropPinMode, setDropPinMode] = useState(false);
+    const [pendingDropPin, setPendingDropPin] = useState<{ lat: number; lon: number } | null>(null);
+
+    // Handler for route changes from RouteButton
+    const handleRouteChange = (coords: [number, number][] | null, altCoords: [number, number][] | null, waypoints: { lat: number; lon: number }[] | null, show: boolean) => {
+        setRouteCoords(coords);
+        setAlternateRouteCoords(altCoords);
+        setRouteWaypoints(waypoints);
+        setShowRoute(show);
+
+        // Calculate bounds and fit map to show entire route
+        if (coords && coords.length > 1 && show) {
+            const bounds = L.latLngBounds(coords);
+            setRouteBounds(bounds);
+        }
+    };
+
+    // Auto-expire old spots every 10 seconds
+    useEffect(() => {
+        const interval = setInterval(() => {
+            const now = Math.floor(Date.now() / 1000);
+            setOpenSpots(prev => {
+                const filtered = prev.filter(spot => !spot.expiresAt || spot.expiresAt > now);
+                if (filtered.length !== prev.length) {
+                    console.log('[Parlens] Expired', prev.length - filtered.length, 'spots');
+                }
+                return filtered.length !== prev.length ? filtered : prev;
+            });
+        }, 10000);
+        return () => clearInterval(interval);
+    }, []);
+
+    // Listen for map drag events to enable recenter behavior
+    useEffect(() => {
+        const handleMapInteraction = () => setNeedsRecenter(true);
+        window.addEventListener('map-user-interaction', handleMapInteraction);
+        return () => window.removeEventListener('map-user-interaction', handleMapInteraction);
+    }, []);
 
     // Theme state
     const [isDarkMode, setIsDarkMode] = useState(false);
@@ -240,61 +379,143 @@ export const LandingPage: React.FC = () => {
     // High accuracy location tracking
     useEffect(() => {
         if ("geolocation" in navigator) {
+            // Set a timeout to show error message if location takes too long
+            const timeoutId = setTimeout(() => {
+                if (!location) {
+                    setLocationError('Unable to get location. Please enable location permissions in your browser/device settings.');
+                }
+            }, 10000);
+
             watchIdRef.current = navigator.geolocation.watchPosition(
                 (pos) => {
                     const { latitude, longitude, heading } = pos.coords;
                     setLocation([latitude, longitude]);
+                    setLocationError(null); // Clear any error
                     if (heading !== null) {
                         setBearing(heading);
                     }
                 },
-                (err) => console.error('Location error:', err),
+                (err) => {
+                    console.error('Location error:', err);
+                    if (err.code === err.PERMISSION_DENIED) {
+                        setLocationError('Location permission denied. Please enable location access in your browser settings.');
+                    } else if (err.code === err.POSITION_UNAVAILABLE) {
+                        setLocationError('Location unavailable. Please check your device\'s GPS settings.');
+                    } else if (err.code === err.TIMEOUT) {
+                        setLocationError('Location request timed out. Please try again.');
+                    }
+                },
                 {
                     enableHighAccuracy: true,
                     maximumAge: 0, // Request live data without caching
-                    timeout: 5000
+                    timeout: 15000 // Increased timeout
                 }
             );
+
+            return () => {
+                clearTimeout(timeoutId);
+                if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
+            };
+        } else {
+            setLocationError('Geolocation is not supported by this browser.');
         }
-        return () => {
-            if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
-        };
-    }, []);
+    }, [location]);
 
     // Device orientation for heading - requires permission on iOS 13+
-    useEffect(() => {
-        const requestOrientationPermission = async () => {
-            // Check if DeviceOrientationEvent exists and needs permission (iOS 13+)
-            if (typeof (DeviceOrientationEvent as any).requestPermission === 'function') {
-                try {
-                    const permission = await (DeviceOrientationEvent as any).requestPermission();
-                    if (permission !== 'granted') {
-                        console.warn('Device orientation permission denied');
-                        return;
+    // Uses ref to properly track event listener for cleanup
+    const orientationHandlerRef = useRef<((e: DeviceOrientationEvent) => void) | null>(null);
+    const [orientationNeedsPermission, setOrientationNeedsPermission] = useState(false);
+
+    // Function to request orientation permission (needs user gesture on iOS)
+    const requestOrientationPermission = async () => {
+        if (typeof (DeviceOrientationEvent as any).requestPermission === 'function') {
+            try {
+                const permission = await (DeviceOrientationEvent as any).requestPermission();
+                if (permission === 'granted') {
+                    setOrientationNeedsPermission(false);
+                    if (orientationHandlerRef.current) {
+                        window.addEventListener('deviceorientation', orientationHandlerRef.current, true);
                     }
-                } catch (e) {
-                    console.error('Error requesting device orientation permission:', e);
-                    return;
+                    return true;
                 }
+            } catch (e) {
+                console.error('Error requesting device orientation permission:', e);
+            }
+        }
+        return false;
+    };
+
+    useEffect(() => {
+        // Throttling state
+        let lastBearingUpdate = 0;
+        let lastBearingValue = 0;
+
+        const handleOrientation = (e: DeviceOrientationEvent) => {
+            const now = Date.now();
+            let newBearing = 0;
+
+            // webkitCompassHeading is more accurate on iOS
+            if ((e as any).webkitCompassHeading !== undefined) {
+                newBearing = (e as any).webkitCompassHeading;
+            } else if (e.alpha !== null) {
+                // On Android, alpha represents device orientation relative to magnetic north
+                newBearing = 360 - e.alpha;
             }
 
-            const handleOrientation = (e: DeviceOrientationEvent) => {
-                // webkitCompassHeading is more accurate on iOS
-                if ((e as any).webkitCompassHeading !== undefined) {
-                    setBearing((e as any).webkitCompassHeading);
-                } else if (e.alpha !== null) {
-                    // On Android, alpha represents device orientation relative to magnetic north
-                    setBearing(360 - e.alpha);
-                }
-            };
+            // Only update if bearing changed by 3+ degrees OR 100ms passed
+            const bearingDiff = Math.abs(newBearing - lastBearingValue);
+            const timeDiff = now - lastBearingUpdate;
 
-            window.addEventListener('deviceorientation', handleOrientation, true);
-            return () => window.removeEventListener('deviceorientation', handleOrientation, true);
+            if (bearingDiff > 3 || timeDiff > 100) {
+                lastBearingValue = newBearing;
+                lastBearingUpdate = now;
+                setBearing(newBearing);
+            }
         };
 
+        orientationHandlerRef.current = handleOrientation;
+
+        const startOrientationTracking = async () => {
+            // Check if DeviceOrientationEvent exists and needs permission (iOS 13+)
+            if (typeof (DeviceOrientationEvent as any).requestPermission === 'function') {
+                // iOS requires user gesture for permission request
+                // Show the orange prompt on the orientation button
+                setOrientationNeedsPermission(true);
+                return; // Don't try to auto-request, let user tap the button
+            }
+
+            // Android/other: add listener directly
+            window.addEventListener('deviceorientation', handleOrientation, true);
+        };
+
+        // Handle visibility change - on iOS, need user gesture to re-request permission
+        const handleVisibilityChange = async () => {
+            if (document.visibilityState === 'visible') {
+                // On iOS, check if we need to re-request permission
+                if (typeof (DeviceOrientationEvent as any).requestPermission === 'function') {
+                    // iOS requires user gesture for permission - show prompt via orientation button
+                    setOrientationNeedsPermission(true);
+                } else {
+                    // Android/other: just re-add listener
+                    if (orientationHandlerRef.current) {
+                        window.addEventListener('deviceorientation', orientationHandlerRef.current, true);
+                    }
+                }
+            }
+        };
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+
         // Small delay to allow geolocation to settle first
-        const timer = setTimeout(requestOrientationPermission, 500);
-        return () => clearTimeout(timer);
+        const timer = setTimeout(startOrientationTracking, 500);
+
+        return () => {
+            clearTimeout(timer);
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+            if (orientationHandlerRef.current) {
+                window.removeEventListener('deviceorientation', orientationHandlerRef.current, true);
+            }
+        };
     }, []);
 
 
@@ -304,27 +525,51 @@ export const LandingPage: React.FC = () => {
             return;
         }
         setVehicleType(type);
+        localStorage.setItem('parlens_vehicle_type', type);
     };
 
     if (!location) {
         return (
-            <div className="flex h-screen items-center justify-center bg-gray-50 dark:bg-black">
-                <div className="flex flex-col items-center gap-4 animate-in fade-in duration-700">
-                    <div className="w-8 h-8 rounded-full border-4 border-blue-500/20 border-t-blue-500 animate-spin" />
-                    <p className="text-sm font-semibold text-zinc-400 dark:text-white/40 tracking-tight">Locating...</p>
+            <div className="fixed inset-0 flex items-center justify-center bg-gray-50 dark:bg-black">
+                <div className="flex flex-col items-center gap-4 animate-in fade-in duration-700 px-8 max-w-sm text-center">
+                    {!locationError ? (
+                        <>
+                            <div className="w-8 h-8 rounded-full border-4 border-blue-500/20 border-t-blue-500 animate-spin" />
+                            <p className="text-sm font-semibold text-zinc-400 dark:text-white/40 tracking-tight">Locating...</p>
+                        </>
+                    ) : (
+                        <>
+                            <div className="w-12 h-12 rounded-full bg-red-500/20 flex items-center justify-center">
+                                <span className="text-2xl">📍</span>
+                            </div>
+                            <p className="text-sm font-medium text-red-500 dark:text-red-400">{locationError}</p>
+                            <button
+                                onClick={() => window.location.reload()}
+                                className="mt-2 px-6 py-2 rounded-full bg-blue-500 text-white text-sm font-medium active:scale-95 transition-transform"
+                            >
+                                Try Again
+                            </button>
+                        </>
+                    )}
                 </div>
             </div>
         );
     }
 
     return (
-        <div className="relative h-screen w-screen overflow-hidden bg-gray-50 dark:bg-black transition-colors duration-300">
+        <div className="fixed inset-0 overflow-hidden bg-gray-50 dark:bg-black transition-colors duration-300">
+            {/* Drop Pin Mode Indicator */}
+            {dropPinMode && (
+                <div className="absolute top-0 left-0 right-0 z-[1000] bg-orange-500 text-white py-3 px-4 text-center font-medium shadow-lg animate-pulse">
+                    📍 Tap anywhere on the map to drop a pin
+                </div>
+            )}
             <div className="absolute inset-0">
                 <MapContainer
                     center={location}
                     zoom={16}
                     zoomControl={false}
-                    className="h-full w-full"
+                    className="absolute inset-0"
                     dragging={true}
                     scrollWheelZoom={true}
                     touchZoom={true}
@@ -338,32 +583,12 @@ export const LandingPage: React.FC = () => {
                         attribution='&copy; CARTO'
                     />
                     <ZoomTracker onZoomChange={setZoomLevel} />
-                    <UserMarker location={location} bearing={bearing} />
-                    {status === 'parked' && parkLocation && (
-                        <ActiveSessionMarker location={parkLocation} vehicleType={vehicleType} />
-                    )}
-                    {/* Open spots (Kind 31714) - only in search mode */}
-                    {status === 'search' && (() => {
-                        console.log('[Parlens] Render check - openSpots.length:', openSpots.length);
-                        if (openSpots.length === 0) return null;
-
-                        const spotsForClustering = openSpots.map(s => ({
-                            id: s.id,
-                            lat: s.lat,
-                            lon: s.lon,
-                            price: s.price,
-                            currency: s.currency,
-                            original: s
-                        }));
-                        console.log('[Parlens] Rendering', spotsForClustering.length, 'spots on map');
-                        const clustered = clusterSpots(spotsForClustering, zoomLevel);
-                        return clustered.map(item =>
-                            isCluster(item)
-                                ? <ClusterMarker key={item.id} cluster={item} type="open" bearing={bearing} orientationMode={orientationMode} />
-                                : <SpotMarker key={item.id} spot={(item as any).original || item} bearing={bearing} orientationMode={orientationMode} />
-                        );
-                    })()}
-                    {/* History spots (Kind 31417) - always visible */}
+                    <DropPinHandler
+                        enabled={dropPinMode}
+                        onDropPin={(lat, lon) => setPendingDropPin({ lat, lon })}
+                    />
+                    {/* Render in order: History (bottom) -> Open Spots -> Parked Spot -> User (top) */}
+                    {/* History spots (Kind 31417) */}
                     {historySpots.length > 0 && (() => {
                         const filtered = historySpots.filter(spot => {
                             const type = spot.tags?.find((t: string[]) => t[0] === 'type')?.[1] || 'car';
@@ -387,18 +612,67 @@ export const LandingPage: React.FC = () => {
                                 : <HistoryMarker key={item.id} spot={(item as any).original || item} bearing={bearing} orientationMode={orientationMode} />
                         );
                     })()}
+                    {/* Open spots (Kind 21011) - only show during search */}
+                    {status === 'search' && openSpots.length > 0 && (() => {
+                        const spotsForClustering = openSpots.map(s => ({
+                            id: s.id,
+                            lat: s.lat,
+                            lon: s.lon,
+                            price: s.price,
+                            currency: s.currency,
+                            original: s
+                        }));
+                        const clustered = clusterSpots(spotsForClustering, zoomLevel);
+                        return clustered.map(item =>
+                            isCluster(item)
+                                ? <ClusterMarker key={item.id} cluster={item} type="open" bearing={bearing} orientationMode={orientationMode} />
+                                : <SpotMarker key={item.id} spot={(item as any).original || item} bearing={bearing} orientationMode={orientationMode} />
+                        );
+                    })()}
+                    {/* Parked spot marker */}
+                    {status === 'parked' && parkLocation && (
+                        <ActiveSessionMarker location={parkLocation} vehicleType={vehicleType} bearing={bearing} orientationMode={orientationMode} />
+                    )}
+                    {/* Alternate Route Polyline (dashed, lighter) */}
+                    {showRoute && alternateRouteCoords && alternateRouteCoords.length > 1 && (
+                        <Polyline positions={alternateRouteCoords} color="#007AFF" weight={3} opacity={0.4} dashArray="8, 8" />
+                    )}
+                    {/* Primary Route Polyline Overlay */}
+                    {showRoute && routeCoords && routeCoords.length > 1 && (
+                        <Polyline positions={routeCoords} color="#007AFF" weight={4} opacity={0.9} />
+                    )}
+                    {/* Route Waypoint Markers */}
+                    {showRoute && routeWaypoints && routeWaypoints.map((wp, index) => (
+                        <Marker
+                            key={`waypoint-${index}`}
+                            position={[wp.lat, wp.lon]}
+                            icon={L.divIcon({
+                                className: 'waypoint-marker',
+                                html: `<div style="width: 20px; height: 20px; background: #007AFF; border: 2px solid white; border-radius: 50%; box-shadow: 0 2px 6px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; color: white; font-size: 10px; font-weight: bold;">${index + 1}</div>`,
+                                iconSize: [20, 20],
+                                iconAnchor: [10, 10]
+                            })}
+                        />
+                    ))}
+                    {/* User location marker (on top) */}
+                    <UserMarker location={location} bearing={bearing} />
                     <MapController
                         location={location}
                         bearing={bearing}
                         orientationMode={orientationMode}
                         shouldRecenter={shouldRecenter}
                         setShouldRecenter={setShouldRecenter}
+                        routeBounds={routeBounds}
+                        setRouteBounds={setRouteBounds}
                     />
                 </MapContainer>
             </div>
 
-            {/* Bottom Left Controls */}
-            <div className="absolute bottom-10 left-6 z-[1000] flex flex-col items-start gap-4 animate-in slide-in-from-left-6">
+            {/* Bottom Left Controls - with safe area for portrait and landscape */}
+            <div className="absolute z-[1000] flex flex-col items-start gap-4 animate-in slide-in-from-left-6" style={{
+                bottom: 'max(1.5rem, calc(env(safe-area-inset-bottom) + 0.5rem))',
+                left: 'max(1rem, env(safe-area-inset-left))'
+            }}>
 
                 {/* Vehicle Toggle */}
                 <div className="flex flex-col gap-1 p-1 rounded-[2rem] bg-white/80 dark:bg-white/10 backdrop-blur-md border border-black/5 dark:border-white/10 shadow-lg mb-2">
@@ -437,24 +711,54 @@ export const LandingPage: React.FC = () => {
                 </button>
             </div>
 
-            {/* Bottom Right Controls */}
-            <div className="absolute bottom-10 right-6 z-[1000] flex flex-col items-end gap-5 animate-in slide-in-from-right-6">
+            {/* Bottom Right Controls - with safe area for portrait and landscape */}
+            <div className="absolute z-[1000] flex flex-col items-end gap-5 animate-in slide-in-from-right-6" style={{
+                bottom: 'max(1.5rem, calc(env(safe-area-inset-bottom) + 0.5rem))',
+                right: 'max(1rem, env(safe-area-inset-right))'
+            }}>
 
-                {/* Orientation Toggle */}
+                {/* Orientation Toggle - first click recenters, second click changes mode */}
                 <button
-                    onClick={() => {
-                        setOrientationMode(m => m === 'auto' ? 'fixed' : 'auto');
-                        setShouldRecenter(true);
+                    onClick={async () => {
+                        // If iOS needs permission re-request, do that first
+                        if (orientationNeedsPermission) {
+                            await requestOrientationPermission();
+                            return;
+                        }
+
+                        if (needsRecenter) {
+                            // First click: just recenter
+                            setShouldRecenter(true);
+                            setNeedsRecenter(false);
+                        } else {
+                            // Second click: change mode
+                            setOrientationMode(m => m === 'auto' ? 'fixed' : 'auto');
+                            setShouldRecenter(true);
+                        }
                     }}
-                    className={`h-12 w-12 flex items-center justify-center rounded-[1.5rem] backdrop-blur-md transition-all active:scale-95 border shadow-lg ${orientationMode === 'auto'
-                        ? 'bg-blue-500/20 border-blue-500/50 text-blue-500 dark:text-blue-400'
-                        : 'bg-white/80 dark:bg-zinc-800/80 border-black/5 dark:border-white/10 text-zinc-600 dark:text-white/70'
+                    className={`h-12 w-12 flex items-center justify-center rounded-[1.5rem] backdrop-blur-md transition-all active:scale-95 border shadow-lg ${orientationNeedsPermission
+                        ? 'bg-orange-500/20 border-orange-500/50 text-orange-500 dark:text-orange-400 animate-pulse'
+                        : orientationMode === 'auto'
+                            ? 'bg-blue-500/20 border-blue-500/50 text-blue-500 dark:text-blue-400'
+                            : needsRecenter
+                                ? 'bg-white/80 dark:bg-zinc-800/80 border-black/5 dark:border-white/10 text-zinc-400 dark:text-white/40'
+                                : 'bg-white/80 dark:bg-zinc-800/80 border-black/5 dark:border-white/10 text-zinc-600 dark:text-white/70'
                         }`}
                 >
                     {orientationMode === 'auto' ? <Navigation size={20} className="fill-current" /> : <Compass size={20} />}
                 </button>
 
-                <ProfileButton setHistorySpots={setHistorySpots} />
+                {/* Route Button - below orientation button */}
+                <RouteButton
+                    vehicleType={vehicleType}
+                    onRouteChange={handleRouteChange}
+                    currentLocation={location}
+                    onDropPinModeChange={setDropPinMode}
+                    pendingDropPin={pendingDropPin}
+                    onDropPinConsumed={() => setPendingDropPin(null)}
+                />
+
+                <ProfileButton setHistorySpots={setHistorySpots} onOpenChange={setIsProfileOpen} />
                 <FAB
                     status={status}
                     setStatus={setStatus}
@@ -468,8 +772,12 @@ export const LandingPage: React.FC = () => {
 
             {/* Help Popup */}
             {showHelp && (
-                <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 dark:bg-black/80 backdrop-blur-xl p-6 animate-in fade-in">
-                    <div className="w-full max-w-md bg-white dark:bg-[#1c1c1e] rounded-[2.5rem] border border-black/5 dark:border-white/10 shadow-2xl p-8 space-y-8 animate-in zoom-in-95 max-h-[85vh] overflow-y-auto no-scrollbar relative transition-colors">
+                <div className="fixed inset-0 z-[2000] flex flex-col items-center justify-start bg-black/60 backdrop-blur-xl pt-2 px-4 pb-4 animate-in fade-in">
+                    <button
+                        onClick={() => setShowHelp(false)}
+                        className="absolute inset-0 z-0 cursor-default"
+                    />
+                    <div className="relative z-10 w-full max-w-md bg-white dark:bg-[#1c1c1e] rounded-[2rem] border border-black/5 dark:border-white/5 shadow-2xl p-6 space-y-6 animate-in slide-in-from-bottom-10 duration-300 h-[calc(100vh-1.5rem)] overflow-y-auto no-scrollbar transition-colors">
                         <button
                             onClick={() => setShowHelp(false)}
                             className="absolute top-6 right-6 p-2 rounded-full bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/20 transition-colors"
@@ -492,7 +800,7 @@ export const LandingPage: React.FC = () => {
                                 <button onClick={() => {
                                     const el = document.getElementById('android-guide');
                                     el?.classList.toggle('hidden');
-                                }} className="w-full flex items-center justify-between p-4 font-bold text-sm text-left hover:bg-zinc-200 dark:hover:bg-white/5 text-zinc-800 dark:text-zinc-200 transition-colors">
+                                }} className="w-full flex items-center justify-between p-4 font-bold text-sm text-left hover:bg-zinc-200 dark:hover:bg-white/5 text-zinc-800 dark:text-zinc-200 transition-colors" style={{ WebkitTapHighlightColor: 'transparent' }}>
                                     <span>Using Browser Menu (Android)</span>
                                     <ChevronDown size={16} className="text-zinc-400 dark:text-white/50" />
                                 </button>
@@ -500,13 +808,13 @@ export const LandingPage: React.FC = () => {
                                     <p className="font-semibold text-zinc-900 dark:text-white">Chrome & Brave:</p>
                                     <ol className="list-decimal pl-5 space-y-1">
                                         <li>Tap menu button (three dots)</li>
-                                        <li>Tap "Add to Home screen"</li>
-                                        <li>Tap "Add" to confirm</li>
+                                        <li>Tap <strong>Add to Home screen</strong></li>
+                                        <li>Tap <strong>Add</strong> to confirm</li>
                                     </ol>
                                     <p className="font-semibold text-zinc-900 dark:text-white mt-3">Firefox:</p>
                                     <ol className="list-decimal pl-5 space-y-1">
                                         <li>Tap menu button (three dots)</li>
-                                        <li>Tap "Install"</li>
+                                        <li>Tap <strong>Install</strong></li>
                                     </ol>
                                 </div>
                             </div>
@@ -516,7 +824,7 @@ export const LandingPage: React.FC = () => {
                                 <button onClick={() => {
                                     const el = document.getElementById('ios-guide');
                                     el?.classList.toggle('hidden');
-                                }} className="w-full flex items-center justify-between p-4 font-bold text-sm text-left hover:bg-zinc-200 dark:hover:bg-white/5 text-zinc-800 dark:text-zinc-200 transition-colors">
+                                }} className="w-full flex items-center justify-between p-4 font-bold text-sm text-left hover:bg-zinc-200 dark:hover:bg-white/5 text-zinc-800 dark:text-zinc-200 transition-colors" style={{ WebkitTapHighlightColor: 'transparent' }}>
                                     <span>Using Share Button (iOS)</span>
                                     <ChevronDown size={16} className="text-zinc-400 dark:text-white/50" />
                                 </button>
@@ -532,36 +840,46 @@ export const LandingPage: React.FC = () => {
 
                         <div className="space-y-6 text-sm text-zinc-600 dark:text-white/80 leading-relaxed pt-4 border-t border-black/5 dark:border-white/10">
                             <p>
-                                <strong className="text-zinc-900 dark:text-white block mb-1">1. Select vehicle type</strong>
+                                <strong className="text-zinc-900 dark:text-white block mb-1">1. Plan your route (optional)</strong>
+                                Tap the route button to add waypoints and create a route. Your path will display on the map as you travel.
+                            </p>
+
+                            <p>
+                                <strong className="text-zinc-900 dark:text-white block mb-1">2. Select vehicle type</strong>
                                 Use the vertical toggle on the bottom-left to switch between Bicycle 🚲, Motorcycle 🏍️, or Car 🚗.
                             </p>
 
                             <p>
-                                <strong className="text-zinc-900 dark:text-white block mb-1">2. Search for spots</strong>
+                                <strong className="text-zinc-900 dark:text-white block mb-1">3. Search for spots</strong>
                                 Click the main button once to see open spots reported by others.
                             </p>
 
                             <p>
-                                <strong className="text-zinc-900 dark:text-white block mb-1">3. Park & End Session</strong>
+                                <strong className="text-zinc-900 dark:text-white block mb-1">4. Park & end session</strong>
                                 Click again to mark your location. When leaving, click once more to end the session and report the fee.
                             </p>
 
                             <p>
-                                <strong className="text-zinc-900 dark:text-white block mb-1">4. View History</strong>
-                                Use the log button (clipboard icon) to see your parking history.
+                                <strong className="text-zinc-900 dark:text-white block mb-1">5. View history</strong>
+                                Use the profile button to see your parking history.
                             </p>
 
                             <p>
-                                <strong className="text-zinc-900 dark:text-white block mb-1">5. Secure your keys</strong>
+                                <strong className="text-zinc-900 dark:text-white block mb-1">6. Secure your keys</strong>
                                 Copy and store your npub (public key) and nsec (secret key) from the profile section. These are your account access keys and cannot be recovered if lost.
+                            </p>
+
+                            <p>
+                                <strong className="text-zinc-900 dark:text-white block mb-1">7. User privacy</strong>
+                                Parlens does not collect or share any user data. Your log and route data is encrypted by your keys and only accessible by you. Open spot broadcasts are ephemeral and not linked to any personal identifiers.
                             </p>
                         </div>
                     </div>
                 </div>
             )}
 
-            {status === 'search' && (
-                <div className="absolute top-12 left-1/2 z-[1000] -translate-x-1/2 animate-in slide-in-from-top-6 duration-500">
+            {status === 'search' && !isProfileOpen && (
+                <div className="absolute left-1/2 z-[1000] -translate-x-1/2 animate-in slide-in-from-top-6 duration-500" style={{ top: 'max(3rem, calc(env(safe-area-inset-top) + 0.75rem))' }}>
                     <div className="px-6 py-3 rounded-full bg-white text-black font-bold shadow-xl flex items-center gap-3 border border-black/5 whitespace-nowrap min-w-max">
                         <div className="w-2 h-2 rounded-full bg-orange-500 animate-pulse" />
                         <span className="text-sm tracking-tight">Searching for spots</span>
@@ -569,8 +887,8 @@ export const LandingPage: React.FC = () => {
                 </div>
             )}
 
-            {status === 'parked' && (
-                <div className="absolute top-12 left-1/2 z-[1000] -translate-x-1/2 animate-in slide-in-from-top-6 duration-500">
+            {status === 'parked' && !isProfileOpen && (
+                <div className="absolute left-1/2 z-[1000] -translate-x-1/2 animate-in slide-in-from-top-6 duration-500" style={{ top: 'max(3rem, calc(env(safe-area-inset-top) + 0.75rem))' }}>
                     <div className="px-6 py-3 rounded-full bg-[#34C759] text-white font-bold shadow-xl flex items-center gap-3">
                         <span className="text-lg">
                             {vehicleType === 'bicycle' ? '🚲' : vehicleType === 'motorcycle' ? '🏍️' : '🚗'}
