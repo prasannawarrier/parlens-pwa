@@ -417,7 +417,7 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
             alert('Route saved!');
         } catch (error) {
             console.error('[Parlens] Error saving route:', error);
-            alert('Failed to save route: ' + (error instanceof Error ? error.message : 'Unknown error'));
+            alert('Failed to save route, try again later');
         } finally {
             setIsSaving(false);
         }
@@ -845,7 +845,7 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                                                     </button>
                                                     <button
                                                         onClick={() => deleteRoute(route)}
-                                                        className="p-2 rounded-lg text-zinc-400 hover:text-red-500 hover:bg-red-500/10 transition-colors"
+                                                        className="p-2 rounded-lg text-zinc-400 dark:text-white/40 active:scale-95 transition-transform"
                                                     >
                                                         <Trash2 size={16} />
                                                     </button>
