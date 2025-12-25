@@ -205,6 +205,17 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
 
     const handleClick = async () => {
         if (status === 'idle') {
+            // Check cool-off period
+            const lastParked = parseInt(localStorage.getItem('parlens_last_parked_at') || '0');
+            const now = Date.now();
+            const cooldown = 5 * 60 * 1000; // 5 minutes
+
+            if (now - lastParked < cooldown) {
+                const remaining = Math.ceil((cooldown - (now - lastParked)) / 60000);
+                alert(`Please wait ${remaining} minutes before searching for a new spot.`);
+                return;
+            }
+
             setStatus('search');
         } else if (status === 'search') {
             setSessionStart(Math.floor(Date.now() / 1000));
@@ -240,6 +251,9 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
                 started_at: startTime,
                 finished_at: endTime
             };
+
+            // Set cool-off timestamp
+            localStorage.setItem('parlens_last_parked_at', Date.now().toString());
 
             const privkeyHex = localStorage.getItem('parlens_privkey');
             const seckey = privkeyHex ? new Uint8Array(privkeyHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16))) : undefined;

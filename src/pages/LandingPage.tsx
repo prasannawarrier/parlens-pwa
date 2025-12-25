@@ -856,7 +856,7 @@ export const LandingPage: React.FC = () => {
 
                             <p>
                                 <strong className="text-zinc-900 dark:text-white block mb-1">4. Park & end session</strong>
-                                Click again to mark your location. When leaving, click once more to end the session and report the fee.
+                                Click again to mark your location. When leaving, click once more to end the session and report the fee. Note that there is a 5-minute cool-off period after parking before you can search again.
                             </p>
 
                             <p>
