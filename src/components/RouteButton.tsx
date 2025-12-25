@@ -745,18 +745,18 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                                     <Save size={14} />
                                     Save Route
                                 </label>
-                                <div className="flex gap-2">
+                                <div className="flex flex-col sm:flex-row gap-2">
                                     <input
                                         type="text"
                                         value={routeName}
                                         onChange={(e) => setRouteName(e.target.value)}
                                         placeholder="Route name (optional)"
-                                        className="flex-1 p-3 rounded-xl bg-white dark:bg-white/5 border border-black/5 dark:border-white/10 text-zinc-700 dark:text-white placeholder-zinc-400 dark:placeholder-white/40 text-sm"
+                                        className="w-full sm:flex-1 p-3 rounded-xl bg-white dark:bg-white/5 border border-black/5 dark:border-white/10 text-zinc-700 dark:text-white placeholder-zinc-400 dark:placeholder-white/40 text-sm"
                                     />
                                     <button
                                         onClick={saveRoute}
                                         disabled={isSaving}
-                                        className="px-4 rounded-xl bg-green-500 text-white font-bold disabled:opacity-50 transition-all active:scale-95"
+                                        className="w-full sm:w-auto px-6 rounded-xl bg-green-500 text-white font-bold disabled:opacity-50 transition-all active:scale-95 py-3 sm:py-0"
                                     >
                                         {isSaving ? '...' : 'Save'}
                                     </button>
