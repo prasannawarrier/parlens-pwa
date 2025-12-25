@@ -316,6 +316,7 @@ export const LandingPage: React.FC = () => {
     const [needsRecenter, setNeedsRecenter] = useState(false); // Track if user has panned away
     const [zoomLevel, setZoomLevel] = useState(16);
     const [isProfileOpen, setIsProfileOpen] = useState(false);
+    const [isRouteOpen, setIsRouteOpen] = useState(false);
     const [routeCoords, setRouteCoords] = useState<[number, number][] | null>(null);
     const [alternateRouteCoords, setAlternateRouteCoords] = useState<[number, number][] | null>(null);
     const [routeWaypoints, setRouteWaypoints] = useState<{ lat: number; lon: number }[] | null>(null);
@@ -756,6 +757,7 @@ export const LandingPage: React.FC = () => {
                     onDropPinModeChange={setDropPinMode}
                     pendingDropPin={pendingDropPin}
                     onDropPinConsumed={() => setPendingDropPin(null)}
+                    onOpenChange={setIsRouteOpen}
                 />
 
                 <ProfileButton setHistorySpots={setHistorySpots} onOpenChange={setIsProfileOpen} />
@@ -890,7 +892,7 @@ export const LandingPage: React.FC = () => {
                 </div>
             )}
 
-            {status === 'search' && !isProfileOpen && (
+            {status === 'search' && !isProfileOpen && !isRouteOpen && (
                 <div className="absolute left-1/2 z-[1000] -translate-x-1/2 animate-in slide-in-from-top-6 duration-500" style={{ top: 'max(3rem, calc(env(safe-area-inset-top) + 0.75rem))' }}>
                     <div className="px-6 py-3 rounded-full bg-white text-black font-bold shadow-xl flex items-center gap-3 border border-black/5 whitespace-nowrap min-w-max">
                         <div className="w-2 h-2 rounded-full bg-orange-500 animate-pulse" />
@@ -899,7 +901,7 @@ export const LandingPage: React.FC = () => {
                 </div>
             )}
 
-            {status === 'parked' && !isProfileOpen && (
+            {status === 'parked' && !isProfileOpen && !isRouteOpen && (
                 <div className="absolute left-1/2 z-[1000] -translate-x-1/2 animate-in slide-in-from-top-6 duration-500" style={{ top: 'max(3rem, calc(env(safe-area-inset-top) + 0.75rem))' }}>
                     <div className="px-6 py-3 rounded-full bg-[#34C759] text-white font-bold shadow-xl flex items-center gap-3">
                         <span className="text-lg">

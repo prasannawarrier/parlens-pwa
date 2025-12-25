@@ -27,6 +27,7 @@ interface RouteButtonProps {
     onDropPinModeChange?: (enabled: boolean) => void;
     pendingDropPin?: { lat: number; lon: number } | null;
     onDropPinConsumed?: () => void;
+    onOpenChange?: (isOpen: boolean) => void;
 }
 
 // Debounce hook for search input
@@ -39,9 +40,14 @@ function useDebounce<T>(value: T, delay: number): T {
     return debouncedValue;
 }
 
-export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteChange, currentLocation, onDropPinModeChange, pendingDropPin, onDropPinConsumed }) => {
+export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteChange, currentLocation, onDropPinModeChange, pendingDropPin, onDropPinConsumed, onOpenChange }) => {
     const { pool, pubkey, signEvent } = useAuth();
     const [isOpen, setIsOpen] = useState(false);
+
+    // Notify parent on open change
+    useEffect(() => {
+        onOpenChange?.(isOpen);
+    }, [isOpen, onOpenChange]);
     const [waypoints, setWaypoints] = useState<Waypoint[]>([]);
     const [searchQuery, setSearchQuery] = useState('');
     const [suggestions, setSuggestions] = useState<any[]>([]);
