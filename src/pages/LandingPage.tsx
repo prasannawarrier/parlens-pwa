@@ -873,6 +873,18 @@ export const LandingPage: React.FC = () => {
                                 <strong className="text-zinc-900 dark:text-white block mb-1">7. User privacy</strong>
                                 Parlens does not collect or share any user data. Your log and route data is encrypted by your keys and only accessible by you. Open spot broadcasts are ephemeral and not linked to any personal identifiers.
                             </p>
+
+                            <p>
+                                <strong className="text-zinc-900 dark:text-white block mb-1">8. Create your own mirror</strong>
+                                <a
+                                    href="https://github.com/prasannawarrier/parlens-pwa/blob/main/MIRROR_CREATION.md"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 underline"
+                                >
+                                    Follow these steps
+                                </a> to create your own mirror of the Parlens app to distribute the load and share with your friends.
+                            </p>
                         </div>
                     </div>
                 </div>
