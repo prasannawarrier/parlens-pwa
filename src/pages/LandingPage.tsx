@@ -900,8 +900,8 @@ export const LandingPage: React.FC = () => {
                                 <strong className="text-zinc-900 dark:text-white block mb-1">3. Search for spots</strong>
                                 Click the main button once to see open spots reported by others.
                                 <ul className="mt-2 space-y-1 list-disc pl-4 text-xs text-zinc-500 dark:text-white/60">
-                                    <li><span className="text-[#007AFF] font-bold">Blue</span> tags: Fresh spots (less than 1 min ago)</li>
-                                    <li><span className="text-[#8E8E93] font-bold">Grey</span> tags: Expired spots (older history)</li>
+                                    <li><span className="text-lg leading-none align-middle mr-1">🔵</span> Fresh spots (less than 1 min ago)</li>
+                                    <li><span className="text-lg leading-none align-middle mr-1 grayscale opacity-70">🔵</span> Expired spots (older history)</li>
                                 </ul>
                             </p>
 
