@@ -4,7 +4,6 @@ import { useAuth } from '../contexts/AuthContext';
 import { KINDS, DEFAULT_RELAYS } from '../lib/nostr';
 import type { RouteLogContent } from '../lib/nostr';
 import { encryptParkingLog, decryptParkingLog } from '../lib/encryption';
-import { encodeGeohash, geohashToBounds } from '../lib/geo';
 
 interface Waypoint {
     id: string;
@@ -30,16 +29,6 @@ interface RouteButtonProps {
     onOpenChange?: (isOpen: boolean) => void;
 }
 
-// Debounce hook for search input
-function useDebounce<T>(value: T, delay: number): T {
-    const [debouncedValue, setDebouncedValue] = useState<T>(value);
-    useEffect(() => {
-        const handler = setTimeout(() => setDebouncedValue(value), delay);
-        return () => clearTimeout(handler);
-    }, [value, delay]);
-    return debouncedValue;
-}
-
 export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteChange, currentLocation, onDropPinModeChange, pendingDropPin, onDropPinConsumed, onOpenChange }) => {
     const { pool, pubkey, signEvent } = useAuth();
     const [isOpen, setIsOpen] = useState(false);
@@ -50,8 +39,6 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
     }, [isOpen, onOpenChange]);
     const [waypoints, setWaypoints] = useState<Waypoint[]>([]);
     const [searchQuery, setSearchQuery] = useState('');
-    const [suggestions, setSuggestions] = useState<any[]>([]);
-    const [isSearching, setIsSearching] = useState(false);
     const [showOnMap, setShowOnMap] = useState(false);
     const [routeCoords, setRouteCoords] = useState<[number, number][] | null>(null);
     const [alternateRouteCoords, setAlternateRouteCoords] = useState<[number, number][] | null>(null);
@@ -68,8 +55,6 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
     const [editingWaypointId, setEditingWaypointId] = useState<string | null>(null);
     const [editingName, setEditingName] = useState('');
     const [isDeleting, setIsDeleting] = useState(false);
-
-    const debouncedQuery = useDebounce(searchQuery, 800); // Increased debounce - wait for user to stop typing
 
     // Search saved waypoints from routes (offline search)
     const savedWaypointMatches = React.useMemo(() => {
@@ -93,71 +78,6 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
         }
         return matches.slice(0, 5); // Limit to 5 results
     }, [searchQuery, savedRoutes]);
-
-    // Search for places using Nominatim (OpenStreetMap geocoding)
-    useEffect(() => {
-        if (!debouncedQuery || debouncedQuery.length < 3) {
-            setSuggestions([]);
-            return;
-        }
-
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
-
-        const searchPlaces = async () => {
-            setIsSearching(true);
-            try {
-                // Build URL with location bias via 1-char geohash bounds
-                let url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(debouncedQuery)}&limit=5`;
-
-                // Use 1-character geohash bounds (large regional area) for location bias
-                if (currentLocation) {
-                    const [lat, lon] = currentLocation;
-                    const geohash1 = encodeGeohash(lat, lon, 1); // 1-char = ~5000km x 5000km region
-                    const bounds = geohashToBounds(geohash1);
-                    url += `&viewbox=${bounds.sw[1]},${bounds.ne[0]},${bounds.ne[1]},${bounds.sw[0]}&bounded=0`;
-                }
-
-                const response = await fetch(url, {
-                    headers: { 'User-Agent': 'Parlens PWA' },
-                    signal: controller.signal
-                });
-                const data = await response.json();
-                setSuggestions(data || []);
-            } catch (error: any) {
-                if (error.name !== 'AbortError') {
-                    console.error('Geocoding error:', error);
-                }
-                setSuggestions([]);
-            } finally {
-                setIsSearching(false);
-            }
-        };
-
-        searchPlaces();
-
-        return () => {
-            clearTimeout(timeoutId);
-            controller.abort();
-        };
-    }, [debouncedQuery, currentLocation]);
-
-    const addWaypoint = (suggestion: any) => {
-        const newWaypoint: Waypoint = {
-            id: crypto.randomUUID(),
-            name: suggestion.display_name.split(',')[0],
-            lat: parseFloat(suggestion.lat),
-            lon: parseFloat(suggestion.lon)
-        };
-        setWaypoints(prev => [...prev, newWaypoint]);
-        setSearchQuery('');
-        setSuggestions([]);
-        // Clear existing route when waypoints change
-        setRouteCoords(null);
-        setAlternateRouteCoords(null);
-        setShowOnMap(false);
-        onRouteChange(null, null, null, false);
-    };
 
     const removeWaypoint = (id: string) => {
         setWaypoints(prev => prev.filter(w => w.id !== id));
@@ -560,16 +480,11 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                                 <input
                                     ref={inputRef}
                                     type="text"
-                                    placeholder="Search for a place..."
+                                    placeholder="Search waypoints from saved routes"
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
                                     className="w-full h-14 rounded-2xl bg-zinc-100 dark:bg-white/5 border border-black/5 dark:border-white/10 px-4 text-zinc-900 dark:text-white placeholder:text-zinc-400 dark:placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-blue-500"
                                 />
-                                {isSearching && (
-                                    <div className="absolute right-4 top-1/2 -translate-y-1/2">
-                                        <div className="w-5 h-5 rounded-full border-2 border-blue-500/30 border-t-blue-500 animate-spin" />
-                                    </div>
-                                )}
                             </div>
 
                             {/* Saved Waypoint Matches (offline/local) */}
@@ -600,24 +515,6 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                                             <MapPin size={16} className="text-green-600 dark:text-green-400 shrink-0" />
                                             <span className="flex-1 text-sm text-zinc-700 dark:text-white/80 truncate">
                                                 {match.name}
-                                            </span>
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
-
-                            {/* API Suggestions */}
-                            {suggestions.length > 0 && (
-                                <div className="rounded-2xl overflow-hidden bg-zinc-50 dark:bg-white/5 border border-black/5 dark:border-white/10">
-                                    {suggestions.map((suggestion, index) => (
-                                        <button
-                                            key={index}
-                                            onClick={() => addWaypoint(suggestion)}
-                                            className="w-full p-3 flex items-center gap-3 hover:bg-zinc-100 dark:hover:bg-white/5 transition-colors text-left border-b border-black/5 dark:border-white/5 last:border-0"
-                                        >
-                                            <MapPin size={16} className="text-blue-500 shrink-0" />
-                                            <span className="text-sm text-zinc-700 dark:text-white/80 truncate">
-                                                {suggestion.display_name}
                                             </span>
                                         </button>
                                     ))}
@@ -851,10 +748,10 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                             </div>
                         )}
 
-                        {/* API Warning Message */}
+                        {/* Tip Message */}
                         <div className="p-3 rounded-xl bg-amber-500/10 dark:bg-amber-500/5 border border-amber-500/20">
                             <p className="text-xs text-amber-700 dark:text-amber-400/80 leading-relaxed">
-                                <strong>Tip:</strong> Place search uses a rate-limited API. Use <strong>Drop Pin on Map</strong> and
+                                <strong>Tip:</strong> Use <strong>Drop Pin on Map</strong> and
                                 <strong> edit waypoint names</strong> to label locations. When you <strong>save routes</strong>,
                                 waypoint names become searchable — building your personal offline map over time! ⭐
                             </p>

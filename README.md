@@ -18,7 +18,6 @@ Parlens is a decentralized parking utility app built on the [Nostr](https://nost
 - **Language**: TypeScript
 - **Styling**: [Tailwind CSS](https://tailwindcss.com/)
 - **Maps**: [Leaflet](https://leafletjs.com/) with [React Leaflet](https://react-leaflet.js.org/)
-- **Geocoding**: [Nominatim](https://nominatim.org/) (OpenStreetMap)
 - **Routing**: [OSRM](http://project-osrm.org/) (Open Source Routing Machine)
 - **Protocol**: [Nostr](https://github.com/nostr-protocol/nostr) (via `nostr-tools` and `@nostrify/react`)
 - **State Management**: React Context + Nostr Relays
