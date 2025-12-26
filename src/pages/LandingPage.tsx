@@ -292,8 +292,9 @@ const MapController = ({ location, bearing, cumulativeRotation, orientationMode,
         // Only update map if user is NOT dragging
         if (!isInteracting.current && location && (orientationMode === 'auto' || orientationMode === 'recentre')) {
             // Both auto and recentre modes follow the user
-            // Use same zoom level (18) for both to prevent zoom animation when switching
-            const targetZoom = 18;
+            // Use same zoom level (17) for both to prevent zoom animation when switching
+            // Standardizing at 17 based on user request for smoothness
+            const targetZoom = 17;
             const currentZoom = map.getZoom();
 
             if (Math.abs(currentZoom - targetZoom) > 0.5) {
