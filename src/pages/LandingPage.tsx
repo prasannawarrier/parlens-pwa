@@ -207,7 +207,7 @@ const MapController = ({ location, bearing, orientationMode, shouldRecenter, set
 
     useEffect(() => {
         if (shouldRecenter && location) {
-            map.setView(location, 16, { animate: true }); // Default zoom 16
+            map.setView(location, 17, { animate: true }); // Default zoom 17
             setShouldRecenter(false);
         }
     }, [shouldRecenter, location, map, setShouldRecenter]);
@@ -314,7 +314,7 @@ export const LandingPage: React.FC = () => {
     const [parkLocation, setParkLocation] = useState<[number, number] | null>(null);
     const [shouldRecenter, setShouldRecenter] = useState(false);
     const [needsRecenter, setNeedsRecenter] = useState(false); // Track if user has panned away
-    const [zoomLevel, setZoomLevel] = useState(16);
+    const [zoomLevel, setZoomLevel] = useState(17);
     const [isProfileOpen, setIsProfileOpen] = useState(false);
     const [isRouteOpen, setIsRouteOpen] = useState(false);
     const [routeCoords, setRouteCoords] = useState<[number, number][] | null>(null);
@@ -568,7 +568,7 @@ export const LandingPage: React.FC = () => {
             <div className="absolute inset-0">
                 <MapContainer
                     center={location}
-                    zoom={16}
+                    zoom={17}
                     zoomControl={false}
                     className="absolute inset-0"
                     dragging={true}
