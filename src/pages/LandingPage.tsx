@@ -292,8 +292,8 @@ const MapController = ({ location, bearing, cumulativeRotation, orientationMode,
         // Only update map if user is NOT dragging
         if (!isInteracting.current && location && (orientationMode === 'auto' || orientationMode === 'recentre')) {
             // Both auto and recentre modes follow the user
-            // Use different zoom levels: auto=18 (closer), recentre/fixed=17
-            const targetZoom = orientationMode === 'auto' ? 18 : 17;
+            // Use same zoom level (18) for both to prevent zoom animation when switching
+            const targetZoom = 18;
             const currentZoom = map.getZoom();
 
             if (Math.abs(currentZoom - targetZoom) > 0.5) {
@@ -684,7 +684,10 @@ export const LandingPage: React.FC = () => {
                             ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
                             : "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
                         }
+
                         attribution='&copy; CARTO'
+                        keepBuffer={12} // Load more tiles around viewport to prevent clipping during rotation
+                        updateWhenIdle={false} // Update tiles during animation for smoother experience
                     />
                     <ZoomTracker onZoomChange={setZoomLevel} />
                     <DropPinHandler
