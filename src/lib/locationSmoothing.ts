@@ -103,6 +103,52 @@ export class LocationSmoother {
     }
 }
 
+// Bearing animator that handles wrap-around correctly for CSS rotation
+export class BearingAnimator {
+    private currentRotation: number = 0; // Cumulative rotation (can go beyond 360)
+    private lastRawBearing: number = 0;
+    private initialized: boolean = false;
+
+    // Update target bearing and calculate shortest rotation path
+    setBearing(newBearing: number): number {
+        // Normalize input to 0-360
+        const normalizedBearing = ((newBearing % 360) + 360) % 360;
+
+        if (!this.initialized) {
+            this.currentRotation = normalizedBearing;
+            this.lastRawBearing = normalizedBearing;
+            this.initialized = true;
+            return this.currentRotation;
+        }
+
+        // Calculate the shortest path delta
+        let delta = normalizedBearing - this.lastRawBearing;
+
+        // Wrap-around: choose shortest path
+        if (delta > 180) {
+            delta -= 360;
+        } else if (delta < -180) {
+            delta += 360;
+        }
+
+        // Apply delta to cumulative rotation
+        this.currentRotation += delta;
+        this.lastRawBearing = normalizedBearing;
+
+        return this.currentRotation;
+    }
+
+    getCurrentRotation(): number {
+        return this.currentRotation;
+    }
+
+    reset() {
+        this.currentRotation = 0;
+        this.lastRawBearing = 0;
+        this.initialized = false;
+    }
+}
+
 // LERP (Linear Interpolation) animator for smooth position transitions
 export class PositionAnimator {
     private startLat: number = 0;

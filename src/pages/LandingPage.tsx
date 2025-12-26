@@ -8,7 +8,7 @@ import { ProfileButton } from '../components/ProfileButton';
 import { RouteButton } from '../components/RouteButton';
 import { getCurrencySymbol } from '../lib/currency';
 import { clusterSpots, isCluster, type Cluster, type SpotBase } from '../lib/clustering';
-import { LocationSmoother, PositionAnimator } from '../lib/locationSmoothing';
+import { LocationSmoother, BearingAnimator } from '../lib/locationSmoothing';
 
 // Fix Leaflet marker icon issue
 import icon from 'leaflet/dist/images/marker-icon.png';
@@ -176,9 +176,10 @@ const DropPinHandler = ({ enabled, onDropPin }: { enabled: boolean, onDropPin: (
 };
 
 // Controller to handle map centering and rotation
-const MapController = ({ location, bearing, orientationMode, shouldRecenter, setShouldRecenter, routeBounds, setRouteBounds }: {
+const MapController = ({ location, bearing, cumulativeRotation, orientationMode, shouldRecenter, setShouldRecenter, routeBounds, setRouteBounds }: {
     location: [number, number],
     bearing: number,
+    cumulativeRotation: number,
     orientationMode: 'auto' | 'fixed',
     shouldRecenter: boolean,
     setShouldRecenter: (v: boolean) => void,
@@ -254,7 +255,7 @@ const MapController = ({ location, bearing, orientationMode, shouldRecenter, set
         setTimeout(() => map.invalidateSize(), 50);
     }, [orientationMode, map]);
 
-    // Handle rotation smoothly
+    // Handle rotation smoothly - use cumulativeRotation to prevent full-spin on wrap-around
     useEffect(() => {
         if (orientationMode === 'auto') {
             const mapContainer = map.getContainer();
@@ -262,11 +263,13 @@ const MapController = ({ location, bearing, orientationMode, shouldRecenter, set
                 // Use faster transition for responsive updates
                 mapContainer.style.transition = 'transform 0.3s linear';
                 mapContainer.style.transformOrigin = 'center center';
-                mapContainer.style.transform = `rotate(${-bearing}deg)`;
+                // Use cumulative rotation (can go beyond 360) to take shortest path
+                mapContainer.style.transform = `rotate(${-cumulativeRotation}deg)`;
+                // Keep bearing for UserMarker counter-rotation
                 document.documentElement.style.setProperty('--map-rotation', `${bearing}deg`);
             });
         }
-    }, [bearing, orientationMode, map]);
+    }, [cumulativeRotation, bearing, orientationMode, map]);
 
     useEffect(() => {
         if (location && orientationMode === 'auto') {
@@ -388,14 +391,10 @@ export const LandingPage: React.FC = () => {
 
     // Location smoothing refs (persist across re-renders)
     const locationSmootherRef = useRef<LocationSmoother>(new LocationSmoother());
-    const positionAnimatorRef = useRef<PositionAnimator>(new PositionAnimator());
+    const bearingAnimatorRef = useRef<BearingAnimator>(new BearingAnimator());
 
-    // Set up position animator callback
-    useEffect(() => {
-        positionAnimatorRef.current.setUpdateCallback((lat, lon) => {
-            setLocation([lat, lon]);
-        });
-    }, []);
+    // Cumulative rotation for CSS (handles wrap-around without full spins)
+    const [cumulativeRotation, setCumulativeRotation] = useState(0);
 
     // High accuracy location tracking with Kalman smoothing
     useEffect(() => {
@@ -434,9 +433,8 @@ export const LandingPage: React.FC = () => {
                     const timeThreshold = currentSpeed > 10 ? 1500 : 2500;
 
                     if (dist > distThreshold || (now - lastLocUpdate) > timeThreshold) {
-                        // Use LERP animation for smooth position transitions
-                        const animDuration = currentSpeed > 10 ? 200 : 300;
-                        positionAnimatorRef.current.animateTo(smoothedLat, smoothedLon, animDuration);
+                        // Direct setLocation - panTo in separate useEffect handles animation
+                        setLocation([smoothedLat, smoothedLon]);
 
                         lastRawLat = latitude;
                         lastRawLon = longitude;
@@ -445,10 +443,13 @@ export const LandingPage: React.FC = () => {
 
                     setLocationError(null);
 
-                    // Smooth bearing update with speed gate
-                    if (heading !== null && !isNaN(heading)) {
+                    // Smooth bearing update with speed gate and wrap-around handling
+                    if (heading !== null && !isNaN(heading) && currentSpeed > 2) {
                         const smoothedBearing = locationSmootherRef.current.smoothBearing(heading, currentSpeed);
                         if (smoothedBearing !== null) {
+                            // Get cumulative rotation for CSS (prevents full-spin on wrap-around)
+                            const cumRotation = bearingAnimatorRef.current.setBearing(smoothedBearing);
+                            setCumulativeRotation(cumRotation);
                             setBearing(smoothedBearing);
                         }
                     }
@@ -473,7 +474,6 @@ export const LandingPage: React.FC = () => {
             return () => {
                 clearTimeout(timeoutId);
                 if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
-                positionAnimatorRef.current.stop();
             };
         } else {
             setLocationError('Geolocation is not supported by this browser.');
@@ -719,6 +719,7 @@ export const LandingPage: React.FC = () => {
                     <MapController
                         location={location}
                         bearing={bearing}
+                        cumulativeRotation={cumulativeRotation}
                         orientationMode={orientationMode}
                         shouldRecenter={shouldRecenter}
                         setShouldRecenter={setShouldRecenter}
