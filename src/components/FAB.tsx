@@ -274,12 +274,24 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
 
             const signedLog = await signEvent(logEvent);
 
-            console.log('Publishing log:', signedLog.id, 'to', DEFAULT_RELAYS);
+            console.log('[Parlens] Publishing log:', signedLog.id, 'to', DEFAULT_RELAYS);
+            console.log('[Parlens] Log content (encrypted):', signedLog.content.substring(0, 50) + '...');
+            console.log('[Parlens] Log tags:', signedLog.tags);
+
             const pubs = pool.publish(DEFAULT_RELAYS, signedLog);
 
-            // Wait for all publishes to at least attempt
-            await Promise.allSettled(pubs);
-            console.log('Log published');
+            // Wait for all publishes and log results
+            const results = await Promise.allSettled(pubs);
+            results.forEach((result, i) => {
+                if (result.status === 'fulfilled') {
+                    console.log(`[Parlens] Relay ${DEFAULT_RELAYS[i]}: Published successfully`);
+                } else {
+                    console.error(`[Parlens] Relay ${DEFAULT_RELAYS[i]}: Failed -`, result.reason);
+                }
+            });
+
+            const successCount = results.filter(r => r.status === 'fulfilled').length;
+            console.log(`[Parlens] Log published to ${successCount}/${DEFAULT_RELAYS.length} relays`);
 
             // Broadcast open spot (Kind 31714 - Addressable) to help other users
             // Use anonymous one-time keypair for privacy
