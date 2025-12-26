@@ -330,13 +330,18 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
 
                 <button
                     onClick={handleClick}
+                    disabled={status === 'submitting'}
                     className={`h-20 w-20 flex items-center justify-center rounded-[2.5rem] shadow-2xl transition-all active:scale-90 ${status === 'idle' ? 'bg-[#007AFF] text-white shadow-blue-500/20' :
                         status === 'search' ? 'bg-[#FF9500] text-white shadow-orange-500/20' :
-                            'bg-[#34C759] text-white shadow-green-500/20'
+                            status === 'submitting' ? 'bg-[#007AFF] text-white shadow-blue-500/20' :
+                                'bg-[#34C759] text-white shadow-green-500/20'
                         }`}
                 >
                     {status === 'idle' && <Search size={32} strokeWidth={2.5} />}
                     {status === 'search' && <MapPin size={32} strokeWidth={2.5} className="animate-pulse" />}
+                    {status === 'submitting' && (
+                        <div className="w-8 h-8 border-4 border-white/30 border-t-white rounded-full animate-spin" />
+                    )}
                     {status === 'parked' && (
                         vehicleType === 'bicycle' ? <span className="text-3xl">🚲</span> :
                             vehicleType === 'motorcycle' ? <span className="text-3xl">🏍️</span> :
