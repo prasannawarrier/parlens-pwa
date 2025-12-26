@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, memo } from 'react';
-import { HelpCircle, Compass, Navigation, ChevronDown, X } from 'lucide-react';
+import { HelpCircle, Compass, Navigation, ChevronDown, X, MapPin } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Polyline, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -44,7 +44,7 @@ const UserMarker = ({ location, bearing }: { location: [number, number], bearing
 }
 
 // Marker for the user's currently parked vehicle
-const ActiveSessionMarker = ({ location, vehicleType, bearing, orientationMode }: { location: [number, number], vehicleType: string, bearing: number, orientationMode: 'auto' | 'fixed' }) => {
+const ActiveSessionMarker = ({ location, vehicleType, bearing, orientationMode }: { location: [number, number], vehicleType: string, bearing: number, orientationMode: 'fixed' | 'recentre' | 'auto' }) => {
     const emoji = vehicleType === 'bicycle' ? '🚲' : vehicleType === 'motorcycle' ? '🏍️' : '🚗';
     const rotation = orientationMode === 'auto' ? bearing : 0;
     const content = `<div style="font-size: 36px; filter: drop-shadow(0 4px 8px rgba(0,0,0,0.4)); transform: rotate(${rotation}deg);">${emoji}</div>`;
@@ -62,7 +62,7 @@ const ActiveSessionMarker = ({ location, vehicleType, bearing, orientationMode }
 // Marker for Open Spots (Kind 31714) - shows 🅿️ - Memoized to prevent re-renders
 // Marker for Open Spots (Kind 31714) - shows 🅿️ - Memoized to prevent re-renders
 // Marker for Open Spots (Kind 31714) - shows 🅿️ - Memoized to prevent re-renders
-const SpotMarker = memo(({ spot, bearing, orientationMode }: { spot: any, bearing: number, orientationMode: 'auto' | 'fixed' }) => {
+const SpotMarker = memo(({ spot, bearing, orientationMode }: { spot: any, bearing: number, orientationMode: 'fixed' | 'recentre' | 'auto' }) => {
     const rotation = orientationMode === 'auto' ? bearing : 0;
     const content = `
         <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 60px; transform: rotate(${rotation}deg);">
@@ -86,7 +86,7 @@ const SpotMarker = memo(({ spot, bearing, orientationMode }: { spot: any, bearin
 });
 
 // Marker for History Spots (Kind 31417) - shows 🅟
-const HistoryMarker = ({ spot, bearing, orientationMode }: { spot: any, bearing: number, orientationMode: 'auto' | 'fixed' }) => {
+const HistoryMarker = ({ spot, bearing, orientationMode }: { spot: any, bearing: number, orientationMode: 'fixed' | 'recentre' | 'auto' }) => {
     const content = spot.decryptedContent;
     if (!content || !content.lat || !content.lon) return null;
 
@@ -113,7 +113,7 @@ const HistoryMarker = ({ spot, bearing, orientationMode }: { spot: any, bearing:
 };
 
 // Cluster marker for grouped spots
-const ClusterMarker = ({ cluster, type, bearing, orientationMode }: { cluster: Cluster<SpotBase>, type: 'open' | 'history', bearing: number, orientationMode: 'auto' | 'fixed' }) => {
+const ClusterMarker = ({ cluster, type, bearing, orientationMode }: { cluster: Cluster<SpotBase>, type: 'open' | 'history', bearing: number, orientationMode: 'fixed' | 'recentre' | 'auto' }) => {
     const emoji = type === 'open' ? '🅿️' : '🅟';
 
     // Determine color based on freshness of spots in cluster
@@ -180,7 +180,7 @@ const MapController = ({ location, bearing, cumulativeRotation, orientationMode,
     location: [number, number],
     bearing: number,
     cumulativeRotation: number,
-    orientationMode: 'auto' | 'fixed',
+    orientationMode: 'fixed' | 'recentre' | 'auto',
     shouldRecenter: boolean,
     setShouldRecenter: (v: boolean) => void,
     routeBounds: L.LatLngBounds | null,
@@ -272,10 +272,19 @@ const MapController = ({ location, bearing, cumulativeRotation, orientationMode,
     }, [cumulativeRotation, bearing, orientationMode, map]);
 
     useEffect(() => {
-        if (location && orientationMode === 'auto') {
-            // Use panTo for smoother updates instead of setView
-            // Shorter duration to avoid animation queuing at high speed updates
-            map.panTo(location, { animate: true, duration: 0.3 });
+        if (location && (orientationMode === 'auto' || orientationMode === 'recentre')) {
+            // Both auto and recentre modes follow the user
+            // Use different zoom levels: auto=18 (closer), recentre/fixed=17
+            const targetZoom = orientationMode === 'auto' ? 18 : 17;
+            const currentZoom = map.getZoom();
+
+            if (Math.abs(currentZoom - targetZoom) > 0.5) {
+                // Zoom changed, use flyTo for smooth transition
+                map.flyTo(location, targetZoom, { animate: true, duration: 0.5 });
+            } else {
+                // Just pan for normal following
+                map.panTo(location, { animate: true, duration: 0.3 });
+            }
         }
     }, [location, orientationMode, map]);
 
@@ -312,8 +321,8 @@ export const LandingPage: React.FC = () => {
     const [location, setLocation] = useState<[number, number] | null>(null);
     const [locationError, setLocationError] = useState<string | null>(null);
     const [bearing, setBearing] = useState(0);
-    const [status, setStatus] = useState<'idle' | 'search' | 'parked'>('idle');
-    const [orientationMode, setOrientationMode] = useState<'auto' | 'fixed'>('fixed'); // Default to fixed
+    const [status, setStatus] = useState<'idle' | 'search' | 'parked' | 'submitting'>('idle');
+    const [orientationMode, setOrientationMode] = useState<'fixed' | 'recentre' | 'auto'>('fixed');
     const [showHelp, setShowHelp] = useState(false);
     const [vehicleType, setVehicleType] = useState<'bicycle' | 'motorcycle' | 'car'>(() => {
         const saved = localStorage.getItem('parlens_vehicle_type');
@@ -795,8 +804,12 @@ export const LandingPage: React.FC = () => {
                             setShouldRecenter(true);
                             setNeedsRecenter(false);
                         } else {
-                            // Second click: change mode
-                            setOrientationMode(m => m === 'auto' ? 'fixed' : 'auto');
+                            // Cycle: fixed → recentre → auto → fixed
+                            setOrientationMode(m => {
+                                if (m === 'fixed') return 'recentre';
+                                if (m === 'recentre') return 'auto';
+                                return 'fixed';
+                            });
                             setShouldRecenter(true);
                         }
                     }}
@@ -804,12 +817,15 @@ export const LandingPage: React.FC = () => {
                         ? 'bg-orange-500/20 border-orange-500/50 text-orange-500 dark:text-orange-400 animate-pulse'
                         : orientationMode === 'auto'
                             ? 'bg-blue-500/20 border-blue-500/50 text-blue-500 dark:text-blue-400'
-                            : needsRecenter
-                                ? 'bg-white/80 dark:bg-zinc-800/80 border-black/5 dark:border-white/10 text-zinc-400 dark:text-white/40'
-                                : 'bg-white/80 dark:bg-zinc-800/80 border-black/5 dark:border-white/10 text-zinc-600 dark:text-white/70'
+                            : orientationMode === 'recentre'
+                                ? 'bg-green-500/20 border-green-500/50 text-green-500 dark:text-green-400'
+                                : needsRecenter
+                                    ? 'bg-white/80 dark:bg-zinc-800/80 border-black/5 dark:border-white/10 text-zinc-400 dark:text-white/40'
+                                    : 'bg-white/80 dark:bg-zinc-800/80 border-black/5 dark:border-white/10 text-zinc-600 dark:text-white/70'
                         }`}
                 >
-                    {orientationMode === 'auto' ? <Navigation size={20} className="fill-current" /> : <Compass size={20} />}
+                    {orientationMode === 'auto' ? <Navigation size={20} className="fill-current" /> :
+                        orientationMode === 'recentre' ? <MapPin size={20} /> : <Compass size={20} />}
                 </button>
 
                 {/* Route Button - below orientation button */}
@@ -971,6 +987,15 @@ export const LandingPage: React.FC = () => {
                             {vehicleType === 'bicycle' ? '🚲' : vehicleType === 'motorcycle' ? '🏍️' : '🚗'}
                         </span>
                         <span className="text-sm tracking-tight text-white/90">Session Active</span>
+                    </div>
+                </div>
+            )}
+
+            {status === 'submitting' && !isProfileOpen && !isRouteOpen && (
+                <div className="absolute left-1/2 z-[1000] -translate-x-1/2 animate-in slide-in-from-top-6 duration-500" style={{ top: 'max(3rem, calc(env(safe-area-inset-top) + 0.75rem))' }}>
+                    <div className="px-6 py-3 rounded-full bg-blue-500 text-white font-bold shadow-xl flex items-center gap-3">
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        <span className="text-sm tracking-tight text-white/90">Logging session...</span>
                     </div>
                 </div>
             )}

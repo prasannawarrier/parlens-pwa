@@ -8,8 +8,8 @@ import { getCurrencyFromLocation, getCurrencySymbol, getLocalCurrency } from '..
 import { generateSecretKey, finalizeEvent } from 'nostr-tools/pure';
 
 interface FABProps {
-    status: 'idle' | 'search' | 'parked';
-    setStatus: (s: 'idle' | 'search' | 'parked') => void;
+    status: 'idle' | 'search' | 'parked' | 'submitting';
+    setStatus: (s: 'idle' | 'search' | 'parked' | 'submitting') => void;
     location: [number, number];
     vehicleType: 'bicycle' | 'motorcycle' | 'car';
     setOpenSpots: React.Dispatch<React.SetStateAction<any[]>>;
@@ -188,8 +188,9 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
     };
 
     const handleFinishParking = async () => {
-        // Don't change status yet - do it after async work completes
+        // Show submitting state for user feedback
         setShowCostPopup(false);
+        setStatus('submitting');
 
         const lat = parkLocation ? parkLocation[0] : location[0];
         const lon = parkLocation ? parkLocation[1] : location[1];
