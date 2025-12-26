@@ -592,7 +592,8 @@ export const LandingPage: React.FC = () => {
                     {/* History spots (Kind 31417) */}
                     {historySpots.length > 0 && (() => {
                         const filtered = historySpots.filter(spot => {
-                            const type = spot.tags?.find((t: string[]) => t[0] === 'type')?.[1] || 'car';
+                            // Type is stored in encrypted content for privacy, not in tags
+                            const type = spot.decryptedContent?.type || 'car';
                             return type === vehicleType;
                         });
                         const spotsForClustering = filtered.map(s => {
