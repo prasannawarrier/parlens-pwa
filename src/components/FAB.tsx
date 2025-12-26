@@ -94,15 +94,16 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
                                 };
                                 console.log('[Parlens] *** ADDING SPOT TO MAP ***', spot);
                                 setOpenSpots((prev: any[]) => {
-                                    // Do NOT filter out expired spots - keep them cached locally
-                                    // and let the map render distinguish them visually
+                                    // First filter out expired spots
+                                    const now = Math.floor(Date.now() / 1000);
+                                    const active = prev.filter((p: any) => !p.expiresAt || p.expiresAt > now);
 
-                                    if (prev.find((p: any) => p.id === spot.id)) {
+                                    if (active.find((p: any) => p.id === spot.id)) {
                                         // Update existing spot if needed
-                                        return prev;
+                                        return active;
                                     }
-                                    console.log('[Parlens] New spots array length:', prev.length + 1);
-                                    return [...prev, spot];
+                                    console.log('[Parlens] New spots array length:', active.length + 1);
+                                    return [...active, spot];
                                 });
                             } else {
                                 console.log('[Parlens] No location tag found');
@@ -291,8 +292,10 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
             // Calculate hourly rate based on duration and fee (round up to next hour)
             const durationSeconds = endTime - startTime;
             const durationHours = Math.max(Math.ceil(durationSeconds / 3600), 1); // Minimum 1 hour, always round up
+
+
             const hourlyRate = (parseFloat(cost) / durationHours).toFixed(2);
-            const expirationTime = endTime + 60; // Expires in 60 seconds
+            const expirationTime = endTime + 300; // Expires in 5 minutes (300 seconds)
 
             const broadcastEventTemplate = {
                 kind: KINDS.OPEN_SPOT_BROADCAST,
