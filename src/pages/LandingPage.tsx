@@ -248,13 +248,13 @@ const MapController = ({ location, bearing, orientationMode, shouldRecenter, set
         setTimeout(() => map.invalidateSize(), 50);
     }, [orientationMode, map]);
 
-    // Handle rotation smoothly without triggering layout recalculations
+    // Handle rotation smoothly
     useEffect(() => {
         if (orientationMode === 'auto') {
             const mapContainer = map.getContainer();
-            // Use requestAnimationFrame for smoother updates
             requestAnimationFrame(() => {
-                mapContainer.style.transition = 'transform 0.1s ease-out';
+                // Use linear transition for bearing to avoid ease-out stop/start effect
+                mapContainer.style.transition = 'transform 1s linear';
                 mapContainer.style.transformOrigin = 'center center';
                 mapContainer.style.transform = `rotate(${-bearing}deg)`;
                 document.documentElement.style.setProperty('--map-rotation', `${bearing}deg`);
@@ -262,10 +262,12 @@ const MapController = ({ location, bearing, orientationMode, shouldRecenter, set
         }
     }, [bearing, orientationMode, map]);
 
-    // Follow user location in auto mode
+    // Follow user location smoothly in auto mode
     useEffect(() => {
         if (location && orientationMode === 'auto') {
-            map.setView(location, map.getZoom(), { animate: true, duration: 0.3 });
+            // Use panTo for smoother updates instead of setView
+            // Duration matches the bearing update for synchronized movement
+            map.panTo(location, { animate: true, duration: 1.0 });
         }
     }, [location, orientationMode, map]);
 
@@ -387,12 +389,36 @@ export const LandingPage: React.FC = () => {
                 }
             }, 10000);
 
+            // Throttling references
+            let lastLocUpdate = 0;
+            let lastLat = 0;
+            let lastLon = 0;
+
             watchIdRef.current = navigator.geolocation.watchPosition(
                 (pos) => {
                     const { latitude, longitude, heading } = pos.coords;
-                    setLocation([latitude, longitude]);
+                    const now = Date.now();
+
+                    // Throttling logic:
+                    // 1. Calculate distance moved (approximate in meters)
+                    // 1 deg lat = ~111km = 111000m
+                    const dLat = Math.abs(latitude - lastLat) * 111000;
+                    const dLon = Math.abs(longitude - lastLon) * 111000 * Math.cos(latitude * (Math.PI / 180));
+                    const dist = Math.sqrt(dLat * dLat + dLon * dLon);
+
+                    // 2. Only update if moved > 2 meters OR > 5 seconds passed (to catch drift/stops)
+                    // limiting updates reduces map "shaking" and battery usage
+                    if (dist > 2 || (now - lastLocUpdate) > 5000) {
+                        setLocation([latitude, longitude]);
+                        lastLat = latitude;
+                        lastLon = longitude;
+                        lastLocUpdate = now;
+                    }
+
                     setLocationError(null); // Clear any error
-                    if (heading !== null) {
+
+                    // Only update bearing if moving to avoid "spinning" when stopped
+                    if (heading !== null && !isNaN(heading) && pos.coords.speed && pos.coords.speed > 1) {
                         setBearing(heading);
                     }
                 },
