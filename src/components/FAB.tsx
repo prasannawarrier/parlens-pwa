@@ -188,7 +188,7 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
     };
 
     const handleFinishParking = async () => {
-        setStatus('idle');
+        // Don't change status yet - do it after async work completes
         setShowCostPopup(false);
 
         const lat = parkLocation ? parkLocation[0] : location[0];
@@ -297,9 +297,14 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
             setSessionStart(null);
             setParkLocation(null);
 
+            // Now safe to change status after all async work is done
+            setStatus('idle');
+
         } catch (e) {
             console.error('Persistence error:', e);
             alert('Could not save to Nostr. Check relay connections.');
+            // Still reset to idle even on error
+            setStatus('idle');
         }
     };
 
