@@ -42,24 +42,14 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
             const now = Math.floor(Date.now() / 1000);
             console.log('[Parlens] Searching for open spots - Kind:', KINDS.OPEN_SPOT_BROADCAST, 'Geohashes:', geohashes);
 
-            // Use querySync which was proven to work in testing
-            const searchSpots = async () => {
-                try {
-                    console.log('[Parlens] Starting querySync...');
-                    const events = await pool.querySync(
-                        DEFAULT_RELAYS,
-                        { kinds: [KINDS.OPEN_SPOT_BROADCAST], '#g': geohashes, since: now - 300 } as any
-                    );
-                    console.log('[Parlens] querySync returned', events.length, 'events');
+            // Use subscribeMany for real-time updates
+            console.log('[Parlens] Subscribing to spots - Kind:', KINDS.OPEN_SPOT_BROADCAST, 'Geohashes:', geohashes);
 
-
-
-                    for (const event of events) {
-                        console.log('[Parlens] Processing event - ID:', event.id.substring(0, 16), 'Kind:', event.kind);
-
-                        // Removed early expiration check to allow showing expired spots as grey markers
-                        // The UI layer (LandingPage.tsx) handles the visualization based on expiration time
-
+            const sub = pool.subscribeMany(
+                DEFAULT_RELAYS,
+                [{ kinds: [KINDS.OPEN_SPOT_BROADCAST], '#g': geohashes, since: now - 300 }] as any,
+                {
+                    onevent(event) {
                         try {
                             const tags = event.tags;
                             const locTag = tags.find(t => t[0] === 'location');
@@ -67,19 +57,12 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
                             const currencyTag = tags.find(t => t[0] === 'currency');
                             const typeTag = tags.find(t => t[0] === 'type');
 
-                            console.log('[Parlens] Tags - location:', locTag?.[1], 'type:', typeTag?.[1], 'price:', priceTag?.[1]);
-
                             if (locTag) {
                                 const [lat, lon] = locTag[1].split(',').map(Number);
                                 const spotType = typeTag ? typeTag[1] : 'car';
 
-                                // Filter spots by vehicle type - only show matching spots
-                                if (spotType !== vehicleType) {
-                                    console.log('[Parlens] Skipping spot - type mismatch:', spotType, 'vs', vehicleType);
-                                    continue;
-                                }
+                                if (spotType !== vehicleType) return;
 
-                                // Get expiration from event tags
                                 const expTag = event.tags.find(t => t[0] === 'expiration');
                                 const expiresAt = expTag ? parseInt(expTag[1]) : (Math.floor(Date.now() / 1000) + 300);
 
@@ -92,43 +75,27 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
                                     type: spotType,
                                     expiresAt
                                 };
-                                console.log('[Parlens] *** ADDING SPOT TO MAP ***', spot);
+
                                 setOpenSpots((prev: any[]) => {
-                                    // First filter out expired spots
                                     const now = Math.floor(Date.now() / 1000);
                                     const active = prev.filter((p: any) => !p.expiresAt || p.expiresAt > now);
-
-                                    if (active.find((p: any) => p.id === spot.id)) {
-                                        // Update existing spot if needed
-                                        return active;
-                                    }
-                                    console.log('[Parlens] New spots array length:', active.length + 1);
+                                    if (active.find((p: any) => p.id === spot.id)) return active;
+                                    console.log('[Parlens] New spot received via SUB:', spot.id);
                                     return [...active, spot];
                                 });
-                            } else {
-                                console.log('[Parlens] No location tag found');
                             }
                         } catch (e) {
                             console.warn('[Parlens] Error parsing spot:', e);
                         }
+                    },
+                    oneose() {
+                        console.log('[Parlens] EOSE received for spots');
                     }
-                } catch (e) {
-                    console.error('[Parlens] querySync error:', e);
                 }
-            };
-
-            // Run immediately
-            searchSpots();
-
-            // Also refresh every 30 seconds while in search mode
-            const intervalId = setInterval(() => {
-                console.log('[Parlens] Refreshing spot search...');
-                searchSpots();
-            }, 30000);
+            );
 
             return () => {
-                clearInterval(intervalId);
-                // Don't clear spots - let them persist until expiration
+                sub.close();
             };
         }
     }, [status, location, vehicleType]);
@@ -321,7 +288,10 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
             console.log('[Parlens] Location:', `${lat},${lon}`);
             console.log('[Parlens] Event ID:', signedBroadcast.id);
             console.log('[Parlens] Pubkey:', signedBroadcast.pubkey.substring(0, 20) + '...');
-            pool.publish(DEFAULT_RELAYS, signedBroadcast);
+
+            const broadcastPubs = pool.publish(DEFAULT_RELAYS, signedBroadcast);
+            await Promise.allSettled(broadcastPubs);
+            console.log('[Parlens] Broadcast published to relays');
 
             // Reset session tracking
             setSessionStart(null);
