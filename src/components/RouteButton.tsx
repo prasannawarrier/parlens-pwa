@@ -710,7 +710,7 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                                                     </span>
                                                     <button
                                                         onClick={() => startEditingWaypoint(waypoint)}
-                                                        className="p-2 rounded-xl text-zinc-400 dark:text-white/40 hover:text-blue-500 hover:bg-blue-500/10 transition-colors"
+                                                        className="p-2 rounded-xl text-zinc-400 dark:text-white/40 active:scale-95 transition-transform"
                                                     >
                                                         <Pencil size={14} />
                                                     </button>
