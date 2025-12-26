@@ -212,8 +212,7 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
                 finished_at: endTime
             };
 
-            // Set cool-off timestamp
-            localStorage.setItem('parlens_last_parked_at', Date.now().toString());
+            // Cool-off will be set only after confirmation of successful publish
 
             const privkeyHex = localStorage.getItem('parlens_privkey');
             const seckey = privkeyHex ? new Uint8Array(privkeyHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16))) : undefined;
@@ -252,6 +251,14 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
 
             const successCount = results.filter(r => r.status === 'fulfilled').length;
             console.log(`[Parlens] Log published to ${successCount}/${DEFAULT_RELAYS.length} relays`);
+
+            if (successCount > 0) {
+                // Set cool-off only on success
+                localStorage.setItem('parlens_last_parked_at', Date.now().toString());
+            } else {
+                alert('Could not save to Nostr. Check relay connections.');
+                // Don't set cool-off so user can try again immediately
+            }
 
             // Broadcast open spot (Kind 31714 - Addressable) to help other users
             // Use anonymous one-time keypair for privacy

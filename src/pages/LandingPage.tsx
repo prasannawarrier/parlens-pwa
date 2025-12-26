@@ -176,17 +176,34 @@ const DropPinHandler = ({ enabled, onDropPin }: { enabled: boolean, onDropPin: (
 };
 
 // Controller to handle map centering and rotation
-const MapController = ({ location, bearing, cumulativeRotation, orientationMode, shouldRecenter, setShouldRecenter, routeBounds, setRouteBounds }: {
+const MapController = ({ location, bearing, cumulativeRotation, orientationMode, setOrientationMode, shouldRecenter, setShouldRecenter, setNeedsRecenter, routeBounds, setRouteBounds }: {
     location: [number, number],
     bearing: number,
     cumulativeRotation: number,
     orientationMode: 'fixed' | 'recentre' | 'auto',
+    setOrientationMode: (m: 'fixed' | 'recentre' | 'auto') => void,
     shouldRecenter: boolean,
     setShouldRecenter: (v: boolean) => void,
+    setNeedsRecenter: (v: boolean) => void,
     routeBounds: L.LatLngBounds | null,
     setRouteBounds: (v: L.LatLngBounds | null) => void
 }) => {
     const map = useMap();
+    const isInteracting = useRef(false);
+
+    // Handle user interactions - break out of auto/recentre modes on drag
+    useMapEvents({
+        dragstart: () => {
+            isInteracting.current = true;
+            if (orientationMode !== 'fixed') {
+                setOrientationMode('fixed');
+            }
+            setNeedsRecenter(true);
+        },
+        dragend: () => {
+            isInteracting.current = false;
+        }
+    });
 
     // Force map to recalculate its size on mount (fixes iOS viewport issues)
     useEffect(() => {
@@ -272,7 +289,8 @@ const MapController = ({ location, bearing, cumulativeRotation, orientationMode,
     }, [cumulativeRotation, bearing, orientationMode, map]);
 
     useEffect(() => {
-        if (location && (orientationMode === 'auto' || orientationMode === 'recentre')) {
+        // Only update map if user is NOT dragging
+        if (!isInteracting.current && location && (orientationMode === 'auto' || orientationMode === 'recentre')) {
             // Both auto and recentre modes follow the user
             // Use different zoom levels: auto=18 (closer), recentre/fixed=17
             const targetZoom = orientationMode === 'auto' ? 18 : 17;
@@ -280,13 +298,28 @@ const MapController = ({ location, bearing, cumulativeRotation, orientationMode,
 
             if (Math.abs(currentZoom - targetZoom) > 0.5) {
                 // Zoom changed, use flyTo for smooth transition
-                map.flyTo(location, targetZoom, { animate: true, duration: 0.5 });
+                // Increased duration slightly for smoother feel
+                map.flyTo(location, targetZoom, { animate: true, duration: 1.5 });
             } else {
                 // Just pan for normal following
                 map.panTo(location, { animate: true, duration: 0.3 });
             }
         }
     }, [location, orientationMode, map]);
+
+    // Smooth transition back to zoom 17 when switching to fixed mode
+    useEffect(() => {
+        if (orientationMode === 'fixed' && shouldRecenter && location) {
+            const currentZoom = map.getZoom();
+            if (Math.abs(currentZoom - 17) > 0.5) {
+                map.flyTo(location, 17, { animate: true, duration: 1.5 });
+            } else {
+                map.panTo(location, { animate: true, duration: 0.5 });
+            }
+            // We handled the recentering, but let the parent know we're done
+            // Note: setShouldRecenter(false) happens in the other useEffect, so we don't duplicate logic
+        }
+    }, [orientationMode, shouldRecenter, location, map]);
 
     // Handle orientation/resize changes to prevent black bars
     useEffect(() => {
@@ -733,8 +766,10 @@ export const LandingPage: React.FC = () => {
                         bearing={bearing}
                         cumulativeRotation={cumulativeRotation}
                         orientationMode={orientationMode}
+                        setOrientationMode={setOrientationMode}
                         shouldRecenter={shouldRecenter}
                         setShouldRecenter={setShouldRecenter}
+                        setNeedsRecenter={setNeedsRecenter}
                         routeBounds={routeBounds}
                         setRouteBounds={setRouteBounds}
                     />
