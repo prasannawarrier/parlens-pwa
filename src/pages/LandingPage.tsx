@@ -190,8 +190,9 @@ const MapController = ({ location, bearing, cumulativeRotation, orientationMode,
 }) => {
     const map = useMap();
     const isInteracting = useRef(false);
+    const isProgrammaticZoom = useRef(false);
 
-    // Handle user interactions - break out of auto/recentre modes on drag
+    // Handle user interactions - break out of auto/recentre modes on manual interaction
     useMapEvents({
         dragstart: () => {
             isInteracting.current = true;
@@ -200,8 +201,27 @@ const MapController = ({ location, bearing, cumulativeRotation, orientationMode,
             }
             setNeedsRecenter(true);
         },
+        zoomstart: () => {
+            // Only break out if this is a USER zoom, not our programmatic flyTo
+            if (!isProgrammaticZoom.current) {
+                isInteracting.current = true;
+                if (orientationMode !== 'fixed') {
+                    setOrientationMode('fixed');
+                }
+                setNeedsRecenter(true);
+            }
+        },
         dragend: () => {
             isInteracting.current = false;
+        },
+        zoomend: () => {
+            isInteracting.current = false;
+            // Reset programmatic flag after zoom completes
+            isProgrammaticZoom.current = false;
+        },
+        moveend: () => {
+            // Reset programmatic flag after move completes
+            isProgrammaticZoom.current = false;
         }
     });
 
@@ -294,6 +314,7 @@ const MapController = ({ location, bearing, cumulativeRotation, orientationMode,
             const currentZoom = map.getZoom();
             // Only flyTo if we are significantly off target, to set the "standard"
             if (Math.abs(currentZoom - 17) > 0.5) {
+                isProgrammaticZoom.current = true;
                 map.flyTo(location, 17, { animate: true, duration: 1.5 });
             }
         }
@@ -304,6 +325,7 @@ const MapController = ({ location, bearing, cumulativeRotation, orientationMode,
         // Only update map if user is NOT dragging
         if (!isInteracting.current && location && (orientationMode === 'auto' || orientationMode === 'recentre')) {
             // Just pan to follow, assume zoom is handled by user or initial mode set
+            isProgrammaticZoom.current = true;
             map.panTo(location, { animate: true, duration: 0.3 });
         }
     }, [location, orientationMode, map]);
@@ -313,8 +335,10 @@ const MapController = ({ location, bearing, cumulativeRotation, orientationMode,
         if (orientationMode === 'fixed' && shouldRecenter && location) {
             const currentZoom = map.getZoom();
             if (Math.abs(currentZoom - 17) > 0.5) {
+                isProgrammaticZoom.current = true;
                 map.flyTo(location, 17, { animate: true, duration: 1.5 });
             } else {
+                isProgrammaticZoom.current = true;
                 map.panTo(location, { animate: true, duration: 0.5 });
             }
             // We handled the recentering, but let the parent know we're done
