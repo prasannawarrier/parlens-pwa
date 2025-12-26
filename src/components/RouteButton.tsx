@@ -671,7 +671,7 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
 
                             {waypoints.length === 0 ? (
                                 <div className="p-8 text-center text-zinc-400 dark:text-white/30 text-sm">
-                                    No waypoints added yet.<br />Search for places above to add them.
+                                    No waypoints added yet.
                                 </div>
                             ) : (
                                 <div className="space-y-2">
@@ -718,7 +718,7 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                                             )}
                                             <button
                                                 onClick={() => removeWaypoint(waypoint.id)}
-                                                className="p-2 rounded-xl text-zinc-400 dark:text-white/40 hover:text-red-500 hover:bg-red-500/10 transition-colors"
+                                                className="p-2 rounded-xl text-zinc-400 dark:text-white/40 active:scale-95 transition-transform"
                                             >
                                                 <Trash2 size={16} />
                                             </button>
@@ -814,7 +814,7 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                                 </button>
 
                                 {showSavedRoutes && (
-                                    <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                                    <div className="space-y-2">
                                         {isLoadingSaved ? (
                                             <div className="text-center text-zinc-400 dark:text-white/40 text-sm py-4">
                                                 Loading...
