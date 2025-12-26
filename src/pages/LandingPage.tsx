@@ -258,8 +258,8 @@ const MapController = ({ location, bearing, orientationMode, shouldRecenter, set
         if (orientationMode === 'auto') {
             const mapContainer = map.getContainer();
             requestAnimationFrame(() => {
-                // Use linear transition for bearing to avoid ease-out stop/start effect
-                mapContainer.style.transition = 'transform 1s linear';
+                // Use faster transition for responsive updates
+                mapContainer.style.transition = 'transform 0.3s linear';
                 mapContainer.style.transformOrigin = 'center center';
                 mapContainer.style.transform = `rotate(${-bearing}deg)`;
                 document.documentElement.style.setProperty('--map-rotation', `${bearing}deg`);
@@ -267,12 +267,11 @@ const MapController = ({ location, bearing, orientationMode, shouldRecenter, set
         }
     }, [bearing, orientationMode, map]);
 
-    // Follow user location smoothly in auto mode
     useEffect(() => {
         if (location && orientationMode === 'auto') {
             // Use panTo for smoother updates instead of setView
-            // Duration matches the bearing update for synchronized movement
-            map.panTo(location, { animate: true, duration: 1.0 });
+            // Shorter duration to avoid animation queuing at high speed updates
+            map.panTo(location, { animate: true, duration: 0.3 });
         }
     }, [location, orientationMode, map]);
 
@@ -403,7 +402,7 @@ export const LandingPage: React.FC = () => {
 
             watchIdRef.current = navigator.geolocation.watchPosition(
                 (pos) => {
-                    const { latitude, longitude, heading } = pos.coords;
+                    const { latitude, longitude, heading, speed } = pos.coords;
                     const now = Date.now();
 
                     // Throttling logic:
@@ -413,9 +412,15 @@ export const LandingPage: React.FC = () => {
                     const dLon = Math.abs(longitude - lastLon) * 111000 * Math.cos(latitude * (Math.PI / 180));
                     const dist = Math.sqrt(dLat * dLat + dLon * dLon);
 
-                    // 2. Only update if moved > 2 meters OR > 5 seconds passed (to catch drift/stops)
-                    // limiting updates reduces map "shaking" and battery usage
-                    if (dist > 2 || (now - lastLocUpdate) > 5000) {
+                    // 2. Speed-adaptive throttling:
+                    // - At low speed (<5 m/s / 18 km/h): update if moved > 3m
+                    // - At high speed (>10 m/s / 36 km/h): update if moved > 8m
+                    // This reduces jitter at high speed while staying responsive at low speed
+                    const currentSpeed = speed || 0;
+                    const distThreshold = currentSpeed > 10 ? 8 : (currentSpeed > 5 ? 5 : 3);
+                    const timeThreshold = currentSpeed > 10 ? 2000 : 3000; // Faster updates at speed
+
+                    if (dist > distThreshold || (now - lastLocUpdate) > timeThreshold) {
                         setLocation([latitude, longitude]);
                         lastLat = latitude;
                         lastLon = longitude;
@@ -441,8 +446,8 @@ export const LandingPage: React.FC = () => {
                 },
                 {
                     enableHighAccuracy: true,
-                    maximumAge: 0, // Request live data without caching
-                    timeout: 15000 // Increased timeout
+                    maximumAge: 1000, // Allow 1s cached positions to reduce battery drain
+                    timeout: 15000
                 }
             );
 
