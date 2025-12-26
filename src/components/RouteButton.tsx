@@ -75,18 +75,17 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
     const savedWaypointMatches = React.useMemo(() => {
         if (!searchQuery || searchQuery.length < 2) return [];
         const query = searchQuery.toLowerCase();
-        const matches: Array<{ name: string; lat: number; lon: number; fromRoute: string }> = [];
+        const matches: Array<{ name: string; lat: number; lon: number }> = [];
 
         for (const route of savedRoutes) {
             for (const wp of route.decryptedContent.waypoints) {
                 if (wp.name.toLowerCase().includes(query)) {
-                    // Avoid duplicates
-                    if (!matches.find(m => m.lat === wp.lat && m.lon === wp.lon)) {
+                    // Avoid duplicates by name (case-insensitive) to show unique waypoints
+                    if (!matches.find(m => m.name.toLowerCase() === wp.name.toLowerCase())) {
                         matches.push({
                             name: wp.name,
                             lat: wp.lat,
-                            lon: wp.lon,
-                            fromRoute: route.decryptedContent.name
+                            lon: wp.lon
                         });
                     }
                 }
@@ -599,14 +598,9 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                                             className="w-full p-3 flex items-center gap-3 hover:bg-green-100 dark:hover:bg-green-500/10 transition-colors text-left border-b border-green-500/10 last:border-0"
                                         >
                                             <MapPin size={16} className="text-green-600 dark:text-green-400 shrink-0" />
-                                            <div className="flex-1 min-w-0">
-                                                <span className="text-sm text-zinc-700 dark:text-white/80 truncate block">
-                                                    {match.name}
-                                                </span>
-                                                <span className="text-xs text-green-600/70 dark:text-green-400/50 truncate block">
-                                                    from {match.fromRoute}
-                                                </span>
-                                            </div>
+                                            <span className="flex-1 text-sm text-zinc-700 dark:text-white/80 truncate">
+                                                {match.name}
+                                            </span>
                                         </button>
                                     ))}
                                 </div>
