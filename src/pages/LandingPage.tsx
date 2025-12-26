@@ -8,6 +8,7 @@ import { ProfileButton } from '../components/ProfileButton';
 import { RouteButton } from '../components/RouteButton';
 import { getCurrencySymbol } from '../lib/currency';
 import { clusterSpots, isCluster, type Cluster, type SpotBase } from '../lib/clustering';
+import { LocationSmoother, PositionAnimator } from '../lib/locationSmoothing';
 
 // Fix Leaflet marker icon issue
 import icon from 'leaflet/dist/images/marker-icon.png';
@@ -385,7 +386,18 @@ export const LandingPage: React.FC = () => {
 
     const watchIdRef = useRef<number | null>(null);
 
-    // High accuracy location tracking
+    // Location smoothing refs (persist across re-renders)
+    const locationSmootherRef = useRef<LocationSmoother>(new LocationSmoother());
+    const positionAnimatorRef = useRef<PositionAnimator>(new PositionAnimator());
+
+    // Set up position animator callback
+    useEffect(() => {
+        positionAnimatorRef.current.setUpdateCallback((lat, lon) => {
+            setLocation([lat, lon]);
+        });
+    }, []);
+
+    // High accuracy location tracking with Kalman smoothing
     useEffect(() => {
         if ("geolocation" in navigator) {
             // Set a timeout to show error message if location takes too long
@@ -397,41 +409,48 @@ export const LandingPage: React.FC = () => {
 
             // Throttling references
             let lastLocUpdate = 0;
-            let lastLat = 0;
-            let lastLon = 0;
+            let lastRawLat = 0;
+            let lastRawLon = 0;
 
             watchIdRef.current = navigator.geolocation.watchPosition(
                 (pos) => {
-                    const { latitude, longitude, heading, speed } = pos.coords;
+                    const { latitude, longitude, heading, speed, accuracy } = pos.coords;
                     const now = Date.now();
+                    const currentSpeed = speed || 0;
 
-                    // Throttling logic:
-                    // 1. Calculate distance moved (approximate in meters)
-                    // 1 deg lat = ~111km = 111000m
-                    const dLat = Math.abs(latitude - lastLat) * 111000;
-                    const dLon = Math.abs(longitude - lastLon) * 111000 * Math.cos(latitude * (Math.PI / 180));
+                    // Apply Kalman filter to smooth GPS position
+                    const [smoothedLat, smoothedLon] = locationSmootherRef.current.smoothLocation(latitude, longitude);
+
+                    // Calculate distance moved (using raw values for threshold check)
+                    const dLat = Math.abs(latitude - lastRawLat) * 111000;
+                    const dLon = Math.abs(longitude - lastRawLon) * 111000 * Math.cos(latitude * (Math.PI / 180));
                     const dist = Math.sqrt(dLat * dLat + dLon * dLon);
 
-                    // 2. Speed-adaptive throttling:
-                    // - At low speed (<5 m/s / 18 km/h): update if moved > 3m
-                    // - At high speed (>10 m/s / 36 km/h): update if moved > 8m
-                    // This reduces jitter at high speed while staying responsive at low speed
-                    const currentSpeed = speed || 0;
-                    const distThreshold = currentSpeed > 10 ? 8 : (currentSpeed > 5 ? 5 : 3);
-                    const timeThreshold = currentSpeed > 10 ? 2000 : 3000; // Faster updates at speed
+                    // Speed-adaptive throttling with accuracy consideration
+                    // Higher accuracy = trust smaller movements, lower accuracy = require bigger jumps
+                    const accuracyFactor = Math.min(accuracy || 10, 30) / 10; // 1-3x multiplier
+                    const baseThreshold = currentSpeed > 10 ? 6 : (currentSpeed > 5 ? 4 : 2);
+                    const distThreshold = baseThreshold * accuracyFactor;
+                    const timeThreshold = currentSpeed > 10 ? 1500 : 2500;
 
                     if (dist > distThreshold || (now - lastLocUpdate) > timeThreshold) {
-                        setLocation([latitude, longitude]);
-                        lastLat = latitude;
-                        lastLon = longitude;
+                        // Use LERP animation for smooth position transitions
+                        const animDuration = currentSpeed > 10 ? 200 : 300;
+                        positionAnimatorRef.current.animateTo(smoothedLat, smoothedLon, animDuration);
+
+                        lastRawLat = latitude;
+                        lastRawLon = longitude;
                         lastLocUpdate = now;
                     }
 
-                    setLocationError(null); // Clear any error
+                    setLocationError(null);
 
-                    // Only update bearing if moving to avoid "spinning" when stopped
-                    if (heading !== null && !isNaN(heading) && pos.coords.speed && pos.coords.speed > 1) {
-                        setBearing(heading);
+                    // Smooth bearing update with speed gate
+                    if (heading !== null && !isNaN(heading)) {
+                        const smoothedBearing = locationSmootherRef.current.smoothBearing(heading, currentSpeed);
+                        if (smoothedBearing !== null) {
+                            setBearing(smoothedBearing);
+                        }
                     }
                 },
                 (err) => {
@@ -446,7 +465,7 @@ export const LandingPage: React.FC = () => {
                 },
                 {
                     enableHighAccuracy: true,
-                    maximumAge: 1000, // Allow 1s cached positions to reduce battery drain
+                    maximumAge: 500, // Shorter cache for smoother updates
                     timeout: 15000
                 }
             );
@@ -454,6 +473,7 @@ export const LandingPage: React.FC = () => {
             return () => {
                 clearTimeout(timeoutId);
                 if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
+                positionAnimatorRef.current.stop();
             };
         } else {
             setLocationError('Geolocation is not supported by this browser.');
