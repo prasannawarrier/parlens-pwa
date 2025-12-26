@@ -102,16 +102,15 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
                                 };
                                 console.log('[Parlens] *** ADDING SPOT TO MAP ***', spot);
                                 setOpenSpots((prev: any[]) => {
-                                    // First filter out expired spots
-                                    const now = Math.floor(Date.now() / 1000);
-                                    const active = prev.filter((p: any) => !p.expiresAt || p.expiresAt > now);
+                                    // Do NOT filter out expired spots - keep them cached locally
+                                    // and let the map render distinguish them visually
 
-                                    if (active.find((p: any) => p.id === spot.id)) {
-                                        console.log('[Parlens] Spot already exists, skipping');
-                                        return active;
+                                    if (prev.find((p: any) => p.id === spot.id)) {
+                                        // Update existing spot if needed
+                                        return prev;
                                     }
-                                    console.log('[Parlens] New spots array length:', active.length + 1);
-                                    return [...active, spot];
+                                    console.log('[Parlens] New spots array length:', prev.length + 1);
+                                    return [...prev, spot];
                                 });
                             } else {
                                 console.log('[Parlens] No location tag found');

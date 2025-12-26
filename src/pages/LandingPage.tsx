@@ -58,15 +58,24 @@ const ActiveSessionMarker = ({ location, vehicleType, bearing, orientationMode }
     return <Marker position={location} icon={customIcon} />;
 };
 
-// Marker for Open Spots (Kind 21011) - shows 🅿️ - Memoized to prevent re-renders
+// Marker for Open Spots (Kind 31714) - shows 🅿️ - Memoized to prevent re-renders
 const SpotMarker = memo(({ spot, bearing, orientationMode }: { spot: any, bearing: number, orientationMode: 'auto' | 'fixed' }) => {
     const rotation = orientationMode === 'auto' ? bearing : 0;
+
+    // Check freshness - expired if older than 60s from creation/updates
+    // We use expiresAt which is set to created_at + 60s
+    const now = Math.floor(Date.now() / 1000);
+    const isExpired = spot.expiresAt && spot.expiresAt < now;
+
+    // Fresh = Blue (#007AFF), Expired = Grey (#8E8E93)
+    const bgColor = isExpired ? '#8E8E93' : '#007AFF';
+
     const content = `
         <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 60px; transform: rotate(${rotation}deg);">
-             <div style="font-size: 32px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));">
+             <div style="font-size: 32px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3)); ${isExpired ? 'opacity: 0.6; grayscale: 100%;' : ''}">
                 🅿️
              </div>
-             <div style="background: #34C759; border-radius: 12px; padding: 2px 8px; font-weight: bold; font-size: 11px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); transform: translateY(-5px); white-space: nowrap; color: white;">
+             <div style="background: ${bgColor}; border-radius: 12px; padding: 2px 8px; font-weight: bold; font-size: 11px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); transform: translateY(-5px); white-space: nowrap; color: white;">
                 ${spot.price > 0 ? `${spot.currency === 'USD' ? '$' : spot.currency}${spot.price.toFixed(2)}/hr` : 'Free'}
              </div>
         </div>
@@ -112,7 +121,15 @@ const HistoryMarker = ({ spot, bearing, orientationMode }: { spot: any, bearing:
 // Cluster marker for grouped spots
 const ClusterMarker = ({ cluster, type, bearing, orientationMode }: { cluster: Cluster<SpotBase>, type: 'open' | 'history', bearing: number, orientationMode: 'auto' | 'fixed' }) => {
     const emoji = type === 'open' ? '🅿️' : '🅟';
-    const bgColor = type === 'open' ? '#34C759' : '#8E8E93';
+
+    // Determine color based on freshness of spots in cluster
+    let bgColor = '#8E8E93'; // Default Grey
+    if (type === 'open') {
+        // Simplification: Clusters of open spots are Blue (#007AFF) to indicate activity in the area
+        // We'll optimistically assume fresh if we can't check deep
+        bgColor = '#007AFF';
+    }
+
     const rotation = orientationMode === 'auto' ? bearing : 0;
     const priceRange = cluster.minPrice === cluster.maxPrice
         ? (cluster.minPrice > 0 ? `${getCurrencySymbol(cluster.currency)}${cluster.minPrice}` : 'Free')
@@ -341,18 +358,19 @@ export const LandingPage: React.FC = () => {
         }
     };
 
-    // Auto-expire old spots every 10 seconds
+    // Auto-expire OLD spots (older than 15 minutes instead of 10s) to keep memory clean
+    // But keep "expired" spots visible on map for a while as specifically requested
     useEffect(() => {
         const interval = setInterval(() => {
             const now = Math.floor(Date.now() / 1000);
             setOpenSpots(prev => {
-                const filtered = prev.filter(spot => !spot.expiresAt || spot.expiresAt > now);
-                if (filtered.length !== prev.length) {
-                    console.log('[Parlens] Expired', prev.length - filtered.length, 'spots');
-                }
+                // Keep spots for 15 minutes after expiration so users can see history
+                // (expiration is retention + 60s, so this keeps them long enough)
+                const retentionLimit = now - (15 * 60);
+                const filtered = prev.filter(spot => !spot.expiresAt || spot.expiresAt > retentionLimit);
                 return filtered.length !== prev.length ? filtered : prev;
             });
-        }, 10000);
+        }, 30000);
         return () => clearInterval(interval);
     }, []);
 
@@ -881,6 +899,10 @@ export const LandingPage: React.FC = () => {
                             <p>
                                 <strong className="text-zinc-900 dark:text-white block mb-1">3. Search for spots</strong>
                                 Click the main button once to see open spots reported by others.
+                                <ul className="mt-2 space-y-1 list-disc pl-4 text-xs text-zinc-500 dark:text-white/60">
+                                    <li><span className="text-[#007AFF] font-bold">Blue</span> tags: Fresh spots (less than 1 min ago)</li>
+                                    <li><span className="text-[#8E8E93] font-bold">Grey</span> tags: Expired spots (older history)</li>
+                                </ul>
                             </p>
 
                             <p>
