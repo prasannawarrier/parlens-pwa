@@ -176,8 +176,8 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
 
                         <div className="space-y-4">
                             <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-white/20 ml-2">Keys</h4>
-                            <div className="space-y-0.5 rounded-[2rem] overflow-hidden bg-zinc-50 dark:bg-white/[0.03] border border-black/5 dark:border-white/5">
-                                <div className="p-5 flex items-center justify-between hover:bg-black/5 dark:hover:bg-white/5 transition-colors cursor-pointer" onClick={() => {
+                            <div className="space-y-0.5 rounded-[2rem] bg-zinc-50 dark:bg-white/[0.03] border border-black/5 dark:border-white/5">
+                                <div className="p-5 flex items-center justify-between hover:bg-black/5 dark:hover:bg-white/5 transition-colors cursor-pointer rounded-t-[2rem] last:rounded-b-[2rem]" onClick={() => {
                                     navigator.clipboard.writeText(profile?.npub);
                                     alert('Copied to clipboard');
                                 }}>
@@ -192,7 +192,7 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                                         <div className="h-[1px] bg-black/5 dark:bg-white/5 mx-4" />
                                         <div
                                             onClick={handleBackupKey}
-                                            className="flex items-center justify-between p-4 cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 transition-colors active:bg-black/10 dark:active:bg-white/10"
+                                            className="flex items-center justify-between p-4 cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 transition-colors active:bg-black/10 dark:active:bg-white/10 rounded-b-[2rem]"
                                         >
                                             <div className="flex items-center gap-3">
                                                 <div className="p-2.5 rounded-xl bg-red-500/10 dark:bg-red-500/20 text-red-500"><Shield size={20} /></div>

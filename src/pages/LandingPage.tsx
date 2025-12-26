@@ -799,11 +799,11 @@ export const LandingPage: React.FC = () => {
                         <div className="space-y-3">
                             <h3 className="text-center font-bold text-zinc-600 dark:text-white/90">Add to your homescreen</h3>
                             {/* Android */}
-                            <div className="rounded-2xl bg-zinc-100 dark:bg-white/5 overflow-hidden">
+                            <div className="rounded-2xl bg-zinc-100 dark:bg-white/5">
                                 <button onClick={() => {
                                     const el = document.getElementById('android-guide');
                                     el?.classList.toggle('hidden');
-                                }} className="w-full flex items-center justify-between p-4 font-bold text-sm text-left hover:bg-zinc-200 dark:hover:bg-white/5 text-zinc-800 dark:text-zinc-200 transition-colors" style={{ WebkitTapHighlightColor: 'transparent' }}>
+                                }} className="w-full flex items-center justify-between p-4 font-bold text-sm text-left hover:bg-zinc-200 dark:hover:bg-white/5 text-zinc-800 dark:text-zinc-200 transition-colors rounded-2xl" style={{ WebkitTapHighlightColor: 'transparent' }}>
                                     <span>Using Browser Menu (Android)</span>
                                     <ChevronDown size={16} className="text-zinc-400 dark:text-white/50" />
                                 </button>
@@ -823,11 +823,11 @@ export const LandingPage: React.FC = () => {
                             </div>
 
                             {/* iOS */}
-                            <div className="rounded-2xl bg-zinc-100 dark:bg-white/5 overflow-hidden">
+                            <div className="rounded-2xl bg-zinc-100 dark:bg-white/5">
                                 <button onClick={() => {
                                     const el = document.getElementById('ios-guide');
                                     el?.classList.toggle('hidden');
-                                }} className="w-full flex items-center justify-between p-4 font-bold text-sm text-left hover:bg-zinc-200 dark:hover:bg-white/5 text-zinc-800 dark:text-zinc-200 transition-colors" style={{ WebkitTapHighlightColor: 'transparent' }}>
+                                }} className="w-full flex items-center justify-between p-4 font-bold text-sm text-left hover:bg-zinc-200 dark:hover:bg-white/5 text-zinc-800 dark:text-zinc-200 transition-colors rounded-2xl" style={{ WebkitTapHighlightColor: 'transparent' }}>
                                     <span>Using Share Button (iOS)</span>
                                     <ChevronDown size={16} className="text-zinc-400 dark:text-white/50" />
                                 </button>
