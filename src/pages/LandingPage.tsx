@@ -529,6 +529,9 @@ export const LandingPage: React.FC = () => {
                 lastBearingValue = newBearing;
                 lastBearingUpdate = now;
                 setBearing(newBearing);
+                // Also update cumulative rotation for smooth CSS transform
+                const cumRotation = bearingAnimatorRef.current.setBearing(newBearing);
+                setCumulativeRotation(cumRotation);
             }
         };
 
