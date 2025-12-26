@@ -52,21 +52,13 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
                     );
                     console.log('[Parlens] querySync returned', events.length, 'events');
 
-                    const currentTime = Math.floor(Date.now() / 1000);
+
 
                     for (const event of events) {
                         console.log('[Parlens] Processing event - ID:', event.id.substring(0, 16), 'Kind:', event.kind);
 
-                        // Check expiration tag
-                        const expirationTag = event.tags.find(t => t[0] === 'expiration');
-                        if (expirationTag) {
-                            const expTime = parseInt(expirationTag[1]);
-                            console.log('[Parlens] Expiration check:', expTime, 'vs current:', currentTime, 'expired:', expTime < currentTime);
-                            if (expTime < currentTime) {
-                                console.log('[Parlens] Skipping expired spot');
-                                continue;
-                            }
-                        }
+                        // Removed early expiration check to allow showing expired spots as grey markers
+                        // The UI layer (LandingPage.tsx) handles the visualization based on expiration time
 
                         try {
                             const tags = event.tags;
