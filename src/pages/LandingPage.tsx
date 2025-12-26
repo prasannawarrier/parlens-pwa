@@ -288,23 +288,23 @@ const MapController = ({ location, bearing, cumulativeRotation, orientationMode,
         }
     }, [cumulativeRotation, bearing, orientationMode, map]);
 
+    // Reset zoom to 17 when entering auto/recentre modes
+    useEffect(() => {
+        if (location && (orientationMode === 'auto' || orientationMode === 'recentre')) {
+            const currentZoom = map.getZoom();
+            // Only flyTo if we are significantly off target, to set the "standard"
+            if (Math.abs(currentZoom - 17) > 0.5) {
+                map.flyTo(location, 17, { animate: true, duration: 1.5 });
+            }
+        }
+    }, [orientationMode, map]); // Only run when mode changes (or map/location init)
+
+    // Follow user location (without enforcing zoom)
     useEffect(() => {
         // Only update map if user is NOT dragging
         if (!isInteracting.current && location && (orientationMode === 'auto' || orientationMode === 'recentre')) {
-            // Both auto and recentre modes follow the user
-            // Use same zoom level (17) for both to prevent zoom animation when switching
-            // Standardizing at 17 based on user request for smoothness
-            const targetZoom = 17;
-            const currentZoom = map.getZoom();
-
-            if (Math.abs(currentZoom - targetZoom) > 0.5) {
-                // Zoom changed, use flyTo for smooth transition
-                // Increased duration slightly for smoother feel
-                map.flyTo(location, targetZoom, { animate: true, duration: 1.5 });
-            } else {
-                // Just pan for normal following
-                map.panTo(location, { animate: true, duration: 0.3 });
-            }
+            // Just pan to follow, assume zoom is handled by user or initial mode set
+            map.panTo(location, { animate: true, duration: 0.3 });
         }
     }, [location, orientationMode, map]);
 
