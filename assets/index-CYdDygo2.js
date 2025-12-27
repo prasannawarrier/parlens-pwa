@@ -19,7 +19,7 @@ Error generating stack: `+o.message+`
                 🅿️
              </div>
              <div style="background: #34C759; border-radius: 12px; padding: 2px 8px; font-weight: bold; font-size: 11px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); transform: translateY(-5px); white-space: nowrap; color: white;">
-                ${a.price>0?`${a.currency==="USD"?"$":a.currency}${a.price.toFixed(2)}/hr`:"Free"}
+                ${a.price>0?`${a.currency==="USD"?"$":a.currency}${Math.round(a.price)}/hr`:"Free"}
              </div>
         </div>
     `,p=va.divIcon({className:"spot-marker",html:d,iconSize:[60,60],iconAnchor:[30,45]});return w.jsx(io,{position:[a.lat,a.lon],icon:p})}),FE=({spot:a,bearing:s,orientationMode:l})=>{const u=a.decryptedContent;if(!u||!u.lat||!u.lon)return null;const p=`
