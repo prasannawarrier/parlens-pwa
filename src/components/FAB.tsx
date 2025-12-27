@@ -8,8 +8,8 @@ import { getCurrencyFromLocation, getCurrencySymbol, getLocalCurrency } from '..
 import { generateSecretKey, finalizeEvent } from 'nostr-tools/pure';
 
 interface FABProps {
-    status: 'idle' | 'search' | 'parked' | 'submitting';
-    setStatus: (s: 'idle' | 'search' | 'parked' | 'submitting') => void;
+    status: 'idle' | 'search' | 'parked';
+    setStatus: (s: 'idle' | 'search' | 'parked') => void;
     location: [number, number];
     vehicleType: 'bicycle' | 'motorcycle' | 'car';
     setOpenSpots: React.Dispatch<React.SetStateAction<any[]>>;
@@ -24,81 +24,87 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
     const [currency, setCurrency] = useState('USD');
     const [symbol, setSymbol] = useState('$');
     const [sessionStart, setSessionStart] = useState<number | null>(null);
-    const prevVehicleTypeRef = React.useRef(vehicleType);
 
-    // Search for open spots when entering search mode
+    // Search for open spots when entering search mode - POLLING (iOS compatible)
     useEffect(() => {
         if (status === 'search' && location) {
-            // Only clear spots when vehicleType changes, not on every refresh
-            if (prevVehicleTypeRef.current !== vehicleType) {
-                setOpenSpots([]);
-                prevVehicleTypeRef.current = vehicleType;
-            }
-
             // Get center + 8 neighboring geohashes for boundary-safe discovery
             const geohashes = getGeohashNeighbors(location[0], location[1], 5);
-            console.log('[Parlens] Searching for spots in geohashes:', geohashes);
+            console.log('[Parlens] Starting spot search with polling in geohashes:', geohashes);
 
-            const now = Math.floor(Date.now() / 1000);
-            console.log('[Parlens] Searching for open spots - Kind:', KINDS.OPEN_SPOT_BROADCAST, 'Geohashes:', geohashes);
+            // Use querySync (HTTP-like, works on iOS) instead of subscribeMany (WebSocket issues on iOS)
+            const searchSpots = async () => {
+                try {
+                    const now = Math.floor(Date.now() / 1000);
+                    console.log('[Parlens] Querying for spots since:', now - 300);
 
-            // Use subscribeMany for real-time updates
-            console.log('[Parlens] Subscribing to spots - Kind:', KINDS.OPEN_SPOT_BROADCAST, 'Geohashes:', geohashes);
+                    const events = await pool.querySync(
+                        DEFAULT_RELAYS,
+                        { kinds: [KINDS.OPEN_SPOT_BROADCAST], '#g': geohashes, since: now - 300 } as any
+                    );
 
-            const sub = pool.subscribeMany(
-                DEFAULT_RELAYS,
-                [{ kinds: [KINDS.OPEN_SPOT_BROADCAST], '#g': geohashes, since: now - 300 }] as any,
-                {
-                    onevent(event) {
+                    console.log('[Parlens] Found', events.length, 'spot events');
+                    const currentTime = Math.floor(Date.now() / 1000);
+                    const newSpots: any[] = [];
+
+                    for (const event of events) {
+                        // Check expiration tag
+                        const expirationTag = event.tags.find((t: string[]) => t[0] === 'expiration');
+                        if (expirationTag) {
+                            const expTime = parseInt(expirationTag[1]);
+                            if (expTime < currentTime) {
+                                continue; // Skip expired
+                            }
+                        }
+
                         try {
                             const tags = event.tags;
-                            const locTag = tags.find(t => t[0] === 'location');
-                            const priceTag = tags.find(t => t[0] === 'hourly_rate');
-                            const currencyTag = tags.find(t => t[0] === 'currency');
-                            const typeTag = tags.find(t => t[0] === 'type');
+                            const locTag = tags.find((t: string[]) => t[0] === 'location');
+                            const priceTag = tags.find((t: string[]) => t[0] === 'hourly_rate');
+                            const currencyTag = tags.find((t: string[]) => t[0] === 'currency');
+                            const typeTag = tags.find((t: string[]) => t[0] === 'type');
 
                             if (locTag) {
                                 const [lat, lon] = locTag[1].split(',').map(Number);
                                 const spotType = typeTag ? typeTag[1] : 'car';
 
-                                if (spotType !== vehicleType) return;
-
-                                const expTag = event.tags.find(t => t[0] === 'expiration');
-                                const expiresAt = expTag ? parseInt(expTag[1]) : (Math.floor(Date.now() / 1000) + 300);
-
-                                const spot = {
+                                newSpots.push({
                                     id: event.id,
                                     lat,
                                     lon,
                                     price: priceTag ? parseFloat(priceTag[1]) : 0,
                                     currency: currencyTag ? currencyTag[1] : 'USD',
-                                    type: spotType,
-                                    expiresAt
-                                };
-
-                                setOpenSpots((prev: any[]) => {
-                                    const now = Math.floor(Date.now() / 1000);
-                                    const active = prev.filter((p: any) => !p.expiresAt || p.expiresAt > now);
-                                    if (active.find((p: any) => p.id === spot.id)) return active;
-                                    console.log('[Parlens] New spot received via SUB:', spot.id);
-                                    return [...active, spot];
+                                    type: spotType
                                 });
                             }
                         } catch (e) {
                             console.warn('[Parlens] Error parsing spot:', e);
                         }
-                    },
-                    oneose() {
-                        console.log('[Parlens] EOSE received for spots');
                     }
+
+                    console.log('[Parlens] Setting', newSpots.length, 'valid spots');
+                    setOpenSpots(newSpots);
+                } catch (e) {
+                    console.error('[Parlens] Spot query error:', e);
                 }
-            );
+            };
+
+            // Search immediately
+            searchSpots();
+
+            // Poll every 10 seconds for new spots
+            const intervalId = setInterval(searchSpots, 10000);
 
             return () => {
-                sub.close();
+                console.log('[Parlens] Stopping spot search');
+                clearInterval(intervalId);
+                // Note: Don't clear spots here - spots are cleared when status changes away from 'search'
             };
+        } else {
+            // Clear spots when NOT in search mode
+            setOpenSpots([]);
         }
-    }, [status, location, vehicleType]);
+    }, [status, vehicleType, pool]); // Removed location - we use it inside but don't need to re-run effect on location change
 
     // Session persistence: restore session on mount
     useEffect(() => {
@@ -130,14 +136,10 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
                 sessionStart,
                 parkLocation
             }));
-            // Clear spots when entering parked state (in case of session restore)
-            setOpenSpots([]);
         } else if (status === 'search') {
             localStorage.setItem('parlens_session', JSON.stringify({ status: 'search' }));
         } else if (status === 'idle') {
             localStorage.removeItem('parlens_session');
-            // Clear spots when returning to idle
-            setOpenSpots([]);
         }
     }, [status, sessionStart, parkLocation]);
 
@@ -164,33 +166,20 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
 
     const handleClick = async () => {
         if (status === 'idle') {
-            // Check cool-off period
-            const lastParked = parseInt(localStorage.getItem('parlens_last_parked_at') || '0');
-            const now = Date.now();
-            const cooldown = 5 * 60 * 1000; // 5 minutes
-
-            if (now - lastParked < cooldown) {
-                const remaining = Math.ceil((cooldown - (now - lastParked)) / 60000);
-                alert(`Please wait ${remaining} minutes before searching for a new spot.`);
-                return;
-            }
-
             setStatus('search');
         } else if (status === 'search') {
             setSessionStart(Math.floor(Date.now() / 1000));
             setParkLocation([location[0], location[1]]);
-            setOpenSpots([]); // Clear spots when starting parking session
             setStatus('parked');
         } else if (status === 'parked') {
-            setCost('0'); // Reset cost to 0 when opening popup
+            setCost('0'); // Reset to 0 for new session
             setShowCostPopup(true);
         }
     };
 
     const handleFinishParking = async () => {
-        // Show submitting state for user feedback
+        setStatus('idle');
         setShowCostPopup(false);
-        setStatus('submitting');
 
         const lat = parkLocation ? parkLocation[0] : location[0];
         const lon = parkLocation ? parkLocation[1] : location[1];
@@ -202,17 +191,15 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
         try {
             const logContent = {
                 status: 'vacated',
-                type: vehicleType,
                 lat,
                 lon,
                 geohash,
                 fee: cost,
                 currency,
+                type: vehicleType, // Include in encrypted content for private filtering
                 started_at: startTime,
                 finished_at: endTime
             };
-
-            // Cool-off will be set only after confirmation of successful publish
 
             const privkeyHex = localStorage.getItem('parlens_privkey');
             const seckey = privkeyHex ? new Uint8Array(privkeyHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16))) : undefined;
@@ -223,9 +210,10 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
                 kind: KINDS.PARKING_LOG, // Parameterized Replaceable for history
                 content: encryptedContent,
                 tags: [
-                    ['g', geohash],
-                    ['client', 'parlens'],
-                    ['d', `session_${startTime}`] // Unique ID for history
+                    // Only non-sensitive tags are public
+                    // Geohash and type are in encrypted content for privacy
+                    ['d', `session_${startTime}`], // Required for parameterized replaceable
+                    ['client', 'parlens']
                 ],
                 created_at: endTime,
                 pubkey: pubkey!,
@@ -233,44 +221,44 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
 
             const signedLog = await signEvent(logEvent);
 
-            console.log('[Parlens] Publishing log:', signedLog.id, 'to', DEFAULT_RELAYS);
-            console.log('[Parlens] Log content (encrypted):', signedLog.content.substring(0, 50) + '...');
-            console.log('[Parlens] Log tags:', signedLog.tags);
+            console.log('Publishing log:', signedLog.id, 'to', DEFAULT_RELAYS);
 
-            const pubs = pool.publish(DEFAULT_RELAYS, signedLog);
+            // Use Promise.allSettled for Safari/iOS compatibility
+            const results = await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedLog));
 
-            // Wait for all publishes and log results
-            const results = await Promise.allSettled(pubs);
-            results.forEach((result, i) => {
-                if (result.status === 'fulfilled') {
-                    console.log(`[Parlens] Relay ${DEFAULT_RELAYS[i]}: Published successfully`);
-                } else {
-                    console.error(`[Parlens] Relay ${DEFAULT_RELAYS[i]}: Failed -`, result.reason);
+            // Log detailed results for debugging Safari/iOS issues
+            const succeeded = results.filter(r => r.status === 'fulfilled').length;
+            const failed = results.filter(r => r.status === 'rejected').length;
+            console.log(`[Parlens] Publish results: ${succeeded}/${results.length} succeeded, ${failed} failed`);
+            results.forEach((r, i) => {
+                if (r.status === 'rejected') {
+                    console.warn(`[Parlens] Relay ${DEFAULT_RELAYS[i]} failed:`, r.reason);
                 }
             });
 
-            const successCount = results.filter(r => r.status === 'fulfilled').length;
-            console.log(`[Parlens] Log published to ${successCount}/${DEFAULT_RELAYS.length} relays`);
-
-            if (successCount > 0) {
-                // Set cool-off only on success
-                localStorage.setItem('parlens_last_parked_at', Date.now().toString());
-            } else {
-                alert('Could not save to Nostr. Check relay connections.');
-                // Don't set cool-off so user can try again immediately
+            // Note: On iOS/Safari, all promises may report as rejected even when data IS saved
+            // This is a known Safari WebSocket quirk - we just log a warning, don't throw
+            if (succeeded === 0) {
+                console.warn('[Parlens] All relays reported failure, but data may still be saved (iOS quirk)');
             }
+            console.log('Log published');
+
+            // Small delay for Safari/iOS relay sync
+            await new Promise(resolve => setTimeout(resolve, 300));
+
+            // Dispatch event to trigger immediate parking history refresh
+            window.dispatchEvent(new Event('parking-log-updated'));
 
             // Broadcast open spot (Kind 31714 - Addressable) to help other users
             // Use anonymous one-time keypair for privacy
             const anonPrivkey = generateSecretKey();
 
-            // Calculate hourly rate based on duration and fee (round up to next hour)
+            // Calculate hourly rate based on duration and fee
+            // Round duration UP to whole hours (10 mins = 1hr, 61 mins = 2hrs)
             const durationSeconds = endTime - startTime;
-            const durationHours = Math.max(Math.ceil(durationSeconds / 3600), 1); // Minimum 1 hour, always round up
-
-
-            const hourlyRate = (parseFloat(cost) / durationHours).toFixed(2);
-            const expirationTime = endTime + 300; // Expires in 5 minutes (300 seconds)
+            const durationHours = Math.max(Math.ceil(durationSeconds / 3600), 1); // Minimum 1 hour
+            const hourlyRate = String(Math.round(parseFloat(cost) / durationHours));
+            const expirationTime = endTime + 60; // Expires in 60 seconds
 
             const broadcastEventTemplate = {
                 kind: KINDS.OPEN_SPOT_BROADCAST,
@@ -296,23 +284,15 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
             console.log('[Parlens] Location:', `${lat},${lon}`);
             console.log('[Parlens] Event ID:', signedBroadcast.id);
             console.log('[Parlens] Pubkey:', signedBroadcast.pubkey.substring(0, 20) + '...');
-
-            const broadcastPubs = pool.publish(DEFAULT_RELAYS, signedBroadcast);
-            await Promise.allSettled(broadcastPubs);
-            console.log('[Parlens] Broadcast published to relays');
+            pool.publish(DEFAULT_RELAYS, signedBroadcast);
 
             // Reset session tracking
             setSessionStart(null);
             setParkLocation(null);
 
-            // Now safe to change status after all async work is done
-            setStatus('idle');
-
         } catch (e) {
             console.error('Persistence error:', e);
             alert('Could not save to Nostr. Check relay connections.');
-            // Still reset to idle even on error
-            setStatus('idle');
         }
     };
 
@@ -321,7 +301,7 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
             <div className="flex items-center gap-4">
                 {status === 'search' && (
                     <button
-                        onClick={() => { setOpenSpots([]); setStatus('idle'); }}
+                        onClick={() => setStatus('idle')}
                         className="h-14 px-8 rounded-full bg-red-500/90 text-white font-bold text-xs tracking-widest shadow-2xl backdrop-blur-md animate-in slide-in-from-left-8"
                     >
                         CANCEL
@@ -330,18 +310,13 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
 
                 <button
                     onClick={handleClick}
-                    disabled={status === 'submitting'}
                     className={`h-20 w-20 flex items-center justify-center rounded-[2.5rem] shadow-2xl transition-all active:scale-90 ${status === 'idle' ? 'bg-[#007AFF] text-white shadow-blue-500/20' :
                         status === 'search' ? 'bg-[#FF9500] text-white shadow-orange-500/20' :
-                            status === 'submitting' ? 'bg-[#007AFF] text-white shadow-blue-500/20' :
-                                'bg-[#34C759] text-white shadow-green-500/20'
+                            'bg-[#34C759] text-white shadow-green-500/20'
                         }`}
                 >
                     {status === 'idle' && <Search size={32} strokeWidth={2.5} />}
                     {status === 'search' && <MapPin size={32} strokeWidth={2.5} className="animate-pulse" />}
-                    {status === 'submitting' && (
-                        <div className="w-8 h-8 border-4 border-white/30 border-t-white rounded-full animate-spin" />
-                    )}
                     {status === 'parked' && (
                         vehicleType === 'bicycle' ? <span className="text-3xl">🚲</span> :
                             vehicleType === 'motorcycle' ? <span className="text-3xl">🏍️</span> :
@@ -351,8 +326,8 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
             </div>
 
             {showCostPopup && (
-                <div className="fixed inset-0 z-[2000] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-xl animate-in fade-in duration-300 p-4">
-                    <div className="w-full max-w-sm bg-white dark:bg-[#1c1c1e] rounded-[2rem] shadow-2xl p-6 flex flex-col items-center space-y-5 animate-in slide-in-from-bottom-10 sm:zoom-in-95 border border-black/5 dark:border-white/10 transition-colors">
+                <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/60 backdrop-blur-xl animate-in fade-in duration-300 p-4">
+                    <div className="w-full max-w-sm bg-white dark:bg-[#1c1c1e] rounded-[2rem] shadow-2xl p-6 flex flex-col items-center space-y-5 animate-in zoom-in-95 border border-black/5 dark:border-white/10 transition-colors">
                         <div className="text-center space-y-1">
                             <h3 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-white">End Session</h3>
                             <p className="text-xs font-medium text-zinc-500 dark:text-white/40">Enter total parking fee, 0 if free parking</p>

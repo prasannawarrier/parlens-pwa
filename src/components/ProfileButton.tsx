@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Key, X, Shield, ChevronRight, MapPin, Clock, User, Trash2 } from 'lucide-react';
+import { Key, X, Shield, ChevronRight, MapPin, Clock, User } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useParkingLogs } from '../hooks/useParkingLogs';
 import { nip19 } from 'nostr-tools';
 import { decryptParkingLog } from '../lib/encryption';
 import { getCurrencySymbol, getCountryFlag } from '../lib/currency';
-import { DEFAULT_RELAYS, KINDS } from '../lib/nostr';
+import { DEFAULT_RELAYS } from '../lib/nostr';
 
 interface ProfileButtonProps {
     setHistorySpots?: (spots: any[]) => void;
@@ -13,13 +13,17 @@ interface ProfileButtonProps {
 }
 
 export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, onOpenChange }) => {
-    const { pubkey, logout, pool, signEvent } = useAuth();
+    const { pubkey, logout, pool } = useAuth();
     const { logs, refetch } = useParkingLogs();
     const [isOpen, setIsOpen] = useState(false);
+
+    // Notify parent when open state changes
+    useEffect(() => {
+        onOpenChange?.(isOpen);
+    }, [isOpen, onOpenChange]);
     const [profile, setProfile] = useState<any>(null);
     const [decryptedLogs, setDecryptedLogs] = useState<any[]>([]);
     const [showHistoryOnMap, setShowHistoryOnMap] = useState(false);
-    const [isDeleting, setIsDeleting] = useState(false);
 
     useEffect(() => {
         if (pubkey) {
@@ -93,52 +97,12 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
         }
     };
 
-    // Delete a parking log using NIP-09 (kind 5 deletion event)
-    const handleDeleteLog = async (log: any) => {
-        if (!confirm('Are you sure you want to delete this parking entry? This action cannot be undone.')) {
-            return;
-        }
-
-        setIsDeleting(true);
-        try {
-            // Get the 'd' tag value from the log for addressable event deletion
-            const dTag = log.tags?.find((t: string[]) => t[0] === 'd')?.[1];
-
-            const deleteEvent = {
-                kind: 5, // NIP-09 deletion event
-                content: 'Deleted by user',
-                tags: [
-                    ['e', log.id], // Reference the event ID
-                    ...(dTag ? [['a', `${KINDS.PARKING_LOG}:${pubkey}:${dTag}`]] : []) // Reference addressable event
-                ],
-                created_at: Math.floor(Date.now() / 1000),
-                pubkey: pubkey!,
-            };
-
-            const signedDelete = await signEvent(deleteEvent);
-            await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedDelete));
-
-            // Remove from local state
-            setDecryptedLogs(prev => prev.filter(l => l.id !== log.id));
-
-            // Refetch to update
-            refetch();
-
-            alert('Entry deleted');
-        } catch (e) {
-            console.error('Delete error:', e);
-            alert('Failed to delete entry');
-        } finally {
-            setIsDeleting(false);
-        }
-    };
-
     return (
         <>
             <button
-                onClick={() => { refetch(); setIsOpen(true); onOpenChange?.(true); }}
+                onClick={() => { refetch(); setIsOpen(true); }}
                 className="h-12 w-12 flex items-center justify-center rounded-[1.5rem] bg-white/80 dark:bg-white/10 backdrop-blur-md text-zinc-600 dark:text-white/70 hover:bg-white dark:hover:bg-white/20 active:scale-95 transition-all shadow-lg border border-black/5 dark:border-white/10"
-                title="Profile"
+                title="Activity Log"
             >
                 <User size={20} />
             </button>
@@ -146,28 +110,19 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
             {isOpen && (
                 <div className="fixed inset-0 z-[2000] flex flex-col items-center justify-start bg-black/60 backdrop-blur-xl animate-in fade-in duration-300 pt-2 px-4 pb-4">
                     <button
-                        onClick={() => { setIsOpen(false); onOpenChange?.(false); }}
+                        onClick={() => setIsOpen(false)}
                         className="absolute inset-0 z-0 cursor-default"
                     />
 
                     <div className="relative z-10 w-full max-w-md bg-white dark:bg-[#1c1c1e] rounded-[2rem] shadow-2xl p-6 flex flex-col gap-6 animate-in slide-in-from-bottom-10 duration-300 h-[calc(100vh-1.5rem)] overflow-y-auto no-scrollbar border border-black/5 dark:border-white/5 transition-colors">
 
-                        {/* Loading Overlay */}
-                        {isDeleting && (
-                            <div className="fixed inset-0 z-[3000] flex items-center justify-center bg-black/70 backdrop-blur-sm">
-                                <div className="flex flex-col items-center gap-3">
-                                    <div className="w-8 h-8 rounded-full border-4 border-white/20 border-t-white animate-spin" />
-                                    <p className="text-sm font-medium text-white">Deleting...</p>
-                                </div>
-                            </div>
-                        )}
                         {/* Header - Username Only */}
                         <div className="flex items-center justify-between">
                             <h2 className="text-xl font-bold bg-gradient-to-r from-blue-500 to-purple-500 dark:from-blue-400 dark:to-purple-400 bg-clip-text text-transparent">
                                 {profile?.name || 'Nostr User'}
                             </h2>
                             <button
-                                onClick={() => { setIsOpen(false); onOpenChange?.(false); }}
+                                onClick={() => setIsOpen(false)}
                                 className="p-2 rounded-full bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/20 transition-colors"
                             >
                                 <X size={20} className="text-black/60 dark:text-white/60" />
@@ -176,8 +131,8 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
 
                         <div className="space-y-4">
                             <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-white/20 ml-2">Keys</h4>
-                            <div className="space-y-0.5 rounded-[2rem] bg-zinc-50 dark:bg-white/[0.03] border border-black/5 dark:border-white/5">
-                                <div className="p-5 flex items-center justify-between hover:bg-black/5 dark:hover:bg-white/5 transition-colors cursor-pointer rounded-t-[2rem] last:rounded-b-[2rem]" onClick={() => {
+                            <div className="space-y-0.5 rounded-[2rem] overflow-hidden bg-zinc-50 dark:bg-white/[0.03] border border-black/5 dark:border-white/5">
+                                <div className="p-5 flex items-center justify-between hover:bg-black/5 dark:hover:bg-white/5 transition-colors cursor-pointer" onClick={() => {
                                     navigator.clipboard.writeText(profile?.npub);
                                     alert('Copied to clipboard');
                                 }}>
@@ -192,7 +147,7 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                                         <div className="h-[1px] bg-black/5 dark:bg-white/5 mx-4" />
                                         <div
                                             onClick={handleBackupKey}
-                                            className="flex items-center justify-between p-4 cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 transition-colors active:bg-black/10 dark:active:bg-white/10 rounded-b-[2rem]"
+                                            className="flex items-center justify-between p-4 cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 transition-colors active:bg-black/10 dark:active:bg-white/10"
                                         >
                                             <div className="flex items-center gap-3">
                                                 <div className="p-2.5 rounded-xl bg-red-500/10 dark:bg-red-500/20 text-red-500"><Shield size={20} /></div>
@@ -236,8 +191,8 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                                         const endTime = content.finished_at ? new Date(content.finished_at * 1000) : new Date(log.created_at * 1000);
                                         const coords = content.lat && content.lon ? `${content.lat.toFixed(5)}, ${content.lon.toFixed(5)}` : null;
 
-                                        // Read type from encrypted content (privacy) with fallback to tags for backward compatibility
-                                        const type = content.type || log.tags?.find((t: string[]) => t[0] === 'type')?.[1] || 'car';
+                                        // Read type from encrypted content (not public tags for privacy)
+                                        const type = content.type || 'car';
                                         const typeEmoji = type === 'bicycle' ? '🚲' : type === 'motorcycle' ? '🏍️' : '🚗';
 
                                         return (
@@ -247,16 +202,7 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                                                         <span className="text-2xl">{typeEmoji}</span>
                                                         <p className="font-bold text-xl">{content.fee ? `${currencySymbol}${content.fee}` : 'Free'}</p>
                                                     </div>
-                                                    <div className="flex items-center gap-2">
-                                                        <span className="text-2xl">{getCountryFlag(content.currency || 'USD')}</span>
-                                                        <button
-                                                            onClick={() => handleDeleteLog(log)}
-                                                            className="p-2 rounded-xl text-zinc-400 dark:text-white/40 active:scale-95 transition-transform"
-                                                            title="Delete entry"
-                                                        >
-                                                            <Trash2 size={16} />
-                                                        </button>
-                                                    </div>
+                                                    <span className="text-2xl">{getCountryFlag(content.currency || 'USD')}</span>
                                                 </div>
 
                                                 {coords && (
@@ -288,7 +234,7 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                         </div>
 
                         <button
-                            onClick={() => { logout(); setIsOpen(false); onOpenChange?.(false); }}
+                            onClick={() => { logout(); setIsOpen(false); }}
                             className="w-full py-5 rounded-[2rem] bg-zinc-100 dark:bg-zinc-800 text-red-500 font-bold tracking-wide border border-black/5 dark:border-white/5 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all active:scale-95 text-center mt-4"
                         >
                             Logout

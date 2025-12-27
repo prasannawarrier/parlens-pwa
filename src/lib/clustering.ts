@@ -45,9 +45,9 @@ export function clusterSpots<T extends SpotBase>(
     spots: T[],
     zoom: number,
     shouldCluster: boolean = true
-): (T | Cluster<T>)[] {
-    // Don't cluster at high zoom levels
-    if (!shouldCluster || zoom >= 17 || spots.length < 2) {
+): (T | Cluster<SpotBase>)[] {
+    // Always cluster if there are at least 2 spots
+    if (!shouldCluster || spots.length < 2) {
         return spots;
     }
 
@@ -55,10 +55,11 @@ export function clusterSpots<T extends SpotBase>(
     const clusters = new Map<string, Cluster<T>>();
 
     for (const spot of spots) {
-        // At high zoom levels (>=15), use exact coordinates for grouping to catch duplicates
+        // At high zoom levels (>=15), use rounded coordinates for grouping to catch nearby spots
+        // 4 decimal places = ~11m precision, catches GPS jitter and same-spot duplicates
         // At lower zoom levels, use geohash for broader clustering
         const hash = zoom >= 15
-            ? `${spot.lat.toFixed(6)},${spot.lon.toFixed(6)}`
+            ? `${spot.lat.toFixed(4)},${spot.lon.toFixed(4)}`
             : encodeGeohash(spot.lat, spot.lon, precision);
 
         if (clusters.has(hash)) {

@@ -1,3 +1,4 @@
+
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { KINDS, DEFAULT_RELAYS } from '../lib/nostr';
@@ -7,14 +8,14 @@ export function useParkingLogs() {
     const [logs, setLogs] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
 
+    // Fetch logs using querySync (same pattern as working RouteButton)
     const fetchLogs = useCallback(async () => {
-        if (!pubkey) return;
+        if (!pubkey || !pool) return;
 
         setLoading(true);
         console.log('[useParkingLogs] Fetching logs for', pubkey);
 
         try {
-            // Use querySync for a one-time fetch (more reliable than subscribeMany)
             const events = await pool.querySync(DEFAULT_RELAYS, {
                 kinds: [KINDS.PARKING_LOG],
                 authors: [pubkey],
@@ -22,8 +23,6 @@ export function useParkingLogs() {
             });
 
             console.log('[useParkingLogs] Fetched', events.length, 'events');
-
-            // Sort by created_at descending
             const sorted = events.sort((a, b) => b.created_at - a.created_at);
             setLogs(sorted);
         } catch (e) {
@@ -33,8 +32,22 @@ export function useParkingLogs() {
         }
     }, [pool, pubkey]);
 
+    // Fetch on mount and when pubkey changes (like RouteButton)
     useEffect(() => {
-        fetchLogs();
+        if (pubkey) {
+            fetchLogs();
+        }
+    }, [pubkey, fetchLogs]);
+
+    // Listen for parking-log-updated event for immediate refetch
+    useEffect(() => {
+        const handleUpdate = () => {
+            console.log('[useParkingLogs] Received parking-log-updated event, refetching...');
+            fetchLogs();
+        };
+
+        window.addEventListener('parking-log-updated', handleUpdate);
+        return () => window.removeEventListener('parking-log-updated', handleUpdate);
     }, [fetchLogs]);
 
     return { logs, loading, refetch: fetchLogs };

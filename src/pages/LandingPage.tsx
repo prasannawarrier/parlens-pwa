@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, memo } from 'react';
-import { HelpCircle, Compass, Navigation, ChevronDown, X, MapPin } from 'lucide-react';
+import { HelpCircle, Compass, ChevronDown, X, MapPin } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Polyline, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -70,7 +70,7 @@ const SpotMarker = memo(({ spot, bearing, orientationMode }: { spot: any, bearin
                 🅿️
              </div>
              <div style="background: #34C759; border-radius: 12px; padding: 2px 8px; font-weight: bold; font-size: 11px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); transform: translateY(-5px); white-space: nowrap; color: white;">
-                ${spot.price > 0 ? `${spot.currency === 'USD' ? '$' : spot.currency}${spot.price.toFixed(2)}/hr` : 'Free'}
+                ${spot.price > 0 ? `${spot.currency === 'USD' ? '$' : spot.currency}${Math.round(spot.price)}/hr` : 'Free'}
              </div>
         </div>
     `;
@@ -176,7 +176,7 @@ const DropPinHandler = ({ enabled, onDropPin }: { enabled: boolean, onDropPin: (
 };
 
 // Controller to handle map centering and rotation
-const MapController = ({ location, bearing, cumulativeRotation, orientationMode, setOrientationMode, shouldRecenter, setShouldRecenter, setNeedsRecenter, routeBounds, setRouteBounds, manualRotation, setManualRotation }: {
+const MapController = ({ location, bearing, cumulativeRotation, orientationMode, setOrientationMode, shouldRecenter, setShouldRecenter, setNeedsRecenter, routeBounds, setRouteBounds }: {
     location: [number, number],
     bearing: number,
     cumulativeRotation: number,
@@ -186,9 +186,7 @@ const MapController = ({ location, bearing, cumulativeRotation, orientationMode,
     setShouldRecenter: (v: boolean) => void,
     setNeedsRecenter: (v: boolean) => void,
     routeBounds: L.LatLngBounds | null,
-    setRouteBounds: (v: L.LatLngBounds | null) => void,
-    manualRotation: number,
-    setManualRotation: (v: number) => void
+    setRouteBounds: (v: L.LatLngBounds | null) => void
 }) => {
     const map = useMap();
     const isInteracting = useRef(false);
@@ -199,10 +197,6 @@ const MapController = ({ location, bearing, cumulativeRotation, orientationMode,
         dragstart: () => {
             isInteracting.current = true;
             if (orientationMode !== 'fixed') {
-                // If breaking out of auto/recentre, preserve current rotation
-                if (orientationMode === 'auto') {
-                    setManualRotation(cumulativeRotation);
-                }
                 setOrientationMode('fixed');
             }
             setNeedsRecenter(true);
@@ -212,10 +206,6 @@ const MapController = ({ location, bearing, cumulativeRotation, orientationMode,
             if (!isProgrammaticZoom.current) {
                 isInteracting.current = true;
                 if (orientationMode !== 'fixed') {
-                    // If breaking out of auto/recentre, preserve current rotation
-                    if (orientationMode === 'auto') {
-                        setManualRotation(cumulativeRotation);
-                    }
                     setOrientationMode('fixed');
                 }
                 setNeedsRecenter(true);
@@ -288,33 +278,13 @@ const MapController = ({ location, bearing, cumulativeRotation, orientationMode,
             mapContainer.style.height = '300%';
             mapContainer.style.top = '-100%';
             mapContainer.style.left = '-100%';
-            mapContainer.style.left = '-100%';
         } else {
-            // In Fixed mode, use manualRotation if set (to preserve breakout orientation)
-            // or 0 if snapped to North
-            const rotation = manualRotation || 0;
-            mapContainer.style.transform = `rotate(${-rotation}deg)`;
-            // If rotated, we still need the buffer logic? 
-            // Actually, if we allow rotation in fixed mode, we might need the buffer too.
-            // For now, let's keep the standard size but apply rotation. 
-            // Note: If manualRotation is present, we might get clipping without buffer.
-            // To be safe, if rotated, maybe treat like auto?
-            // The user requested: "fixed in the orientation it snapped out of".
-
-            if (rotation !== 0) {
-                // Expanded buffer for rotated fixed view
-                mapContainer.style.width = '300%';
-                mapContainer.style.height = '300%';
-                mapContainer.style.top = '-100%';
-                mapContainer.style.left = '-100%';
-            } else {
-                mapContainer.style.width = '100%';
-                mapContainer.style.height = '100%';
-                mapContainer.style.top = '0';
-                mapContainer.style.left = '0';
-            }
-
-            document.documentElement.style.setProperty('--map-rotation', `${rotation}deg`);
+            mapContainer.style.transform = 'rotate(0deg)';
+            document.documentElement.style.setProperty('--map-rotation', '0deg');
+            mapContainer.style.width = '100%';
+            mapContainer.style.height = '100%';
+            mapContainer.style.top = '0';
+            mapContainer.style.left = '0';
         }
         mapContainer.style.position = 'absolute';
 
@@ -409,9 +379,8 @@ export const LandingPage: React.FC = () => {
     const [location, setLocation] = useState<[number, number] | null>(null);
     const [locationError, setLocationError] = useState<string | null>(null);
     const [bearing, setBearing] = useState(0);
-    const [status, setStatus] = useState<'idle' | 'search' | 'parked' | 'submitting'>('idle');
+    const [status, setStatus] = useState<'idle' | 'search' | 'parked'>('idle');
     const [orientationMode, setOrientationMode] = useState<'fixed' | 'recentre' | 'auto'>('fixed');
-    const [manualRotation, setManualRotation] = useState(0); // For preserving rotation in fixed mode
     const [showHelp, setShowHelp] = useState(false);
     const [vehicleType, setVehicleType] = useState<'bicycle' | 'motorcycle' | 'car'>(() => {
         const saved = localStorage.getItem('parlens_vehicle_type');
@@ -423,7 +392,7 @@ export const LandingPage: React.FC = () => {
     const [shouldRecenter, setShouldRecenter] = useState(false);
     const [needsRecenter, setNeedsRecenter] = useState(false); // Track if user has panned away
     const [zoomLevel, setZoomLevel] = useState(17);
-    const [isProfileOpen, setIsProfileOpen] = useState(false);
+    const [isProfileOpen, setIsProfileOpen] = useState(false); // Track profile modal state
     const [isRouteOpen, setIsRouteOpen] = useState(false);
     const [routeCoords, setRouteCoords] = useState<[number, number][] | null>(null);
     const [alternateRouteCoords, setAlternateRouteCoords] = useState<[number, number][] | null>(null);
@@ -776,9 +745,14 @@ export const LandingPage: React.FC = () => {
                                 : <HistoryMarker key={item.id} spot={(item as any).original || item} bearing={bearing} orientationMode={orientationMode} />
                         );
                     })()}
-                    {/* Open spots (Kind 21011) - only show during search */}
+                    {/* Open spots (Kind 21011) - only show during search, filtered by vehicle type */}
                     {status === 'search' && openSpots.length > 0 && (() => {
-                        const spotsForClustering = openSpots.map(s => ({
+                        // Filter by vehicle type (type is in public tags for open spots)
+                        const filteredSpots = openSpots.filter(s => {
+                            const spotType = s.type || 'car';
+                            return spotType === vehicleType;
+                        });
+                        const spotsForClustering = filteredSpots.map(s => ({
                             id: s.id,
                             lat: s.lat,
                             lon: s.lon,
@@ -831,8 +805,6 @@ export const LandingPage: React.FC = () => {
                         setNeedsRecenter={setNeedsRecenter}
                         routeBounds={routeBounds}
                         setRouteBounds={setRouteBounds}
-                        manualRotation={manualRotation}
-                        setManualRotation={setManualRotation}
                     />
                 </MapContainer>
             </div>
@@ -900,44 +872,21 @@ export const LandingPage: React.FC = () => {
                             setShouldRecenter(true);
                             setNeedsRecenter(false);
                         } else {
-                            // Cycle: fixed → recentre → auto → fixed (or reset rotation if rotated)
-
-                            if (orientationMode === 'fixed' && manualRotation !== 0) {
-                                // If in fixed mode but rotated (breakout state), snap to North Up
-                                setManualRotation(0);
-                                return;
-                            }
-
-                            setOrientationMode(m => {
-                                if (m === 'fixed') return 'recentre';
-                                if (m === 'recentre') return 'auto';
-                                return 'fixed'; // Back to fixed (North Up)
-                            });
-                            // Reset rotation when cycling modes (just in case)
-                            if (orientationMode !== 'fixed') setManualRotation(0);
-
+                            // Cycle: fixed ↔ recentre (no auto)
+                            setOrientationMode(m => m === 'fixed' ? 'recentre' : 'fixed');
                             setShouldRecenter(true);
                         }
                     }}
-                    className={`flex flex-col gap-1 p-2.5 rounded-full ${orientationMode === 'auto'
-                        ? 'bg-blue-500 text-white shadow-blue-500/50'
+                    className={`h-12 w-12 flex items-center justify-center rounded-[1.5rem] backdrop-blur-md transition-all active:scale-95 border shadow-lg ${orientationNeedsPermission
+                        ? 'bg-orange-500/20 border-orange-500/50 text-orange-500 dark:text-orange-400 animate-pulse'
                         : orientationMode === 'recentre'
-                            ? 'bg-green-500 text-white shadow-green-500/50'
-                            : 'bg-white text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200'
-                        } shadow-xl active:scale-95 transition-all`}
+                            ? 'bg-green-500/20 border-green-500/50 text-green-500 dark:text-green-400'
+                            : needsRecenter
+                                ? 'bg-white/80 dark:bg-zinc-800/80 border-black/5 dark:border-white/10 text-zinc-400 dark:text-white/40'
+                                : 'bg-white/80 dark:bg-zinc-800/80 border-black/5 dark:border-white/10 text-zinc-600 dark:text-white/70'
+                        }`}
                 >
-                    {orientationMode === 'auto' ? (
-                        <Navigation size={24} className="fill-white" />
-                    ) : orientationMode === 'recentre' ? (
-                        <MapPin size={24} className="fill-white" />
-                    ) : (manualRotation !== 0) ? (
-                        // Show Arrow pointing North (relative to map rotation)
-                        // If map is rotated -X deg, North is at +X deg from Up.
-                        // So rotate arrow by X (manualRotation).
-                        <Navigation size={24} style={{ transform: `rotate(${manualRotation}deg)` }} />
-                    ) : (
-                        <Compass size={24} />
-                    )}
+                    {orientationMode === 'recentre' ? <MapPin size={20} /> : <Compass size={20} />}
                 </button>
 
                 {/* Route Button - below orientation button */}
@@ -1034,7 +983,7 @@ export const LandingPage: React.FC = () => {
                         <div className="space-y-6 text-sm text-zinc-600 dark:text-white/80 leading-relaxed pt-4 border-t border-black/5 dark:border-white/10">
                             <p>
                                 <strong className="text-zinc-900 dark:text-white block mb-1">1. Plan your route (optional)</strong>
-                                Tap the route button to add waypoints and create a route. Your path will display on the map as you travel.
+                                Tap the route button to add waypoints and create a route. Click the location button to re-centre and turn on follow-me mode for route tracking.
                             </p>
 
                             <p>
@@ -1043,32 +992,17 @@ export const LandingPage: React.FC = () => {
                             </p>
 
                             <p>
-                                <strong className="text-zinc-900 dark:text-white block mb-1">3. Search for spots</strong>
-                                Click the main button once to see open spots reported by others.
+                                <strong className="text-zinc-900 dark:text-white block mb-1">3. Find and log parking spots</strong>
+                                Click the main button once to see open spots reported by others. Click again to mark your location. When leaving, click once more to end the session and report the fee. Use the profile button to see your parking history.
                             </p>
 
                             <p>
-                                <strong className="text-zinc-900 dark:text-white block mb-1">4. Park & end session</strong>
-                                Click again to mark your location. When leaving, click once more to end the session and report the fee. Note that there is a 5-minute cool-off period after parking before you can search again.
-                            </p>
-
-                            <p>
-                                <strong className="text-zinc-900 dark:text-white block mb-1">5. View history</strong>
-                                Use the profile button to see your parking history.
-                            </p>
-
-                            <p>
-                                <strong className="text-zinc-900 dark:text-white block mb-1">6. Secure your keys</strong>
-                                Copy and store your npub (public key) and nsec (secret key) from the profile section. These are your account access keys and cannot be recovered if lost.
-                            </p>
-
-                            <p>
-                                <strong className="text-zinc-900 dark:text-white block mb-1">7. User privacy</strong>
+                                <strong className="text-zinc-900 dark:text-white block mb-1">4. User privacy</strong>
                                 Parlens does not collect or share any user data. Your log and route data is encrypted by your keys and only accessible by you. Open spot broadcasts are ephemeral and not linked to any personal identifiers.
                             </p>
 
                             <p>
-                                <strong className="text-zinc-900 dark:text-white block mb-1">8. Create your own mirror</strong>
+                                <strong className="text-zinc-900 dark:text-white block mb-1">5. Create your own mirror</strong>
                                 <a
                                     href="https://github.com/prasannawarrier/parlens-pwa/blob/main/MIRROR_CREATION.md"
                                     target="_blank"
@@ -1103,14 +1037,7 @@ export const LandingPage: React.FC = () => {
                 </div>
             )}
 
-            {status === 'submitting' && !isProfileOpen && !isRouteOpen && (
-                <div className="absolute left-1/2 z-[1000] -translate-x-1/2 animate-in slide-in-from-top-6 duration-500" style={{ top: 'max(3rem, calc(env(safe-area-inset-top) + 0.75rem))' }}>
-                    <div className="px-6 py-3 rounded-full bg-blue-500 text-white font-bold shadow-xl flex items-center gap-3">
-                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                        <span className="text-sm tracking-tight text-white/90 whitespace-nowrap">Logging session...</span>
-                    </div>
-                </div>
-            )}
+            {/* Submitting bubble removed - Dec 23 FAB doesn't support this state */}
         </div>
     );
 };

@@ -11,14 +11,24 @@ export const DEFAULT_RELAYS = [
     'wss://relay.snort.social',
 ];
 
+/**
+ * Kind 31417 - Parking Log (Private History)
+ * 
+ * Public Tags (only non-sensitive):
+ *   ['d', 'session_<timestamp>']  - Required for parameterized replaceable
+ *   ['client', 'parlens']
+ * 
+ * Content (NIP-44 Encrypted):
+ *   - All sensitive data including location, type, and geohash
+ */
 export interface ParkingLogContent {
     status?: 'parked' | 'vacated'; // Encrypted for privacy
-    type?: 'bicycle' | 'motorcycle' | 'car'; // Encrypted for privacy
+    type?: 'bicycle' | 'motorcycle' | 'car'; // Encrypted for privacy (NOT in public tags!)
     location?: string; // Legacy: "lat, lng" with 6 decimal places
-    lat?: number; // Latitude
-    lon?: number; // Longitude
+    lat?: number; // Latitude (encrypted)
+    lon?: number; // Longitude (encrypted)
     g?: string; // Legacy: 10-digit geohash
-    geohash?: string; // 10-digit geohash
+    geohash?: string; // 10-digit geohash (encrypted, NOT in public tags!)
     start?: number; // Legacy: timestamp
     started_at?: number; // Start timestamp
     end?: number; // Legacy: timestamp
@@ -34,7 +44,16 @@ export interface RouteWaypoint {
     lon: number;
 }
 
-// Content for Route Log (Kind 34171) - NIP-44 encrypted
+/**
+ * Kind 34171 - Route Log (Private Saved Routes)
+ * 
+ * Public Tags:
+ *   ['d', 'route_<timestamp>']
+ *   ['client', 'parlens']
+ * 
+ * Content (NIP-44 Encrypted):
+ *   - All route data including waypoints and coordinates
+ */
 export interface RouteLogContent {
     name: string; // User-provided route name
     waypoints: RouteWaypoint[]; // Array of waypoints
@@ -44,6 +63,21 @@ export interface RouteLogContent {
     created_at: number; // Unix timestamp
 }
 
+/**
+ * Kind 31714 - Open Spot Broadcast (Public - Anonymous)
+ * 
+ * Public Tags (all data is public, but published with anonymous keypair):
+ *   ['d', 'spot_<geohash>_<timestamp>']
+ *   ['g', '<geohash>']           - For geo-discovery
+ *   ['location', '<lat>,<lon>']
+ *   ['hourly_rate', '<price>']
+ *   ['currency', '<code>']
+ *   ['type', 'bicycle|motorcycle|car']
+ *   ['expiration', '<timestamp>']
+ *   ['client', 'parlens']
+ * 
+ * Content: '' (empty - all data in tags for public discovery)
+ */
 export interface BroadcastTags {
     location: string;
     g: string;

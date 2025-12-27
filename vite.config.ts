@@ -9,32 +9,51 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'pwa-192x192.png', 'pwa-512x512.png'],
+      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
       manifest: {
         name: 'Parlens',
         short_name: 'Parlens',
         description: 'Nostr-powered parking session tracker and spot broadcaster',
-        theme_color: '#007AFF',
-        background_color: '#007AFF',
+        theme_color: '#005A8C',
+        background_color: '#ffffff',
         display: 'standalone',
         icons: [
           {
             src: 'pwa-192x192.png',
             sizes: '192x192',
-            type: 'image/png',
-            purpose: 'any'
+            type: 'image/png'
+          },
+          {
+            src: 'pwa-512x512.png',
+            sizes: '512x512',
+            type: 'image/png'
           },
           {
             src: 'pwa-512x512.png',
             sizes: '512x512',
             type: 'image/png',
-            purpose: 'any'
-          },
+            purpose: 'any maskable'
+          }
+        ]
+      },
+      // Workbox config for iOS - ensure fresh content
+      workbox: {
+        // Skip waiting and claim clients immediately for faster updates
+        skipWaiting: true,
+        clientsClaim: true,
+        // Don't cache API/WebSocket requests
+        navigateFallbackDenylist: [/^\/api/, /^\/ws/],
+        // Runtime caching for faster loads but fresh data
+        runtimeCaching: [
           {
-            src: 'pwa-512x512.png',
-            sizes: '512x512',
-            type: 'image/png',
-            purpose: 'maskable'
+            urlPattern: /^https:\/\/.*\.github\.io\/.*$/,
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'app-cache',
+              expiration: {
+                maxAgeSeconds: 60 * 5 // 5 minutes max cache
+              }
+            }
           }
         ]
       }

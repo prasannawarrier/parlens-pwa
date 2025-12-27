@@ -17,7 +17,10 @@ const AuthContext = createContext<AuthContextType | null>(null);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [pubkey, setPubkey] = useState<string | null>(localStorage.getItem('parlens_pubkey'));
-    const [pool] = useState(new SimplePool());
+    // SimplePool with iOS-friendly settings for reliable connections
+    // enablePing: sends heartbeats to detect dropped connections (critical for iOS)
+    // enableReconnect: automatically reconnects when connections fail
+    const [pool] = useState(() => new SimplePool({ enablePing: true, enableReconnect: true }));
 
     const login = async (method: 'extension' | 'nsec' | 'bunker' | 'create', value?: string, username?: string) => {
         let key = '';
