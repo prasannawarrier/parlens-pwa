@@ -11,7 +11,6 @@ export function useParkingLogs() {
     // Track locally deleted d-tags to prevent re-appearing after refetch
     const deletedDTagsRef = useRef<Set<string>>(new Set());
 
-    // Fetch logs using querySync (same pattern as working RouteButton)
     const fetchLogs = useCallback(async () => {
         if (!pubkey || !pool) return;
 
@@ -19,23 +18,47 @@ export function useParkingLogs() {
         console.log('[useParkingLogs] Fetching logs for', pubkey);
 
         try {
+            // Fetch both logs and deletion events
             const events = await pool.querySync(DEFAULT_RELAYS, {
-                kinds: [KINDS.PARKING_LOG],
+                kinds: [KINDS.PARKING_LOG, 5],
                 authors: [pubkey],
-                limit: 50,
+                limit: 100, // Increase limit to get deletions too
             });
 
             console.log('[useParkingLogs] Fetched', events.length, 'events');
 
-            // Filter out locally deleted logs
-            const filteredEvents = events.filter(event => {
+            // Process deletions
+            const deletedCoordinates = new Set<string>();
+            const deletionEvents = events.filter(e => e.kind === 5);
+
+            for (const de of deletionEvents) {
+                // Check 'a' tags for addressable events (d-tags)
+                for (const tag of de.tags) {
+                    if (tag[0] === 'a') {
+                        deletedCoordinates.add(tag[1]);
+                    }
+                }
+            }
+
+            // Filter out logs (locally deleted OR found in deletion events)
+            const logEvents = events.filter(e => e.kind === KINDS.PARKING_LOG);
+            const validLogs = logEvents.filter(event => {
                 const dTag = event.tags?.find((t: string[]) => t[0] === 'd')?.[1];
-                if (!dTag) return true;
-                return !deletedDTagsRef.current.has(dTag);
+                if (!dTag) return true; // Should have d-tag
+
+                // Check local deletion cache
+                if (deletedDTagsRef.current.has(dTag)) return false;
+
+                // Check NIP-09 deletion
+                // Coordinate format: kind:pubkey:d-tag
+                const coordinate = `${event.kind}:${event.pubkey}:${dTag}`;
+                if (deletedCoordinates.has(coordinate)) return false;
+
+                return true;
             });
 
-            console.log('[useParkingLogs] After filtering locally deleted:', filteredEvents.length, 'events');
-            const sorted = filteredEvents.sort((a, b) => b.created_at - a.created_at);
+            console.log('[useParkingLogs] Valid logs after filtering:', validLogs.length);
+            const sorted = validLogs.sort((a, b) => b.created_at - a.created_at);
             setLogs(sorted);
         } catch (e) {
             console.error('[useParkingLogs] Fetch error:', e);
