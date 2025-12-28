@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Key, X, Shield, ChevronRight, MapPin, Clock, User } from 'lucide-react';
+import { Key, X, Shield, ChevronRight, MapPin, Clock, User, Trash2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useParkingLogs } from '../hooks/useParkingLogs';
 import { nip19 } from 'nostr-tools';
 import { decryptParkingLog } from '../lib/encryption';
 import { getCurrencySymbol, getCountryFlag } from '../lib/currency';
-import { DEFAULT_RELAYS } from '../lib/nostr';
+import { DEFAULT_RELAYS, KINDS } from '../lib/nostr';
 
 interface ProfileButtonProps {
     setHistorySpots?: (spots: any[]) => void;
@@ -13,9 +13,10 @@ interface ProfileButtonProps {
 }
 
 export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, onOpenChange }) => {
-    const { pubkey, logout, pool } = useAuth();
-    const { logs, refetch } = useParkingLogs();
+    const { pubkey, logout, pool, signEvent } = useAuth();
+    const { logs, refetch, markDeleted } = useParkingLogs();
     const [isOpen, setIsOpen] = useState(false);
+    const [isDeleting, setIsDeleting] = useState(false);
 
     // Notify parent when open state changes
     useEffect(() => {
@@ -24,6 +25,47 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
     const [profile, setProfile] = useState<any>(null);
     const [decryptedLogs, setDecryptedLogs] = useState<any[]>([]);
     const [showHistoryOnMap, setShowHistoryOnMap] = useState(false);
+
+    // Handle delete parking log using NIP-09
+    const handleDeleteLog = async (log: any) => {
+        if (!pubkey || !confirm('Are you sure you want to delete this parking entry? This action cannot be undone.')) return;
+
+        setIsDeleting(true);
+        try {
+            // Get the 'd' tag value for the addressable event reference
+            const dTag = log.tags?.find((t: string[]) => t[0] === 'd')?.[1];
+            if (!dTag) {
+                throw new Error('Missing d tag on event');
+            }
+
+            // NIP-09: Kind 5 deletion event with 'a' tag for addressable events
+            // Format: ['a', '<kind>:<pubkey>:<d-identifier>']
+            const deleteEvent = {
+                kind: 5, // NIP-09 deletion event
+                content: 'Deleted by user',
+                tags: [
+                    ['a', `${KINDS.PARKING_LOG}:${pubkey}:${dTag}`],
+                    ['k', String(KINDS.PARKING_LOG)] // Optional: specify kind being deleted
+                ],
+                created_at: Math.floor(Date.now() / 1000),
+                pubkey: pubkey,
+            };
+
+            const signedDelete = await signEvent(deleteEvent);
+            await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedDelete));
+
+            // Mark as deleted locally so it won't reappear after refetch
+            markDeleted(dTag);
+
+            // Remove from local state immediately
+            setDecryptedLogs(prev => prev.filter(l => l.id !== log.id));
+        } catch (e) {
+            console.error('Failed to delete parking log:', e);
+            alert('Failed to delete. Please try again.');
+        } finally {
+            setIsDeleting(false);
+        }
+    };
 
     useEffect(() => {
         if (pubkey) {
@@ -114,6 +156,16 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                         className="absolute inset-0 z-0 cursor-default"
                     />
 
+                    {/* Deleting Overlay - positioned outside modal to cover border */}
+                    {isDeleting && (
+                        <div className="fixed inset-0 z-[3000] flex items-center justify-center bg-black/70 backdrop-blur-sm">
+                            <div className="flex flex-col items-center gap-3">
+                                <div className="w-8 h-8 rounded-full border-4 border-white/20 border-t-white animate-spin" />
+                                <p className="text-sm font-medium text-white">Deleting...</p>
+                            </div>
+                        </div>
+                    )}
+
                     <div className="relative z-10 w-full max-w-md bg-white dark:bg-[#1c1c1e] rounded-[2rem] shadow-2xl p-6 flex flex-col gap-6 animate-in slide-in-from-bottom-10 duration-300 h-[calc(100vh-1.5rem)] overflow-y-auto no-scrollbar border border-black/5 dark:border-white/5 transition-colors">
 
                         {/* Header - Username Only */}
@@ -200,9 +252,18 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                                                 <div className="flex items-center justify-between">
                                                     <div className="flex items-center gap-3">
                                                         <span className="text-2xl">{typeEmoji}</span>
-                                                        <p className="font-bold text-xl">{content.fee ? `${currencySymbol}${content.fee}` : 'Free'}</p>
+                                                        <p className="font-bold text-xl">{`${currencySymbol}${content.fee || '0'}`}</p>
                                                     </div>
-                                                    <span className="text-2xl">{getCountryFlag(content.currency || 'USD')}</span>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-2xl">{getCountryFlag(content.currency || 'USD')}</span>
+                                                        <button
+                                                            onClick={() => handleDeleteLog(log)}
+                                                            className="p-1.5 text-zinc-400 dark:text-white/30 hover:text-zinc-600 dark:hover:text-white/50 transition-colors"
+                                                            title="Delete entry"
+                                                        >
+                                                            <Trash2 size={16} />
+                                                        </button>
+                                                    </div>
                                                 </div>
 
                                                 {coords && (

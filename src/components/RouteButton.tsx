@@ -56,6 +56,9 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
     const [editingName, setEditingName] = useState('');
     const [isDeleting, setIsDeleting] = useState(false);
 
+    // Track locally deleted d-tags to prevent re-appearing after refetch
+    const deletedDTagsRef = useRef<Set<string>>(new Set());
+
     // Search saved waypoints from routes (offline search)
     const savedWaypointMatches = React.useMemo(() => {
         if (!searchQuery || searchQuery.length < 2) return [];
@@ -217,8 +220,13 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
 
             const routes: SavedRoute[] = [];
             for (const event of events) {
-                // Skip deleted routes
+                // Skip deleted routes (server-side)
                 if (event.tags.find(t => t[0] === 'deleted')) continue;
+
+                // Skip locally deleted routes
+                const dTag = event.tags.find(t => t[0] === 'd')?.[1] || '';
+                if (dTag && deletedDTagsRef.current.has(dTag)) continue;
+
                 // Skip empty content
                 if (!event.content) continue;
 
@@ -328,12 +336,18 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
             const signedEvent = await signEvent(event);
             console.log('[Parlens] Signed route event:', signedEvent);
 
-            const results = await Promise.any(pool.publish(DEFAULT_RELAYS, signedEvent));
-            console.log('[Parlens] Route published:', results);
+            // Use Promise.allSettled for iOS/Safari compatibility (same as parking logs)
+            const results = await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedEvent));
+            const succeeded = results.filter(r => r.status === 'fulfilled').length;
+            console.log('[Parlens] Route published:', succeeded, 'of', results.length, 'relays');
+
+            if (succeeded === 0) {
+                console.warn('[Parlens] All relays reported failure, but data may still be saved (iOS quirk)');
+            }
 
             setRouteName('');
-            await fetchSavedRoutes();
-            alert('Route saved!');
+            // Brief delay to allow relay propagation, then refetch
+            setTimeout(() => fetchSavedRoutes(), 500);
         } catch (error) {
             console.error('[Parlens] Error saving route:', error);
             alert('Failed to save route, try again later');
@@ -419,8 +433,10 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
             const signedReplace = await signEvent(replaceEvent);
             await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedReplace));
 
+            // Mark as deleted locally so it won't reappear after refetch
+            deletedDTagsRef.current.add(saved.dTag);
+
             setSavedRoutes(prev => prev.filter(r => r.id !== saved.id));
-            alert('Route deleted');
         } catch (error) {
             console.error('Error deleting route:', error);
             alert('Failed to delete route');
@@ -446,17 +462,27 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                         className="absolute inset-0 z-0 cursor-default"
                     />
 
-                    <div className="relative z-10 w-full max-w-md bg-white dark:bg-[#1c1c1e] rounded-[2rem] shadow-2xl p-6 flex flex-col gap-6 animate-in slide-in-from-bottom-10 duration-300 h-[calc(100vh-1.5rem)] overflow-y-auto no-scrollbar border border-black/5 dark:border-white/5 transition-colors">
-
-                        {/* Deleting Overlay */}
-                        {isDeleting && (
-                            <div className="fixed inset-0 z-[3000] flex items-center justify-center bg-black/70 backdrop-blur-sm">
-                                <div className="flex flex-col items-center gap-3">
-                                    <div className="w-8 h-8 rounded-full border-4 border-white/20 border-t-white animate-spin" />
-                                    <p className="text-sm font-medium text-white">Deleting...</p>
-                                </div>
+                    {/* Deleting Overlay - positioned outside modal to cover border */}
+                    {isDeleting && (
+                        <div className="fixed inset-0 z-[3000] flex items-center justify-center bg-black/70 backdrop-blur-sm">
+                            <div className="flex flex-col items-center gap-3">
+                                <div className="w-8 h-8 rounded-full border-4 border-white/20 border-t-white animate-spin" />
+                                <p className="text-sm font-medium text-white">Deleting...</p>
                             </div>
-                        )}
+                        </div>
+                    )}
+
+                    {/* Saving Overlay - positioned outside modal to cover border */}
+                    {isSaving && (
+                        <div className="fixed inset-0 z-[3000] flex items-center justify-center bg-black/70 backdrop-blur-sm">
+                            <div className="flex flex-col items-center gap-3">
+                                <div className="w-8 h-8 rounded-full border-4 border-white/20 border-t-white animate-spin" />
+                                <p className="text-sm font-medium text-white">Saving...</p>
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="relative z-10 w-full max-w-md bg-white dark:bg-[#1c1c1e] rounded-[2rem] shadow-2xl p-6 flex flex-col gap-6 animate-in slide-in-from-bottom-10 duration-300 h-[calc(100vh-1.5rem)] overflow-y-auto no-scrollbar border border-black/5 dark:border-white/5 transition-colors">
 
                         {/* Header */}
                         <div className="flex items-center justify-between">

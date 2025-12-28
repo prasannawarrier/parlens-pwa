@@ -286,3 +286,212 @@ export class AccelerometerHelper {
         this.velocityY = 0;
     }
 }
+
+// Speed classifications - 4 tiers for precise tracking
+export type SpeedClass = 'stationary' | 'walking' | 'vehicle' | 'fast_vehicle';
+
+// Stable location tracker with dynamic buffer zone and speed-based updates
+export class StableLocationTracker {
+    private anchorLat: number = 0;
+    private anchorLon: number = 0;
+    private displayLat: number = 0;
+    private displayLon: number = 0;
+    private lastRawLat: number = 0;
+    private lastRawLon: number = 0;
+    private lastUpdateTime: number = 0;
+    private speedHistory: number[] = [];
+    private currentSpeedClass: SpeedClass = 'stationary';
+    private predictedBearing: number = 0;
+    private directionChangeBuffer: number[] = [];
+
+    // Configuration - dynamic based on speed
+    private initialized: boolean = false;
+
+    // Dynamic buffer zones based on speed (in meters)
+    // Larger buffer = more stable but less responsive
+    private bufferZones: Record<SpeedClass, number> = {
+        stationary: 15,      // Large buffer to prevent GPS jitter
+        walking: 10,         // Moderate buffer for smooth walking
+        vehicle: 5,          // Smaller buffer for accurate driving
+        fast_vehicle: 3      // Minimal buffer for highway speeds
+    };
+
+    // Polling intervals based on speed (in ms)
+    // Faster speed = more frequent updates
+    private pollIntervals: Record<SpeedClass, number> = {
+        stationary: 10000,   // 10s when not moving
+        walking: 5000,       // 5s at walking pace
+        vehicle: 2000,       // 2s in vehicle
+        fast_vehicle: 1000   // 1s at high speed
+    };
+
+    // Animation durations based on speed (in ms)
+    // Faster speed = shorter, snappier animations
+    private animationDurations: Record<SpeedClass, number> = {
+        stationary: 1000,
+        walking: 700,
+        vehicle: 400,
+        fast_vehicle: 250
+    };
+
+    // Haversine distance in meters
+    private haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+        const R = 6371000; // Earth radius in meters
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return R * c;
+    }
+
+    // Calculate bearing from one point to another
+    private calculateBearing(lat1: number, lon1: number, lat2: number, lon2: number): number {
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const y = Math.sin(dLon) * Math.cos(lat2 * Math.PI / 180);
+        const x = Math.cos(lat1 * Math.PI / 180) * Math.sin(lat2 * Math.PI / 180) -
+            Math.sin(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.cos(dLon);
+        const bearing = Math.atan2(y, x) * 180 / Math.PI;
+        return (bearing + 360) % 360;
+    }
+
+    // Update location and return stable display position
+    updateLocation(rawLat: number, rawLon: number): {
+        displayLat: number;
+        displayLon: number;
+        speed: number;
+        speedClass: SpeedClass;
+        shouldUpdate: boolean;
+        animationDuration: number;
+    } {
+        const now = Date.now();
+
+        if (!this.initialized) {
+            this.anchorLat = rawLat;
+            this.anchorLon = rawLon;
+            this.displayLat = rawLat;
+            this.displayLon = rawLon;
+            this.lastRawLat = rawLat;
+            this.lastRawLon = rawLon;
+            this.lastUpdateTime = now;
+            this.initialized = true;
+            return {
+                displayLat: rawLat,
+                displayLon: rawLon,
+                speed: 0,
+                speedClass: 'stationary',
+                shouldUpdate: true,
+                animationDuration: 0
+            };
+        }
+
+        // Calculate distance from anchor
+        const distanceFromAnchor = this.haversineDistance(this.anchorLat, this.anchorLon, rawLat, rawLon);
+
+        // Calculate speed (m/s)
+        const timeDelta = (now - this.lastUpdateTime) / 1000;
+        const distanceMoved = this.haversineDistance(this.lastRawLat, this.lastRawLon, rawLat, rawLon);
+        const speed = timeDelta > 0 ? distanceMoved / timeDelta : 0;
+
+        // Update speed history (keep last 5)
+        this.speedHistory.push(speed);
+        if (this.speedHistory.length > 5) this.speedHistory.shift();
+
+        // Average speed for classification
+        const avgSpeed = this.speedHistory.reduce((a, b) => a + b, 0) / this.speedHistory.length;
+
+        // Classify speed - 4 tiers for precise tracking
+        let speedClass: SpeedClass;
+        if (avgSpeed < 0.5) {
+            speedClass = 'stationary';
+        } else if (avgSpeed < 2) {
+            speedClass = 'walking';
+        } else if (avgSpeed < 10) {
+            speedClass = 'vehicle';
+        } else {
+            speedClass = 'fast_vehicle';
+        }
+        this.currentSpeedClass = speedClass;
+
+        // Get current buffer based on speed
+        const currentBuffer = this.bufferZones[speedClass];
+
+        // Calculate bearing of movement
+        if (distanceMoved > 1) {
+            const moveBearing = this.calculateBearing(this.lastRawLat, this.lastRawLon, rawLat, rawLon);
+            this.directionChangeBuffer.push(moveBearing);
+            if (this.directionChangeBuffer.length > 3) this.directionChangeBuffer.shift();
+
+            // Average recent bearings for prediction
+            this.predictedBearing = this.directionChangeBuffer.reduce((a, b) => a + b, 0) / this.directionChangeBuffer.length;
+        }
+
+        // Update last raw position
+        this.lastRawLat = rawLat;
+        this.lastRawLon = rawLon;
+        this.lastUpdateTime = now;
+
+        // Buffer zone logic: only update display if outside buffer
+        let shouldMoveMarker = false;
+        let newDisplayLat = this.displayLat;
+        let newDisplayLon = this.displayLon;
+
+        if (distanceFromAnchor > currentBuffer) {
+            // Outside buffer - move anchor to new position
+            this.anchorLat = rawLat;
+            this.anchorLon = rawLon;
+            newDisplayLat = rawLat;
+            newDisplayLon = rawLon;
+            shouldMoveMarker = true;
+        } else if (distanceFromAnchor > currentBuffer * 0.7) {
+            // Near edge of buffer - smoothly approach new position
+            // Move display toward raw position with damping
+            const blend = 0.3;
+            newDisplayLat = this.displayLat + (rawLat - this.displayLat) * blend;
+            newDisplayLon = this.displayLon + (rawLon - this.displayLon) * blend;
+            shouldMoveMarker = true;
+        }
+        // Else: inside buffer - keep display at current position (stable)
+
+        if (shouldMoveMarker) {
+            this.displayLat = newDisplayLat;
+            this.displayLon = newDisplayLon;
+        }
+
+        return {
+            displayLat: this.displayLat,
+            displayLon: this.displayLon,
+            speed: avgSpeed,
+            speedClass,
+            shouldUpdate: shouldMoveMarker,
+            animationDuration: this.animationDurations[speedClass]
+        };
+    }
+
+    // Get recommended polling interval based on current speed
+    getPollingInterval(): number {
+        return this.pollIntervals[this.currentSpeedClass];
+    }
+
+    // Get current speed classification
+    getSpeedClass(): SpeedClass {
+        return this.currentSpeedClass;
+    }
+
+    // Get predicted bearing for movement direction
+    getPredictedBearing(): number {
+        return this.predictedBearing;
+    }
+
+    reset() {
+        this.initialized = false;
+        this.anchorLat = 0;
+        this.anchorLon = 0;
+        this.displayLat = 0;
+        this.displayLon = 0;
+        this.speedHistory = [];
+        this.currentSpeedClass = 'stationary';
+        this.directionChangeBuffer = [];
+    }
+}

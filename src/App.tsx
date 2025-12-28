@@ -87,7 +87,7 @@ const Login: React.FC = () => {
             className="mx-auto h-24 w-24 rounded-[22%] shadow-2xl shadow-[#007AFF]/20"
           />
           <h1 className="text-5xl font-extrabold tracking-tighter">Parlens</h1>
-          <p className="text-sm font-medium text-white/40 tracking-tight">Peer-to-Peer Parking Management</p>
+          <p className="text-sm font-medium text-white/40 tracking-tight">Decentralised Route and Parking Management</p>
         </div>
 
         <div className="space-y-4">
@@ -287,6 +287,43 @@ const Login: React.FC = () => {
 
 const App: React.FC = () => {
   const { pubkey } = useAuth();
+
+  // Global visibility change handler for iOS PWA background suspension
+  React.useEffect(() => {
+    let lastHiddenTime = 0;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        lastHiddenTime = Date.now();
+        console.log('[App] Backgrounded at', new Date().toISOString());
+      } else if (document.visibilityState === 'visible' && lastHiddenTime > 0) {
+        const hiddenDuration = Date.now() - lastHiddenTime;
+        console.log('[App] Foregrounded after', hiddenDuration, 'ms');
+
+        // If backgrounded for more than 5 seconds, trigger global refresh
+        if (hiddenDuration > 5000) {
+          console.log('[App] Dispatching visibility-refresh event');
+          window.dispatchEvent(new Event('visibility-refresh'));
+        }
+      }
+    };
+
+    // Handle iOS bfcache restoration
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) {
+        console.log('[App] Page restored from bfcache, triggering refresh');
+        window.dispatchEvent(new Event('visibility-refresh'));
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('pageshow', handlePageShow);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pageshow', handlePageShow);
+    };
+  }, []);
 
   if (!pubkey) {
     return <Login />;

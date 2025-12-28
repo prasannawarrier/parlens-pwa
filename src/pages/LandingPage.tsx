@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useRef, memo } from 'react';
-import { HelpCircle, Compass, ChevronDown, X, MapPin } from 'lucide-react';
-import { MapContainer, TileLayer, Marker, Polyline, useMap, useMapEvents } from 'react-leaflet';
+import { HelpCircle, Compass, ChevronDown, X, MapPin, Navigation2 } from 'lucide-react';
+import { MapContainer, Marker, Polyline, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { FAB } from '../components/FAB';
 import { ProfileButton } from '../components/ProfileButton';
 import { RouteButton } from '../components/RouteButton';
+import { MapLibreTileLayer } from '../components/MapLibreTileLayer';
 import { getCurrencySymbol } from '../lib/currency';
 import { clusterSpots, isCluster, type Cluster, type SpotBase } from '../lib/clustering';
-import { LocationSmoother, BearingAnimator } from '../lib/locationSmoothing';
+import { LocationSmoother, BearingAnimator, StableLocationTracker, PositionAnimator } from '../lib/locationSmoothing';
 
 // Fix Leaflet marker icon issue
 import icon from 'leaflet/dist/images/marker-icon.png';
@@ -22,22 +23,27 @@ const DefaultIcon = L.icon({
 L.Marker.prototype.options.icon = DefaultIcon;
 
 // Custom Marker for User - ALWAYS navigation arrow
-const UserMarker = ({ location, bearing }: { location: [number, number], bearing: number }) => {
-    // Standard navigation arrow
+const UserMarker = ({ location, bearing, isNavigationMode }: { location: [number, number], bearing: number, isNavigationMode?: boolean }) => {
+    // Scale up 1.3x in navigation mode for better visibility
+    const scale = isNavigationMode ? 1.3 : 1;
+    const baseSize = 28;
+
+    // Standard navigation arrow with dynamic size
     const content = `
-           <div style="transform: rotate(${bearing}deg); transition: transform 0.05s linear; display: flex; align-items: center; justify-content: center;">
-             <div style="width: 28px; height: 28px; background: #007AFF; border: 3px solid white; border-radius: 50%; box-shadow: 0 0 0 2px rgba(0,122,255,0.4), 0 4px 12px rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; position: relative;">
+           <div style="transform: rotate(${bearing}deg) scale(${scale}); transition: transform 0.3s ease-out; display: flex; align-items: center; justify-content: center;">
+             <div style="width: ${baseSize}px; height: ${baseSize}px; background: #007AFF; border: 3px solid white; border-radius: 50%; box-shadow: 0 0 0 ${isNavigationMode ? 3 : 2}px rgba(0,122,255,${isNavigationMode ? 0.5 : 0.4}), 0 4px 12px rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; position: relative;">
                 <svg width="14" height="14" viewBox="0 0 14 14" style="transform: translateY(-1px); filter: drop-shadow(0 1px 1px rgba(0,0,0,0.2));">
                   <path d="M7 0L14 14L7 12L0 14L7 0Z" fill="white" />
                 </svg>
              </div>
            </div>`;
 
+    const iconSize = Math.round(40 * scale);
     const customIcon = L.divIcon({
         className: 'user-location-marker',
         html: content,
-        iconSize: [40, 40],
-        iconAnchor: [20, 20]
+        iconSize: [iconSize, iconSize],
+        iconAnchor: [iconSize / 2, iconSize / 2]
     });
 
     return <Marker position={location} icon={customIcon} zIndexOffset={1000} />;
@@ -70,7 +76,7 @@ const SpotMarker = memo(({ spot, bearing, orientationMode }: { spot: any, bearin
                 🅿️
              </div>
              <div style="background: #34C759; border-radius: 12px; padding: 2px 8px; font-weight: bold; font-size: 11px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); transform: translateY(-5px); white-space: nowrap; color: white;">
-                ${spot.price > 0 ? `${spot.currency === 'USD' ? '$' : spot.currency}${Math.round(spot.price)}/hr` : 'Free'}
+                ${spot.currency === 'USD' ? '$' : spot.currency}${Math.round(spot.price)}/hr
              </div>
         </div>
     `;
@@ -97,7 +103,7 @@ const HistoryMarker = ({ spot, bearing, orientationMode }: { spot: any, bearing:
                 🅟
              </div>
              <div style="background: #8E8E93; border-radius: 12px; padding: 2px 8px; font-weight: bold; font-size: 11px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); transform: translateY(-5px); white-space: nowrap; color: white;">
-                ${content.fee ? `${getCurrencySymbol(content.currency || 'USD')}${content.fee}` : 'Free'}
+                ${getCurrencySymbol(content.currency || 'USD')}${content.fee || '0'}
              </div>
         </div>
     `;
@@ -121,7 +127,7 @@ const ClusterMarker = ({ cluster, type, bearing, orientationMode }: { cluster: C
 
     const rotation = orientationMode === 'auto' ? bearing : 0;
     const priceRange = cluster.minPrice === cluster.maxPrice
-        ? (cluster.minPrice > 0 ? `${getCurrencySymbol(cluster.currency)}${cluster.minPrice}` : 'Free')
+        ? `${getCurrencySymbol(cluster.currency)}${cluster.minPrice}`
         : `${getCurrencySymbol(cluster.currency)}${cluster.minPrice}-${cluster.maxPrice}`;
 
     const htmlContent = `
@@ -176,7 +182,7 @@ const DropPinHandler = ({ enabled, onDropPin }: { enabled: boolean, onDropPin: (
 };
 
 // Controller to handle map centering and rotation
-const MapController = ({ location, bearing, cumulativeRotation, orientationMode, setOrientationMode, shouldRecenter, setShouldRecenter, setNeedsRecenter, routeBounds, setRouteBounds }: {
+const MapController = ({ location, bearing, cumulativeRotation, orientationMode, setOrientationMode, shouldRecenter, setShouldRecenter, setNeedsRecenter, routeBounds, setRouteBounds, mapRotation, setMapRotation, setLiveMapRotation }: {
     location: [number, number],
     bearing: number,
     cumulativeRotation: number,
@@ -186,11 +192,18 @@ const MapController = ({ location, bearing, cumulativeRotation, orientationMode,
     setShouldRecenter: (v: boolean) => void,
     setNeedsRecenter: (v: boolean) => void,
     routeBounds: L.LatLngBounds | null,
-    setRouteBounds: (v: L.LatLngBounds | null) => void
+    setRouteBounds: (v: L.LatLngBounds | null) => void,
+    mapRotation: number,
+    setMapRotation: (v: number) => void,
+    setLiveMapRotation: (v: number) => void
 }) => {
     const map = useMap();
     const isInteracting = useRef(false);
     const isProgrammaticZoom = useRef(false);
+
+    // Track two-finger rotation gesture
+    const touchStartAngle = useRef<number | null>(null);
+    const touchStartRotation = useRef<number>(0);
 
     // Handle user interactions - break out of auto/recentre modes on manual interaction
     useMapEvents({
@@ -268,24 +281,17 @@ const MapController = ({ location, bearing, cumulativeRotation, orientationMode,
         };
     }, [map]);
 
-    // Handle map resize ONLY when orientation mode changes (not on every bearing update)
+    // Handle map container settings when orientation mode changes
+    // For vector maps, we don't need container enlargement - MapLibre renders edges properly
     useEffect(() => {
         const mapContainer = map.getContainer();
 
-        if (orientationMode === 'auto') {
-            // Increased buffer to 300% to prevent black edges during rotation
-            mapContainer.style.width = '300%';
-            mapContainer.style.height = '300%';
-            mapContainer.style.top = '-100%';
-            mapContainer.style.left = '-100%';
-        } else {
-            mapContainer.style.transform = 'rotate(0deg)';
-            document.documentElement.style.setProperty('--map-rotation', '0deg');
-            mapContainer.style.width = '100%';
-            mapContainer.style.height = '100%';
-            mapContainer.style.top = '0';
-            mapContainer.style.left = '0';
-        }
+        // Vector maps don't need container size changes
+        // Just ensure container is properly sized and positioned
+        mapContainer.style.width = '100%';
+        mapContainer.style.height = '100%';
+        mapContainer.style.top = '0';
+        mapContainer.style.left = '0';
         mapContainer.style.position = 'absolute';
 
         // Only invalidate size when mode changes
@@ -297,8 +303,8 @@ const MapController = ({ location, bearing, cumulativeRotation, orientationMode,
         if (orientationMode === 'auto') {
             const mapContainer = map.getContainer();
             requestAnimationFrame(() => {
-                // Use faster transition for responsive updates
-                mapContainer.style.transition = 'transform 0.3s linear';
+                // Use cubic-bezier for smooth deceleration (no shaking on stop)
+                mapContainer.style.transition = 'transform 0.4s cubic-bezier(0.25, 0.1, 0.25, 1)';
                 mapContainer.style.transformOrigin = 'center center';
                 // Use cumulative rotation (can go beyond 360) to take shortest path
                 mapContainer.style.transform = `rotate(${-cumulativeRotation}deg)`;
@@ -308,17 +314,23 @@ const MapController = ({ location, bearing, cumulativeRotation, orientationMode,
         }
     }, [cumulativeRotation, bearing, orientationMode, map]);
 
-    // Reset zoom to 17 when entering auto/recentre modes
+    // Don't force zoom when changing modes - let user keep their current zoom
+    // Only zoom closer when first entering auto mode AND far away from user
+    const hasZoomedForAutoMode = useRef(false);
     useEffect(() => {
-        if (location && (orientationMode === 'auto' || orientationMode === 'recentre')) {
+        // Only auto-zoom once when entering auto mode for the first time in a session
+        if (orientationMode === 'auto' && !hasZoomedForAutoMode.current && location) {
             const currentZoom = map.getZoom();
-            // Only flyTo if we are significantly off target, to set the "standard"
-            if (Math.abs(currentZoom - 17) > 0.5) {
+            // Only zoom if currently very far out (< 15)
+            if (currentZoom < 15) {
                 isProgrammaticZoom.current = true;
-                map.flyTo(location, 17, { animate: true, duration: 1.5 });
+                map.flyTo(location, 18, { animate: true, duration: 1.2 });
             }
+            hasZoomedForAutoMode.current = true;
+        } else if (orientationMode !== 'auto') {
+            hasZoomedForAutoMode.current = false;
         }
-    }, [orientationMode, map]); // Only run when mode changes (or map/location init)
+    }, [orientationMode, map, location]);
 
     // Follow user location (without enforcing zoom)
     useEffect(() => {
@@ -330,19 +342,26 @@ const MapController = ({ location, bearing, cumulativeRotation, orientationMode,
         }
     }, [location, orientationMode, map]);
 
-    // Smooth transition back to zoom 17 when switching to fixed mode
+    // Smooth transition - split recentre and zoom
+    // First click: only recentre (keep current zoom)
+    // Second click: also reset zoom to 17
     useEffect(() => {
         if (orientationMode === 'fixed' && shouldRecenter && location) {
             const currentZoom = map.getZoom();
-            if (Math.abs(currentZoom - 17) > 0.5) {
-                isProgrammaticZoom.current = true;
-                map.flyTo(location, 17, { animate: true, duration: 1.5 });
-            } else {
-                isProgrammaticZoom.current = true;
-                map.panTo(location, { animate: true, duration: 0.5 });
+            isProgrammaticZoom.current = true;
+
+            // Just pan to location smoothly (keep current zoom)
+            // This is faster and less glitchy than flyTo
+            map.panTo(location, { animate: true, duration: 0.5 });
+
+            // If zoom is significantly different, schedule a separate zoom animation
+            // This splits the animations to reduce glitching
+            if (Math.abs(currentZoom - 17) > 1) {
+                setTimeout(() => {
+                    isProgrammaticZoom.current = true;
+                    map.setZoom(17, { animate: true });
+                }, 600); // After pan completes
             }
-            // We handled the recentering, but let the parent know we're done
-            // Note: setShouldRecenter(false) happens in the other useEffect, so we don't duplicate logic
         }
     }, [orientationMode, shouldRecenter, location, map]);
 
@@ -371,6 +390,173 @@ const MapController = ({ location, bearing, cumulativeRotation, orientationMode,
             }
         };
     }, [map]);
+
+    // Handle two-finger rotation gesture for manual map rotation
+    // Optimized for vector maps - no container enlargement needed
+    useEffect(() => {
+        const mapContainer = map.getContainer();
+        let lastUpdateTime = 0;
+        const THROTTLE_MS = 16; // ~60fps throttling for smoother updates
+        const ROTATION_THRESHOLD = 15; // Degrees before rotation is triggered (prevent accidental rotation)
+        const ZOOM_THRESHOLD = 0.15; // Scale change ratio before zoom is detected
+
+        // Gesture state
+        let gestureIntent: 'none' | 'rotate' | 'zoom' = 'none';
+        let initialPinchDistance = 0;
+        let initialAngle = 0;
+        let hasTriggeredRotation = false;
+        let lastComputedRotation = mapRotation;
+        let fingerMidpoint = { x: 0, y: 0 };
+
+        const calculateAngle = (touch1: Touch, touch2: Touch) => {
+            const dx = touch2.clientX - touch1.clientX;
+            const dy = touch2.clientY - touch1.clientY;
+            return Math.atan2(dy, dx) * (180 / Math.PI);
+        };
+
+        const calculateDistance = (touch1: Touch, touch2: Touch) => {
+            const dx = touch2.clientX - touch1.clientX;
+            const dy = touch2.clientY - touch1.clientY;
+            return Math.sqrt(dx * dx + dy * dy);
+        };
+
+        const calculateMidpoint = (touch1: Touch, touch2: Touch, container: HTMLElement) => {
+            const rect = container.getBoundingClientRect();
+            const midX = (touch1.clientX + touch2.clientX) / 2 - rect.left;
+            const midY = (touch1.clientY + touch2.clientY) / 2 - rect.top;
+            return { x: midX, y: midY };
+        };
+
+        const handleTouchStart = (e: TouchEvent) => {
+            if (e.touches.length === 2) {
+                // Two fingers - start tracking both rotation and zoom
+                touchStartAngle.current = calculateAngle(e.touches[0], e.touches[1]);
+                touchStartRotation.current = mapRotation;
+                initialPinchDistance = calculateDistance(e.touches[0], e.touches[1]);
+                initialAngle = touchStartAngle.current;
+                fingerMidpoint = calculateMidpoint(e.touches[0], e.touches[1], mapContainer);
+                gestureIntent = 'none';
+                hasTriggeredRotation = false;
+            }
+        };
+
+        const handleTouchMove = (e: TouchEvent) => {
+            if (e.touches.length === 2 && touchStartAngle.current !== null) {
+                const now = Date.now();
+                if (now - lastUpdateTime < THROTTLE_MS) return; // Throttle updates
+                lastUpdateTime = now;
+
+                const currentAngle = calculateAngle(e.touches[0], e.touches[1]);
+                const currentDistance = calculateDistance(e.touches[0], e.touches[1]);
+                const angleDelta = currentAngle - initialAngle;
+                const scaleRatio = currentDistance / initialPinchDistance;
+
+                // Detect gesture intent if not yet determined
+                if (gestureIntent === 'none') {
+                    const absAngleDelta = Math.abs(angleDelta);
+                    const absScaleChange = Math.abs(1 - scaleRatio);
+
+                    // Check which threshold is hit first
+                    if (absAngleDelta > ROTATION_THRESHOLD) {
+                        gestureIntent = 'rotate';
+                        // For vector maps, just set transform-origin to finger midpoint
+                        // No container enlargement needed - MapLibre handles edge rendering
+                        mapContainer.style.transformOrigin = `${fingerMidpoint.x}px ${fingerMidpoint.y}px`;
+                        mapContainer.style.transition = 'none';
+                    } else if (absScaleChange > ZOOM_THRESHOLD) {
+                        gestureIntent = 'zoom';
+                        // Let Leaflet handle zoom naturally
+                    }
+                }
+
+                // Only process rotation if that's the detected intent
+                if (gestureIntent === 'rotate') {
+                    // Update finger midpoint continuously for smooth rotation
+                    const currentMidpoint = calculateMidpoint(e.touches[0], e.touches[1], mapContainer);
+                    mapContainer.style.transformOrigin = `${currentMidpoint.x}px ${currentMidpoint.y}px`;
+
+                    // Calculate rotation from initial start (not continuous delta)
+                    const totalAngleDelta = currentAngle - touchStartAngle.current;
+                    const newRotation = touchStartRotation.current - totalAngleDelta;
+
+                    // Apply rotation directly for immediate feedback
+                    mapContainer.style.transform = `rotate(${-newRotation}deg)`;
+                    document.documentElement.style.setProperty('--map-rotation', `${newRotation}deg`);
+
+                    // Update live rotation for real-time compass feedback
+                    setLiveMapRotation(newRotation);
+
+                    // Store rotation value for final state commit at touchEnd
+                    lastComputedRotation = newRotation;
+                    hasTriggeredRotation = true;
+                }
+                // If gestureIntent is 'zoom', we don't interfere - Leaflet handles it
+            }
+        };
+
+        const handleTouchEnd = () => {
+            if (hasTriggeredRotation && gestureIntent === 'rotate') {
+                // Commit the final rotation to state - use the stored rotation value
+                setMapRotation(lastComputedRotation);
+
+                // Reset transform-origin to center and re-enable smooth transitions
+                mapContainer.style.transformOrigin = 'center center';
+                mapContainer.style.transition = 'transform 0.3s ease-out';
+            }
+
+            // Reset gesture state
+            touchStartAngle.current = null;
+            gestureIntent = 'none';
+            hasTriggeredRotation = false;
+        };
+
+        mapContainer.addEventListener('touchstart', handleTouchStart, { passive: true });
+        mapContainer.addEventListener('touchmove', handleTouchMove, { passive: true });
+        mapContainer.addEventListener('touchend', handleTouchEnd, { passive: true });
+
+        return () => {
+            mapContainer.removeEventListener('touchstart', handleTouchStart);
+            mapContainer.removeEventListener('touchmove', handleTouchMove);
+            mapContainer.removeEventListener('touchend', handleTouchEnd);
+        };
+    }, [map, mapRotation, setMapRotation]);
+
+    // Apply manual rotation via CSS transform - handles both rotation and reset to 0
+    useEffect(() => {
+        const mapContainer = map.getContainer();
+
+        if (orientationMode !== 'auto') {
+            // Enable GPU acceleration for smooth animations
+            mapContainer.style.willChange = 'transform';
+            mapContainer.style.transformOrigin = 'center center';
+
+            if (Math.abs(mapRotation) > 0.5) {
+                // Map is rotated - keep enlarged container to cover all corners
+                mapContainer.style.width = '400%';
+                mapContainer.style.height = '400%';
+                mapContainer.style.top = '-150%';
+                mapContainer.style.left = '-150%';
+                // Match map tile background based on color scheme
+                const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                mapContainer.style.backgroundColor = isDark ? '#1a1a1a' : '#e0e0e0';
+                mapContainer.style.transition = 'transform 0.3s ease-out';
+                mapContainer.style.transform = `rotate(${-mapRotation}deg)`;
+                document.documentElement.style.setProperty('--map-rotation', `${mapRotation}deg`);
+            } else {
+                // Reset to true north - restore normal container
+                mapContainer.style.transition = 'transform 0.4s ease-out, width 0.3s ease-out, height 0.3s ease-out, top 0.3s ease-out, left 0.3s ease-out';
+                mapContainer.style.transform = 'rotate(0deg)';
+                mapContainer.style.width = '100%';
+                mapContainer.style.height = '100%';
+                mapContainer.style.top = '0';
+                mapContainer.style.left = '0';
+                document.documentElement.style.setProperty('--map-rotation', '0deg');
+
+                // Invalidate map size after transition
+                setTimeout(() => map.invalidateSize(), 350);
+            }
+        }
+    }, [mapRotation, orientationMode, map]);
 
     return null;
 };
@@ -401,6 +587,16 @@ export const LandingPage: React.FC = () => {
     const [routeBounds, setRouteBounds] = useState<L.LatLngBounds | null>(null);
     const [dropPinMode, setDropPinMode] = useState(false);
     const [pendingDropPin, setPendingDropPin] = useState<{ lat: number; lon: number } | null>(null);
+
+    // Manual map rotation state (two-finger gesture rotation, independent of device bearing)
+    const [mapRotation, setMapRotation] = useState(0);
+    // Live rotation for immediate compass feedback during gesture
+    const [liveMapRotation, setLiveMapRotation] = useState(0);
+
+    // Sync liveMapRotation with mapRotation after gesture ends
+    useEffect(() => {
+        setLiveMapRotation(mapRotation);
+    }, [mapRotation]);
 
     // Handler for route changes from RouteButton
     const handleRouteChange = (coords: [number, number][] | null, altCoords: [number, number][] | null, waypoints: { lat: number; lon: number }[] | null, show: boolean) => {
@@ -460,6 +656,10 @@ export const LandingPage: React.FC = () => {
     const locationSmootherRef = useRef<LocationSmoother>(new LocationSmoother());
     const bearingAnimatorRef = useRef<BearingAnimator>(new BearingAnimator());
 
+    // Stable location tracker with 10m buffer zone for reduced jitter
+    const stableLocationTrackerRef = useRef<StableLocationTracker>(new StableLocationTracker());
+    const positionAnimatorRef = useRef<PositionAnimator>(new PositionAnimator());
+
     // Cumulative rotation for CSS (handles wrap-around without full spins)
     const [cumulativeRotation, setCumulativeRotation] = useState(0);
 
@@ -497,11 +697,27 @@ export const LandingPage: React.FC = () => {
                     const accuracyFactor = Math.min(accuracy || 10, 30) / 10; // 1-3x multiplier
                     const baseThreshold = currentSpeed > 10 ? 6 : (currentSpeed > 5 ? 4 : 2);
                     const distThreshold = baseThreshold * accuracyFactor;
-                    const timeThreshold = currentSpeed > 10 ? 1500 : 2500;
+                    const timeThreshold = stableLocationTrackerRef.current.getPollingInterval();
 
                     if (dist > distThreshold || (now - lastLocUpdate) > timeThreshold) {
-                        // Direct setLocation - panTo in separate useEffect handles animation
-                        setLocation([smoothedLat, smoothedLon]);
+                        // Use stable location tracker with 10m buffer zone
+                        const stableResult = stableLocationTrackerRef.current.updateLocation(smoothedLat, smoothedLon);
+
+                        // Only update location if we've moved enough (buffer zone logic)
+                        if (stableResult.shouldUpdate) {
+                            // Use position animator for smooth transitions
+                            const animDuration = stableResult.animationDuration;
+                            if (animDuration > 0) {
+                                // Set up smooth animation callback
+                                positionAnimatorRef.current.setUpdateCallback((animLat, animLon) => {
+                                    setLocation([animLat, animLon]);
+                                });
+                                positionAnimatorRef.current.animateTo(stableResult.displayLat, stableResult.displayLon, animDuration);
+                            } else {
+                                // Immediate update (first position)
+                                setLocation([stableResult.displayLat, stableResult.displayLon]);
+                            }
+                        }
 
                         lastRawLat = latitude;
                         lastRawLon = longitude;
@@ -704,16 +920,8 @@ export const LandingPage: React.FC = () => {
                     touchZoom={true}
                     doubleClickZoom={true}
                 >
-                    <TileLayer
-                        url={isDarkMode
-                            ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-                            : "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-                        }
-
-                        attribution='&copy; CARTO'
-                        keepBuffer={12} // Load more tiles around viewport to prevent clipping during rotation
-                        updateWhenIdle={false} // Update tiles during animation for smoother experience
-                    />
+                    {/* MapLibre vector tiles for smooth zoom/rotation */}
+                    <MapLibreTileLayer isDarkMode={isDarkMode} />
                     <ZoomTracker onZoomChange={setZoomLevel} />
                     <DropPinHandler
                         enabled={dropPinMode}
@@ -793,7 +1001,7 @@ export const LandingPage: React.FC = () => {
                         />
                     ))}
                     {/* User location marker (on top) */}
-                    <UserMarker location={location} bearing={bearing} />
+                    <UserMarker location={location} bearing={bearing} isNavigationMode={orientationMode === 'auto'} />
                     <MapController
                         location={location}
                         bearing={bearing}
@@ -805,6 +1013,9 @@ export const LandingPage: React.FC = () => {
                         setNeedsRecenter={setNeedsRecenter}
                         routeBounds={routeBounds}
                         setRouteBounds={setRouteBounds}
+                        mapRotation={mapRotation}
+                        setMapRotation={setMapRotation}
+                        setLiveMapRotation={setLiveMapRotation}
                     />
                 </MapContainer>
             </div>
@@ -858,7 +1069,36 @@ export const LandingPage: React.FC = () => {
                 right: 'max(1rem, env(safe-area-inset-right))'
             }}>
 
-                {/* Orientation Toggle - first click recenters, second click changes mode */}
+                {/* Compass Button - shows ABOVE location button when map is rotated from true north */}
+                {/* Use liveMapRotation for real-time feedback during gesture, fallback to mapRotation */}
+                {(Math.abs(liveMapRotation) > 5 || Math.abs(mapRotation) > 5) && orientationMode !== 'auto' && (
+                    <button
+                        onClick={() => {
+                            setMapRotation(0);
+                            setLiveMapRotation(0);
+                        }}
+                        className="h-12 w-12 flex items-center justify-center rounded-[1.5rem] backdrop-blur-md transition-all active:scale-95 border shadow-lg bg-red-500/20 border-red-500/50 animate-in fade-in zoom-in-95 duration-200"
+                        title="Reset to true north"
+                    >
+                        <div
+                            className="flex flex-col items-center justify-center"
+                            style={{ transform: `rotate(${-liveMapRotation}deg)` }}
+                        >
+                            {/* Flat-back arrow pointing up (north) */}
+                            <div style={{
+                                width: 0,
+                                height: 0,
+                                borderLeft: '6px solid transparent',
+                                borderRight: '6px solid transparent',
+                                borderBottom: '10px solid',
+                                borderBottomColor: 'rgb(239 68 68)'
+                            }} />
+                            <span className="text-sm font-bold text-red-500 dark:text-red-400" style={{ marginTop: '-2px' }}>N</span>
+                        </div>
+                    </button>
+                )}
+
+                {/* Orientation Toggle - cycles through: fixed → recentre → auto (navigation) */}
                 <button
                     onClick={async () => {
                         // If iOS needs permission re-request, do that first
@@ -868,25 +1108,44 @@ export const LandingPage: React.FC = () => {
                         }
 
                         if (needsRecenter) {
-                            // First click: just recenter
+                            // First click: just recenter (don't change mode)
                             setShouldRecenter(true);
                             setNeedsRecenter(false);
                         } else {
-                            // Cycle: fixed ↔ recentre (no auto)
-                            setOrientationMode(m => m === 'fixed' ? 'recentre' : 'fixed');
-                            setShouldRecenter(true);
+                            // Cycle through modes: fixed → recentre → auto → fixed
+                            // Mode change only affects: following behavior and marker size
+                            // Does NOT change: zoom, orientation, or position
+                            setOrientationMode(m => {
+                                if (m === 'fixed') return 'recentre';
+                                if (m === 'recentre') return 'auto';
+                                return 'fixed'; // When going to fixed, keep current orientation
+                            });
+
+                            // Only recenter when entering following modes, not when exiting
+                            if (orientationMode === 'fixed') {
+                                setShouldRecenter(true);
+                            }
+
+                            // When entering auto mode from recentre, the map will start rotating with bearing
+                            // but we preserve the manual rotation value for when they exit
                         }
                     }}
                     className={`h-12 w-12 flex items-center justify-center rounded-[1.5rem] backdrop-blur-md transition-all active:scale-95 border shadow-lg ${orientationNeedsPermission
                         ? 'bg-orange-500/20 border-orange-500/50 text-orange-500 dark:text-orange-400 animate-pulse'
-                        : orientationMode === 'recentre'
-                            ? 'bg-green-500/20 border-green-500/50 text-green-500 dark:text-green-400'
-                            : needsRecenter
-                                ? 'bg-white/80 dark:bg-zinc-800/80 border-black/5 dark:border-white/10 text-zinc-400 dark:text-white/40'
-                                : 'bg-white/80 dark:bg-zinc-800/80 border-black/5 dark:border-white/10 text-zinc-600 dark:text-white/70'
+                        : orientationMode === 'auto'
+                            ? 'bg-blue-500/20 border-blue-500/50 text-blue-500 dark:text-blue-400'
+                            : orientationMode === 'recentre'
+                                ? 'bg-green-500/20 border-green-500/50 text-green-500 dark:text-green-400'
+                                : needsRecenter
+                                    ? 'bg-white/80 dark:bg-zinc-800/80 border-black/5 dark:border-white/10 text-zinc-400 dark:text-white/40'
+                                    : 'bg-white/80 dark:bg-zinc-800/80 border-black/5 dark:border-white/10 text-zinc-600 dark:text-white/70'
                         }`}
                 >
-                    {orientationMode === 'recentre' ? <MapPin size={20} /> : <Compass size={20} />}
+                    {orientationMode === 'auto'
+                        ? <Navigation2 size={20} />
+                        : orientationMode === 'recentre'
+                            ? <MapPin size={20} />
+                            : <Compass size={20} />}
                 </button>
 
                 {/* Route Button - below orientation button */}

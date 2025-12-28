@@ -95,9 +95,17 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
             // Poll every 10 seconds for new spots
             const intervalId = setInterval(searchSpots, 10000);
 
+            // Also trigger search when app returns from background (iOS)
+            const handleVisibilityRefresh = () => {
+                console.log('[Parlens] Visibility refresh triggered, searching spots...');
+                searchSpots();
+            };
+            window.addEventListener('visibility-refresh', handleVisibilityRefresh);
+
             return () => {
                 console.log('[Parlens] Stopping spot search');
                 clearInterval(intervalId);
+                window.removeEventListener('visibility-refresh', handleVisibilityRefresh);
                 // Note: Don't clear spots here - spots are cleared when status changes away from 'search'
             };
         } else {
