@@ -12,7 +12,8 @@ import { ProfileButton } from '../components/ProfileButton';
 import { RouteButton } from '../components/RouteButton';
 import { clusterSpots, isCluster } from '../lib/clustering';
 import { getCurrencySymbol } from '../lib/currency';
-import { StableLocationTracker } from '../lib/locationSmoothing';
+import { StableLocationTracker, LocationSmoother, PositionAnimator, BearingAnimator } from '../lib/locationSmoothing';
+import { useWakeLock } from '../hooks/useWakeLock';
 
 // Free vector tile styles - using simpler styles that match better
 const MAP_STYLES = {
@@ -32,22 +33,47 @@ const UserLocationMarker = memo(({ bearing, mapBearing, isNavigationMode }: { be
     // So Marker Up is Screen Up (0).
     // We want Marker to point H relative to screen.
     // But H is absolute (0=North).
-    // If Map is rotated B. Screen Up is Map-Direction B.
-    // North is at -B.
-    // If User Heading H.
-    // We want arrow to point H relative to North.
-    // Relative to Screen Up?
-    // Screen Up = Map Bearing B.
-    // User Heading H.
-    // Angle = H - B.
-    const rotation = isNavigationMode ? 0 : (bearing - mapBearing);
+    // Simplified Rotation Logic:
+    // Auto/Navigation Mode: Map rotates. Marker Points UP (Relative 0).
+    // Fixed Mode: Map is Fixed (0 or user-set). Marker Points Compass Bearing.
+
+    // In AutoMode: We pass "bearing" (Smoothed User Heading) to the map as the bearing.
+    // So the Map rotates such that "North" is at -Bearing.
+    // The screen "Forward" is Bearing.
+    // So the marker should just point UP (0).
+
+    // Unified Rotation Logic:
+    // Always calculate targetRotation = bearing - mapBearing.
+    // In Fixed Mode: mapBearing is roughly constant (0 or set). Bearing rotates. Marker rotates.
+    // In Auto Mode: mapBearing follows Bearing. Ideally targetRotation = 0.
+    // BUT due to animation lag, mapBearing might lag behind Bearing.
+    // By using (Bearing - MapBearing), the marker points to the TRUE Bearing relative to Screen/Map.
+    // If Map lags by 5deg, Marker points 5deg right (True North). This masks the lag.
+
+    const targetRotation = bearing - mapBearing;
+
+    // Shortest Path Logic
+    const rotationRef = useRef(0);
+    const lastTargetRef = useRef(0);
+    const diff = targetRotation - lastTargetRef.current;
+    if (Math.abs(diff) > 180) {
+        if (diff > 0) {
+            rotationRef.current -= 360;
+        } else {
+            rotationRef.current += 360;
+        }
+    }
+    lastTargetRef.current = targetRotation;
+    const finalRotation = targetRotation + rotationRef.current;
+
+
     const scale = isNavigationMode ? 1 : 1;
 
     return (
         <div
             style={{
-                transform: `rotate(${rotation}deg) scale(${scale})`,
-                transition: 'transform 0.3s ease-out',
+                transform: `rotate(${finalRotation}deg) scale(${scale})`,
+                transition: 'transform 0.2s ease-out', // Re-enabled to smooth out compass noise
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -157,10 +183,10 @@ const ClusterMarkerContent = memo(({ count, minPrice, maxPrice, currency, type }
 });
 ClusterMarkerContent.displayName = 'ClusterMarkerContent';
 
-// Active Session Marker
+// Active Session Marker (Map Icon)
 const ActiveSessionMarkerContent = memo(({ vehicleType }: { vehicleType: 'bicycle' | 'motorcycle' | 'car' }) => {
+    // Only the emoji marker on the map
     const emoji = vehicleType === 'bicycle' ? '🚲' : vehicleType === 'motorcycle' ? '🏍️' : '🚗';
-
     return (
         <div style={{ fontSize: 36, filter: 'drop-shadow(0 4px 8px rgba(0,0,0,0.4))', pointerEvents: 'none' }}>
             {emoji}
@@ -238,11 +264,18 @@ VehicleToggle.displayName = 'VehicleToggle';
 export const LandingPage: React.FC = () => {
     const mapRef = useRef<MapRef>(null);
     const [location, setLocation] = useState<[number, number] | null>(null);
+    const locationSmoother = useRef(new LocationSmoother());
+    // Use BearingAnimator for map rotation to prevent 0/360 flip flickering
+    const bearingAnimator = useRef(new BearingAnimator());
+    // Animator for marker position
+    const positionAnimator = useRef(new PositionAnimator());
     const [locationError, setLocationError] = useState<string | null>(null);
-    const [bearing, setBearing] = useState(0);
+
     const [status, setStatus] = useState<'idle' | 'search' | 'parked'>('idle');
     const [orientationMode, setOrientationMode] = useState<'fixed' | 'recentre' | 'auto'>('fixed');
+    const [pendingAutoMode, setPendingAutoMode] = useState(false); // Immediate visual feedback for button
     const [showHelp, setShowHelp] = useState(false);
+    // Currency state - removed (logic in FAB)
     const [vehicleType, setVehicleType] = useState<'bicycle' | 'motorcycle' | 'car'>(() => {
         const saved = localStorage.getItem('parlens_vehicle_type');
         return (saved === 'bicycle' || saved === 'motorcycle' || saved === 'car') ? saved : 'car';
@@ -258,6 +291,12 @@ export const LandingPage: React.FC = () => {
     const [showRoute, setShowRoute] = useState(false);
     const [dropPinMode, setDropPinMode] = useState(false);
     const [pendingDropPin, setPendingDropPin] = useState<{ lat: number; lon: number } | null>(null);
+
+
+
+    // Session State (Lifted from FAB)
+    const [sessionStart, setSessionStart] = useState<number | null>(null);
+    const [isMapLoaded, setIsMapLoaded] = useState(false);
 
     // MapLibre view state
     const [viewState, setViewState] = useState({
@@ -277,13 +316,19 @@ export const LandingPage: React.FC = () => {
     const [orientationNeedsPermission, setOrientationNeedsPermission] = useState(false);
 
     // Cumulative rotation for smooth bearing transitions
-    const lastBearing = useRef(0);
     const [cumulativeRotation, setCumulativeRotation] = useState(0);
+    const [userHeading, setUserHeading] = useState(0); // Responsive heading for marker
+
+    // Screen Wake Lock
+    const { requestLock, releaseLock } = useWakeLock();
 
     // Location smoothing with dynamic buffer zones
     const locationTracker = useRef(new StableLocationTracker());
     const [_userSpeed, setUserSpeed] = useState(0); // Available for future speed indicator UI
     const initialLocationSet = useRef(false); // Track if we've set initial location
+    const userSpeedRef = useRef(0); // Live speed ref for animator callback
+    const latestCompassHeading = useRef(0); // Live compass heading for smooth transitions
+
 
     // Initialize location tracking with smoothing
     useEffect(() => {
@@ -296,16 +341,30 @@ export const LandingPage: React.FC = () => {
             (position) => {
                 const { latitude, longitude } = position.coords;
 
-                // Apply location smoothing with dynamic buffer zone
-                const result = locationTracker.current.updateLocation(latitude, longitude);
+                // 1. Smooth the raw GPS coordinates using Kalman Filter
+                const [smoothedLat, smoothedLon] = locationSmoother.current.smoothLocation(latitude, longitude);
+
+                // 2. Pass smoothed coordinates to StableLocationTracker (Buffer Logic)
+                const result = locationTracker.current.updateLocation(smoothedLat, smoothedLon);
 
                 // Only update state if marker should move (outside buffer zone)
                 if (result.shouldUpdate) {
-                    setLocation([result.displayLat, result.displayLon]);
+                    // Use Animator to smoothly interpolate to the new position
+                    // This creates 60fps movement instead of 1Hz jumps
+                    // IMPORTANT: Stop any previous animation first (handled inside animateTo)
+                    positionAnimator.current.animateTo(
+                        result.displayLat,
+                        result.displayLon,
+                        result.animationDuration
+                    );
                 }
 
                 // Track speed for potential UI feedback
                 setUserSpeed(result.speed);
+                userSpeedRef.current = result.speed;
+
+                // GPS used for Location Interpolation (locationTracker/positionAnimator)
+                // Orientation is Compass-Only (handled in handleOrientation)
 
                 // Initialize view state ONLY on first location (using ref to avoid stale closure)
                 if (!initialLocationSet.current) {
@@ -332,8 +391,54 @@ export const LandingPage: React.FC = () => {
             }
         );
 
+        // Bind animator callback to state updates
+        positionAnimator.current.setUpdateCallback((lat, lon) => {
+            // Always update marker location
+            setLocation([lat, lon]);
+
+            // Sync Map Center in Auto Mode (Hard Lock)
+            // This prevents "jitter" where the marker moves independently of the map camera
+            // We use a functional update to access the latest state without closure issues
+            setOrientationMode(currentMode => {
+                // GUARD: If user is interacting (pinching/panning), DO NOT force update viewState
+                // This prevents "fighting" the user's gestures and allows smooth zooming
+                if ((currentMode === 'auto' || currentMode === 'recentre') && !isUserInteracting.current) {
+
+                    // GUARD: Stationary Check
+                    // If speed is very low (< 0.3 m/s), do not recenter automatically.
+                    // This allows the user to browse the map freely when stopped
+                    if (userSpeedRef.current < 0.3 && currentMode !== 'recentre') {
+                        return currentMode;
+                    }
+
+                    setViewState(prev => {
+                        // CRITICAL: Use LIVE zoom from map instance if available, otherwise fallback to state
+                        const liveZoom = mapRef.current?.getZoom() ?? prev.zoom;
+
+
+
+                        // Soft Follow (LERP)
+                        // Move camera 10% of the distance to the target per frame.
+                        // This removes the "Jitter" effect caused by frame misalignment.
+                        const lerpFactor = 0.1;
+                        const newLat = prev.latitude + (lat - prev.latitude) * lerpFactor;
+                        const newLon = prev.longitude + (lon - prev.longitude) * lerpFactor;
+
+                        return {
+                            ...prev,
+                            latitude: newLat,
+                            longitude: newLon,
+                            zoom: liveZoom
+                        };
+                    });
+                }
+                return currentMode;
+            });
+        });
+
         return () => {
             navigator.geolocation.clearWatch(watchId);
+            positionAnimator.current.stop();
         };
     }, []);
 
@@ -345,25 +450,62 @@ export const LandingPage: React.FC = () => {
         }
 
         const handleOrientation = (event: DeviceOrientationEvent) => {
-            let newBearing: number | null = null;
+            // STOP updating orientation if user is interacting (panning/zooming)
+            // This prevents React re-renders from interrupting the MapLibre gesture handling
+            if (isUserInteracting.current) return;
 
-            // iOS uses webkitCompassHeading
-            if ((event as any).webkitCompassHeading !== undefined) {
-                newBearing = (event as any).webkitCompassHeading;
-            } else if (event.alpha !== null && event.absolute) {
-                // Android
-                newBearing = (360 - event.alpha) % 360;
+            let heading: number | null = null;
+
+            if ((event as any).webkitCompassHeading) {
+                // iOS
+                heading = (event as any).webkitCompassHeading;
+                // Adjust for landscape
+                if ((window.screen as any).orientation && (window.screen as any).orientation.type.includes('landscape')) {
+                    heading = (heading! + 90) % 360;
+                } else if (window.orientation === 90) {
+                    heading = (heading! + 90) % 360;
+                } else if (window.orientation === -90) {
+                    heading = (heading! - 90 + 360) % 360;
+                }
+            } else if (event.alpha !== null) {
+                // Android (absolute)
+                heading = 360 - (event.alpha as number);
+                // Adjust for landscape
+                if ((window.screen as any).orientation && (window.screen as any).orientation.type.includes('landscape')) {
+                    heading = (heading + 90) % 360;
+                }
             }
 
-            if (newBearing !== null) {
-                setBearing(newBearing);
 
-                // Calculate cumulative rotation for smooth animations
-                let delta = newBearing - lastBearing.current;
-                if (delta > 180) delta -= 360;
-                if (delta < -180) delta += 360;
-                setCumulativeRotation(prev => prev + delta);
-                lastBearing.current = newBearing;
+
+            if (heading !== null) {
+                latestCompassHeading.current = heading; // Update for button transition logic
+                // Noise Gate: Ignore micro-changes (< 2 degrees) to filter vibrations
+                // We use a ref to store the last processed heading to compare against
+                // Note: We need to handle 360 wrap-around for the diff check
+
+                // 1. Update Marker (Heavy Smoothing for Stability)
+                // Reduced factor from 0.7 (twitchy) to 0.1 (stable)
+                setUserHeading(h => {
+                    const diff = heading! - h;
+                    let d = diff;
+                    if (d > 180) d -= 360;
+                    if (d < -180) d += 360;
+
+                    // Noise Gate: If change is < 2 degrees, ignore it (return current h)
+                    // limit updates to significant movements
+                    if (Math.abs(d) < 2) return h;
+
+                    return h + d * 0.1;
+                });
+
+                // 2. Update Map Smoothly (Heavy Smoothing to prevent motion sickness)
+                const smoothed = locationSmoother.current.smoothBearing(heading, 0, true);
+                if (smoothed !== null) {
+                    // Use animator to ensure continuous rotation (handles 359->1 wrap correctly)
+                    const continuous = bearingAnimator.current.setBearing(smoothed);
+                    setCumulativeRotation(continuous);
+                }
             }
         };
 
@@ -389,52 +531,187 @@ export const LandingPage: React.FC = () => {
     // recentre = follows position only, keeps current bearing
     useEffect(() => {
         // Only update if we're in a tracking mode and not being interrupted
-        if (!isUserInteracting.current && !isTransitioning.current && !showRoute && location && (orientationMode === 'auto' || orientationMode === 'recentre')) {
+        // REMOVED !showRoute constraint to allow updates during navigation
+        if (!isUserInteracting.current && !isTransitioning.current && location && (orientationMode === 'auto' || orientationMode === 'recentre')) {
             setViewState(prev => {
+                // CRITICAL: Use LIVE zoom from map instance if available.
+                // React state (prev.zoom) lags behind native map gestures (pinch).
+                // If we force prev.zoom back to the map, we effectively cancel the user's pinch every 60Hz frame.
+                const liveZoom = mapRef.current?.getZoom() ?? prev.zoom;
+
                 const newState = {
                     ...prev,
                     longitude: location[1],
                     latitude: location[0],
+                    zoom: liveZoom, // Use live zoom
                     pitch: 0
                 };
                 // Only auto mode rotates with device
                 if (orientationMode === 'auto') {
+                    // Smooth bearing is already applied to cumulativeRotation
                     newState.bearing = cumulativeRotation;
+                    // Apply a small transition (100ms) to hide frame jitter (60Hz -> 100ms smooth)
+                    // 0ms was too harsh and revealed react/gpu variance. 300ms was too laggy fighting user.
+                    // 100ms is the sweet spot.
+                    (newState as any).transitionDuration = 100;
                 }
                 return newState;
             });
         }
     }, [location, cumulativeRotation, orientationMode, showRoute]);
 
+
+
+
+
+    // Manage Wake Lock based on orientation mode
+    // Manage Wake Lock globally (always active when app is open)
+    useEffect(() => {
+        requestLock();
+        return () => {
+            releaseLock();
+        };
+    }, [requestLock, releaseLock]);
+
+    // Session Persistence
+    useEffect(() => {
+        const savedSession = localStorage.getItem('parlens_session');
+        if (savedSession) {
+            try {
+                const session = JSON.parse(savedSession);
+                if (session.status === 'parked' && session.parkLocation && session.sessionStart) {
+                    console.log('[Parlens] Restoring parked session:', session);
+                    setSessionStart(session.sessionStart);
+                    setParkLocation(session.parkLocation);
+                    setStatus('parked');
+                } else if (session.status === 'search') {
+                    console.log('[Parlens] Restoring search session');
+                    setStatus('search');
+                }
+            } catch (e) {
+                console.warn('[Parlens] Failed to restore session:', e);
+                localStorage.removeItem('parlens_session');
+            }
+        }
+    }, []);
+
+    // Save session
+    useEffect(() => {
+        if (status === 'parked' && sessionStart && parkLocation) {
+            localStorage.setItem('parlens_session', JSON.stringify({
+                status: 'parked',
+                sessionStart,
+                parkLocation
+            }));
+        } else if (status === 'search') {
+            localStorage.setItem('parlens_session', JSON.stringify({ status: 'search' }));
+        } else if (status === 'idle') {
+            localStorage.removeItem('parlens_session');
+            setSessionStart(null);
+        }
+    }, [status, sessionStart, parkLocation]);
+
+
     // Handle map move - Update state immediately when user moves map
     const handleMove = useCallback((evt: { viewState: typeof viewState }) => {
         setViewState(evt.viewState);
 
-        // Immediate check for off-center to update icon to 'fixed' immediately
-        if (location && isUserInteracting.current) {
-            const distance = Math.sqrt(
-                Math.pow(evt.viewState.longitude - location[1], 2) +
-                Math.pow(evt.viewState.latitude - location[0], 2)
-            );
+        // Strict Pan-to-Fixed for BOTH Auto and Recentre modes
+        // If user is interacting (dragging), immediately switch to 'fixed'.
+        // Removed distance buffer as per user request ("if the user pans at all").
 
-            // ~50m threshold to switch to fixed mode
-            if (distance > 0.0005) {
-                if (!needsRecenter) setNeedsRecenter(true);
-                if (orientationMode !== 'fixed') setOrientationMode('fixed');
+        // Interaction Logic:
+        // 1. Z O O M: Use multi-touch check (most robust) or isZoomingRef
+        //    If >1 touch point, it's a zoom/pitch -> KEEP tracking mode.
+        // 2. T H R E S H O L D: Allow small pans in Recentering mode (framing).
+        //    Only switch to Fixed if pan is significant (intentional drag away).
+
+        let isZooming = false;
+
+        // Robust Zoom Detection
+        if (mapRef.current) {
+            // Check ref from event listeners
+            if (isZoomingRef.current) isZooming = true;
+            // Check active map state
+            if (mapRef.current.isZooming()) isZooming = true;
+            // Check touch points (if available in original event)
+            if (evt && (evt as any).originalEvent && (evt as any).originalEvent.touches && (evt as any).originalEvent.touches.length > 1) {
+                isZooming = true;
+            }
+        }
+
+        if (isUserInteracting.current && (orientationMode === 'auto' || orientationMode === 'recentre')) {
+            if (!isZooming) {
+                // Calculate pan distance from current location
+                // If very small (< 100 meters?), might be accidental or framing.
+                // User request: "ensure if the user pans to fix centring in re-centre mdoe it doesn't change back to fixed mode"
+                // So we need a threshold.
+
+                let distance = 1.0;
+                if (location) {
+                    distance = Math.sqrt(
+                        Math.pow(evt.viewState.longitude - location[1], 2) +
+                        Math.pow(evt.viewState.latitude - location[0], 2)
+                    );
+                }
+
+                // Threshold: 0.0001 degrees is approx 11 meters.
+                // Allow very small jitters, but any real pan switches to Fixed.
+                if (distance > 0.0001) {
+                    setOrientationMode('fixed');
+                }
             }
         }
     }, [location, orientationMode, needsRecenter]);
 
-    const handleMoveStart = useCallback(() => {
-        isUserInteracting.current = true;
-        // Don't switch modes here - let handleMove check if location is off-center
-        // This preserves auto/recentre modes during zoom, rotation, and small pans
+    const handleMoveStart = useCallback((evt: any) => {
+        // Only consider it a USER interaction if caused by input (touch/mouse)
+        // Programmatic moves (flyTo, easeTo) do not have originalEvent in some versions, 
+        // or we can check specific boolean flags if needed. 
+        // MapLibre standard: check if originalEvent exists.
+        if (evt.originalEvent) {
+            isUserInteracting.current = true;
+            // STOP auto-centering animation immediately when user interacts
+            // This prevents the "fighting" feeling where the map tries to pull back
+            positionAnimator.current.stop();
+            // CRITICAL: Stop any ongoing camera animations (flyTo/easeTo) ONLY if we initiated one.
+            // If the map is just idle or finishing a previous user fling, calling stop() might break the new gesture.
+            if (isTransitioning.current) {
+                mapRef.current?.stop();
+                isTransitioning.current = false;
+            }
+        }
     }, []);
 
     const handleMoveEnd = useCallback(() => {
-        isUserInteracting.current = false;
+        // Debounce the interaction end to prevent fighting during multi-touch gestures
+        setTimeout(() => {
+            isUserInteracting.current = false;
+        }, 1000); // 1-second cooldown after user lets go before auto-tracking resumes
         setZoomLevel(viewState.zoom);
     }, [viewState.zoom]);
+
+    // Track Zoom State explicitly (isZooming is unreliable in handleMove)
+    const isZoomingRef = useRef(false);
+    const handleZoomStart = useCallback(() => {
+        isZoomingRef.current = true;
+        isUserInteracting.current = true;
+        // Stop any ongoing animations to prevents fighting
+        positionAnimator.current.stop();
+        if (isTransitioning.current) {
+            mapRef.current?.stop();
+            isTransitioning.current = false;
+        }
+    }, []);
+    const handleZoomEnd = useCallback(() => {
+        isZoomingRef.current = false;
+        // Debounce the interaction end (same as handleMoveEnd)
+        setTimeout(() => {
+            if (!isZoomingRef.current) {
+                isUserInteracting.current = false;
+            }
+        }, 1000);
+    }, []);
 
     // Handle map click for drop pin
     const handleClick = useCallback((evt: maplibregl.MapMouseEvent) => {
@@ -477,9 +754,17 @@ export const LandingPage: React.FC = () => {
             // Prevent location tracking from overriding the fit
             isTransitioning.current = true;
             mapRef.current.fitBounds(bounds, { padding: 50, duration: 1000 });
-            mapRef.current.once('moveend', () => {
+            // Force Fixed Mode so the user can inspect the route without Auto-Centering hijacking the view
+            setOrientationMode('fixed');
+
+            // Safety timeout to reset transitioning flag
+            setTimeout(() => {
                 isTransitioning.current = false;
-            });
+                // Prompt for toggle if needed to refresh orientation
+                if (typeof (DeviceOrientationEvent as any).requestPermission === 'function') {
+                    setOrientationNeedsPermission(true);
+                }
+            }, 1200);
         }
     }, []);
 
@@ -547,37 +832,36 @@ export const LandingPage: React.FC = () => {
         }
     };
 
-    // Loading state
-    if (!location) {
-        return (
-            <div className="fixed inset-0 flex items-center justify-center bg-gray-50 dark:bg-black">
-                <div className="flex flex-col items-center gap-4 animate-in fade-in duration-700 px-8 max-w-sm text-center">
-                    {!locationError ? (
-                        <>
-                            <div className="w-8 h-8 rounded-full border-4 border-blue-500/20 border-t-blue-500 animate-spin" />
-                            <p className="text-sm font-semibold text-zinc-400 dark:text-white/40 tracking-tight">Locating...</p>
-                        </>
-                    ) : (
-                        <>
-                            <div className="w-12 h-12 rounded-full bg-red-500/20 flex items-center justify-center">
-                                <span className="text-2xl">📍</span>
-                            </div>
-                            <p className="text-sm font-medium text-red-500 dark:text-red-400">{locationError}</p>
-                            <button
-                                onClick={() => window.location.reload()}
-                                className="mt-2 px-6 py-2 rounded-full bg-blue-500 text-white text-sm font-medium active:scale-95 transition-transform"
-                            >
-                                Try Again
-                            </button>
-                        </>
-                    )}
-                </div>
-            </div>
-        );
-    }
+
 
     return (
         <div className="fixed inset-0 overflow-hidden bg-gray-50 dark:bg-black transition-colors duration-300">
+            {/* Loading Overlay - Covers everything until ready */}
+            {((!location && !locationError) || !isMapLoaded) && (
+                <div className="absolute inset-0 z-[2000] flex items-center justify-center bg-gray-50 dark:bg-black transition-opacity duration-500">
+                    <div className="flex flex-col items-center gap-4 animate-in fade-in duration-700 px-8 max-w-sm text-center">
+                        {!locationError ? (
+                            <>
+                                <div className="w-8 h-8 rounded-full border-4 border-blue-500/20 border-t-blue-500 animate-spin" />
+                                <p className="text-sm font-semibold text-zinc-400 dark:text-white/40 tracking-tight">Locating...</p>
+                            </>
+                        ) : (
+                            <>
+                                <div className="w-12 h-12 rounded-full bg-red-500/20 flex items-center justify-center">
+                                    <span className="text-2xl">📍</span>
+                                </div>
+                                <p className="text-sm font-medium text-red-500 dark:text-red-400">{locationError}</p>
+                                <button
+                                    onClick={() => window.location.reload()}
+                                    className="mt-2 px-6 py-2 rounded-full bg-blue-500 text-white text-sm font-medium active:scale-95 transition-transform"
+                                >
+                                    Try Again
+                                </button>
+                            </>
+                        )}
+                    </div>
+                </div>
+            )}
             {/* Drop Pin Mode Indicator */}
             {dropPinMode && (
                 <div className="absolute top-0 left-0 right-0 z-[1000] bg-orange-500 text-white py-3 px-4 text-center font-medium shadow-lg animate-pulse">
@@ -585,18 +869,74 @@ export const LandingPage: React.FC = () => {
                 </div>
             )}
 
+            {/* Active Session Indicator (Parked Mode) - Green Pill Top Center */}
+            {status === 'parked' && (
+                <div className="absolute top-6 left-1/2 -translate-x-1/2 z-[1000] h-12 px-6 bg-[#34C759] rounded-full shadow-lg flex items-center gap-3 animate-in slide-in-from-top-4">
+                    <div className="text-xl">
+                        {vehicleType === 'bicycle' ? '🚲' : vehicleType === 'motorcycle' ? '🏍️' : '🚗'}
+                    </div>
+                    <span className="font-bold text-white whitespace-nowrap">Session Active</span>
+                </div>
+            )}
+
+            {/* Searching Bubble (Search Mode) - White Pill with Orange Dot */}
+            {status === 'search' && (
+                <div className="absolute top-6 left-1/2 -translate-x-1/2 z-[1000] h-12 px-6 bg-white dark:bg-zinc-800 rounded-full shadow-lg flex items-center gap-3 animate-in slide-in-from-top-4">
+                    <div className="w-2.5 h-2.5 rounded-full bg-[#FF9500] animate-pulse" />
+                    <span className="font-bold text-zinc-900 dark:text-white whitespace-nowrap">Searching for spots</span>
+                </div>
+            )}
+
+            {/* STATIC USER MARKER (Auto Mode Only) - Eliminates Vibration & Shaking */}
+            {orientationMode === 'auto' && location && (
+                <div
+                    className="absolute top-1/2 left-1/2 z-[900] pointer-events-none flex items-center justify-center"
+                    style={{
+                        transform: 'translate(-50%, -50%)', // Robust centering
+                        width: '40px', // Explicit size to prevent layout collapse/skew
+                        height: '40px'
+                    }}
+                >
+                    <UserLocationMarker
+                        bearing={userHeading}
+                        mapBearing={viewState.bearing}
+                        isNavigationMode={true}
+                    />
+                </div>
+            )
+            }
+
             {/* MapLibre GL Map */}
-            <div className="absolute inset-0">
+            <div
+                className="absolute inset-0"
+                // CAPTURE ALL TOUCHES/CLICKS EARLY
+                // This guarantees we mark interaction BEFORE MapLibre or React updates processing
+                onPointerDownCapture={() => {
+                    isUserInteracting.current = true;
+                    // Stop strict centering animations immediately
+                    positionAnimator.current.stop();
+                    // Stop any programmatic FlyTo/EaseTo
+                    if (isTransitioning.current) {
+                        mapRef.current?.stop();
+                        isTransitioning.current = false;
+                    }
+                }}
+            >
                 <Map
                     ref={mapRef}
+                    onLoad={() => setIsMapLoaded(true)}
                     {...viewState}
                     onMove={handleMove}
                     onMoveStart={handleMoveStart}
                     onMoveEnd={handleMoveEnd}
+                    onZoomStart={handleZoomStart}
+                    onZoomEnd={handleZoomEnd}
                     onClick={handleClick}
                     style={{ width: '100%', height: '100%' }}
                     mapStyle={mapStyle}
                     attributionControl={false}
+                    // Optimize interaction handlers
+                    dragPan={!isTransitioning.current} // Disable pan during auto-transitions to prevent state fighting
                 >
                     {/* Alternate route */}
                     {showRoute && alternateRouteCoords && alternateRouteCoords.length > 1 && (
@@ -724,19 +1064,21 @@ export const LandingPage: React.FC = () => {
                         </Marker>
                     )}
 
-                    {/* User location marker - Always on top */}
-                    <Marker
-                        longitude={location[1]}
-                        latitude={location[0]}
-                        anchor="center"
-                        style={{ zIndex: 1000 }}
-                    >
-                        <UserLocationMarker
-                            bearing={bearing}
-                            mapBearing={viewState.bearing}
-                            isNavigationMode={orientationMode === 'auto'}
-                        />
-                    </Marker>
+                    {/* User location marker - Unified for ALL modes for smooth transitions */}
+                    {location && orientationMode !== 'auto' && (
+                        <Marker
+                            longitude={location[1]}
+                            latitude={location[0]}
+                            anchor="center"
+                            style={{ zIndex: 1000 }}
+                        >
+                            <UserLocationMarker
+                                bearing={userHeading}
+                                mapBearing={viewState.bearing}
+                                isNavigationMode={false}
+                            />
+                        </Marker>
+                    )}
                 </Map>
             </div>
 
@@ -805,6 +1147,11 @@ export const LandingPage: React.FC = () => {
                             return;
                         }
 
+                        // CRITICAL: Stop any ongoing map animations (e.g. flyTo) immediately
+                        // This ensures the button works even if the map is currently moving/animating
+                        mapRef.current?.stop();
+                        isTransitioning.current = false; // Reset transition flag just in case
+
                         // Logic:
                         // 1. If map is not centered on user (needsRecenter):
                         //    - Recenter ONLY (keep zoom if > 17).
@@ -817,8 +1164,8 @@ export const LandingPage: React.FC = () => {
                         const currentZoom = viewState.zoom;
                         const DEFAULT_ZOOM = 17;
 
+                        // Case 1: Needs Recenter (User panned away)
                         if (needsRecenter) {
-                            // Case 1: Recenter User
                             if (location) {
                                 // If zoomed out, zoom in. If zoomed in, keep zoom.
                                 const targetZoom = currentZoom < DEFAULT_ZOOM ? DEFAULT_ZOOM : currentZoom;
@@ -832,46 +1179,72 @@ export const LandingPage: React.FC = () => {
                                 });
                                 mapRef.current?.once('moveend', () => { isTransitioning.current = false; });
                             }
-                            // Just set to recentre mode, don't cycle yet
                             setOrientationMode('recentre');
                             setNeedsRecenter(false);
                             return;
                         }
 
-                        // Case 2: Already Centered, incorrect zoom
-                        if (Math.abs(currentZoom - DEFAULT_ZOOM) > 0.5) {
-                            // Reset Zoom to default
-                            isTransitioning.current = true;
-                            mapRef.current?.flyTo({
-                                zoom: DEFAULT_ZOOM,
-                                duration: 600
-                            });
-                            mapRef.current?.once('moveend', () => { isTransitioning.current = false; });
-                            return;
+                        // Case 2: Already Centered but Incorrect Zoom OR Manual Re-trigger
+                        // If we are already in 'recentre' or 'fixed' and coming back, make it smooth.
+                        if (orientationMode === 'fixed' || orientationMode === 'recentre') {
+                            if (location) {
+                                isTransitioning.current = true;
+                                mapRef.current?.flyTo({
+                                    center: [location[1], location[0]], // Ensure we fly to user
+                                    zoom: currentZoom < DEFAULT_ZOOM ? DEFAULT_ZOOM : currentZoom,
+                                    bearing: 0, // Reset bearing for recentre mode
+                                    duration: 800,
+                                    essential: true
+                                });
+                                mapRef.current?.once('moveend', () => {
+                                    isTransitioning.current = false;
+                                    // Ensure we stay in recentre mode after flyTo (fixes any pending state)
+                                    if (orientationMode === 'fixed') setOrientationMode('recentre');
+                                });
+                            }
                         }
 
                         // Case 3: Cycle Modes
-                        // fixed -> recentre -> auto -> fixed
+                        // Standard mobile map pattern:
+                        // Fixed (Off) -> Recentre (Follow) -> Auto (Heading) -> Recentre (Follow)
+                        // Pan -> Fixed (Handled in handleMove)
+
+                        if (orientationMode === 'recentre') {
+                            // Recentre -> Auto
+                            // Smoothly rotate map to current compass heading BEFORE switching mode
+                            // This prevents the "snap" from 0 to current heading
+                            const targetBearing = userHeading || 0;
+                            isTransitioning.current = true;
+                            setPendingAutoMode(true); // Immediate visual update
+                            mapRef.current?.rotateTo(targetBearing, { duration: 800 });
+                            mapRef.current?.once('moveend', () => {
+                                isTransitioning.current = false;
+                                setPendingAutoMode(false);
+                                // Reset animator to match target to prevent spin on takeover
+                                bearingAnimator.current.reset(targetBearing);
+                                setOrientationMode('auto');
+                            });
+                            return; // Don't change mode yet
+                        }
+
                         setOrientationMode(m => {
-                            if (m === 'recentre') {
-                                // Switch to Auto (Navigation) - SMOOTH TRANSITION with device bearing
+                            if (m === 'auto') {
+                                // NEW: Auto -> Fixed (Exit Cycle)
+                                // Reset zoom to default (16.5) and rotation to 0
                                 isTransitioning.current = true;
                                 mapRef.current?.flyTo({
-                                    bearing: cumulativeRotation,
-                                    duration: 1000,
-                                    easing: (t) => t
+                                    bearing: 0,
+                                    pitch: 0,
+                                    zoom: 16.5,
+                                    duration: 800,
+                                    essential: true
                                 });
+                                // Reset flags
                                 mapRef.current?.once('moveend', () => { isTransitioning.current = false; });
-                                return 'auto';
+                                setPendingAutoMode(false);
+                                return 'fixed'; // Switch to Fixed
                             }
-                            if (m === 'auto') {
-                                // Clicking out of auto -> go to FIXED with North orientation
-                                isTransitioning.current = true;
-                                mapRef.current?.rotateTo(0, { duration: 600 });
-                                mapRef.current?.once('moveend', () => { isTransitioning.current = false; });
-                                return 'fixed'; // Stop all tracking
-                            }
-                            // From Fixed -> Recentre (start following again)
+                            // Fixed -> Recentre (Cycle started by flyTo above)
                             return 'recentre';
                         });
                     }}
@@ -882,7 +1255,7 @@ export const LandingPage: React.FC = () => {
                 >
                     {orientationNeedsPermission ? (
                         <MapPin size={20} />
-                    ) : orientationMode === 'auto' ? (
+                    ) : (orientationMode === 'auto' || pendingAutoMode) ? (
                         <ArrowUp size={20} className="text-blue-500" />
                     ) : orientationMode === 'recentre' ? (
                         <Locate size={20} fill="currentColor" className="text-green-500" />
@@ -909,14 +1282,18 @@ export const LandingPage: React.FC = () => {
                 </div>
 
                 {/* FAB */}
+                {/* Ensure we pass a valid location tuple if available, or default to 0,0 (FAB won't search if null anyway) */}
+
                 <FAB
                     status={status}
                     setStatus={setStatus}
-                    location={location}
+                    searchLocation={location} // Pass null if location not ready
                     vehicleType={vehicleType}
                     setOpenSpots={setOpenSpots}
                     parkLocation={parkLocation}
                     setParkLocation={setParkLocation}
+                    sessionStart={sessionStart}
+                    setSessionStart={setSessionStart}
                 />
             </div>
 
@@ -930,7 +1307,10 @@ export const LandingPage: React.FC = () => {
                             onClick={() => setShowHelp(false)}
                             className="absolute inset-0 z-0 cursor-default"
                         />
-                        <div className="relative z-10 w-full max-w-md bg-white dark:bg-[#1c1c1e] rounded-[2rem] border border-black/5 dark:border-white/5 shadow-2xl p-6 space-y-6 animate-in slide-in-from-bottom-10 duration-300 h-[calc(100vh-1.5rem)] overflow-y-auto no-scrollbar transition-colors">
+                        <div
+                            className="relative z-10 w-full max-w-md bg-white dark:bg-[#1c1c1e] rounded-[2rem] border border-black/5 dark:border-white/5 shadow-2xl p-6 space-y-6 animate-in slide-in-from-bottom-10 duration-300 h-[calc(100vh-1.5rem)] overflow-y-auto no-scrollbar transition-colors"
+                            style={{ overscrollBehaviorY: 'contain' }}
+                        >
                             <button
                                 onClick={() => setShowHelp(false)}
                                 className="absolute top-6 right-6 p-2 rounded-full bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/20 transition-colors"
@@ -943,7 +1323,10 @@ export const LandingPage: React.FC = () => {
                                     <HelpCircle size={32} />
                                 </div>
                                 <h2 className="text-2xl font-bold text-zinc-900 dark:text-white">How to use Parlens</h2>
+                                <p className="text-sm text-zinc-500 dark:text-zinc-400">Find free parking spots near you</p>
                             </div>
+
+
 
                             {/* Install Instructions Accordion */}
                             <div className="space-y-3">
@@ -993,13 +1376,13 @@ export const LandingPage: React.FC = () => {
 
                             <div className="space-y-6 text-sm text-zinc-600 dark:text-white/80 leading-relaxed pt-4 border-t border-black/5 dark:border-white/10">
                                 <p>
-                                    <strong className="text-zinc-900 dark:text-white block mb-1">1. Plan your route (optional)</strong>
-                                    Tap the route button to add waypoints and create a route. Click the location button to re-centre and turn on follow-me or navigation mode for route tracking.
+                                    <strong className="text-zinc-900 dark:text-white block mb-1">1. Select vehicle type</strong>
+                                    Use the vertical toggle on the bottom-left to switch between Bicycle 🚲, Motorcycle 🏍️, or Car 🚗.
                                 </p>
 
                                 <p>
-                                    <strong className="text-zinc-900 dark:text-white block mb-1">2. Select vehicle type</strong>
-                                    Use the vertical toggle on the bottom-left to switch between Bicycle 🚲, Motorcycle 🏍️, or Car 🚗.
+                                    <strong className="text-zinc-900 dark:text-white block mb-1">2. Plan your route (optional)</strong>
+                                    Tap the route button to add waypoints and create a route. Click the location button to re-centre and turn on follow-me or navigation mode for route tracking.
                                 </p>
 
                                 <p>
@@ -1008,12 +1391,7 @@ export const LandingPage: React.FC = () => {
                                 </p>
 
                                 <p>
-                                    <strong className="text-zinc-900 dark:text-white block mb-1">4. User privacy</strong>
-                                    Parlens does not collect or share any user data. Your log and route data is encrypted by your keys and only accessible by you. Open spot broadcasts are ephemeral and not linked to any personal identifiers.
-                                </p>
-
-                                <p>
-                                    <strong className="text-zinc-900 dark:text-white block mb-1">5. Create your own mirror</strong>
+                                    <strong className="text-zinc-900 dark:text-white block mb-1">4. Create your own mirror (optional)</strong>
                                     <a
                                         href="https://github.com/prasannawarrier/parlens-pwa/blob/main/MIRROR_CREATION.md"
                                         target="_blank"
@@ -1023,6 +1401,19 @@ export const LandingPage: React.FC = () => {
                                         Follow these steps
                                     </a> to create your own mirror of the Parlens app to distribute the bandwidth load while sharing with your friends.
                                 </p>
+
+                                <p>
+                                    <strong className="text-zinc-900 dark:text-white block mb-1">5. User privacy</strong>
+                                    Parlens does not collect or share any user data. Your log and route data is encrypted by your keys and only accessible by you. Open spot broadcasts are ephemeral and not linked to any personal identifiers.
+                                </p>
+
+                                {/* Bottom tip */}
+                                <div className="p-3 rounded-xl bg-amber-500/10 dark:bg-amber-500/5 border border-amber-500/20 mt-6">
+                                    <p className="text-xs text-amber-700 dark:text-amber-400/80 leading-relaxed">
+                                        <span className="font-bold">Tip: </span>
+                                        Use Parlens over your cellular internet connection to prevent personal IP address(es) from being associated with your data.
+                                    </p>
+                                </div>
                             </div>
                         </div>
                     </div>

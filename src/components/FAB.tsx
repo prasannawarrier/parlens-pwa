@@ -10,40 +10,69 @@ import { generateSecretKey, finalizeEvent } from 'nostr-tools/pure';
 interface FABProps {
     status: 'idle' | 'search' | 'parked';
     setStatus: (s: 'idle' | 'search' | 'parked') => void;
-    location: [number, number];
+    searchLocation: [number, number] | null; // Allow null to prevent premptive searches
     vehicleType: 'bicycle' | 'motorcycle' | 'car';
     setOpenSpots: React.Dispatch<React.SetStateAction<any[]>>;
     parkLocation: [number, number] | null;
     setParkLocation: (loc: [number, number] | null) => void;
+    sessionStart: number | null;
+    setSessionStart: (time: number | null) => void;
 }
 
-export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleType, setOpenSpots, parkLocation, setParkLocation }) => {
+export const FAB: React.FC<FABProps> = ({
+    status,
+    setStatus,
+    searchLocation,
+    vehicleType,
+    setOpenSpots,
+    parkLocation,
+    setParkLocation,
+    sessionStart,
+    setSessionStart
+}) => {
     const { pubkey, pool, signEvent } = useAuth();
     const [showCostPopup, setShowCostPopup] = useState(false);
     const [cost, setCost] = useState('0');
     const [currency, setCurrency] = useState('USD');
     const [symbol, setSymbol] = useState('$');
-    const [sessionStart, setSessionStart] = useState<number | null>(null);
+    const [elapsedTime, setElapsedTime] = useState('00:00:00');
+
+    // Timer for stopwatch
+    useEffect(() => {
+        if (status === 'parked' && sessionStart) {
+            const updateTimer = () => {
+                const now = Math.floor(Date.now() / 1000);
+                const diff = now - sessionStart;
+                const hours = Math.floor(diff / 3600);
+                const minutes = Math.floor((diff % 3600) / 60);
+                const seconds = diff % 60;
+                setElapsedTime(
+                    `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
+                );
+            };
+            const id = setInterval(updateTimer, 1000);
+            updateTimer();
+            return () => clearInterval(id);
+        }
+    }, [status, sessionStart]);
 
     // Search for open spots when entering search mode - POLLING (iOS compatible)
     useEffect(() => {
-        if (status === 'search' && location) {
+        if (status === 'search' && searchLocation) {
             // Get center + 8 neighboring geohashes for boundary-safe discovery
-            const geohashes = getGeohashNeighbors(location[0], location[1], 5);
+            const geohashes = getGeohashNeighbors(searchLocation[0], searchLocation[1], 5);
             console.log('[Parlens] Starting spot search with polling in geohashes:', geohashes);
 
             // Use querySync (HTTP-like, works on iOS) instead of subscribeMany (WebSocket issues on iOS)
             const searchSpots = async () => {
                 try {
                     const now = Math.floor(Date.now() / 1000);
-                    console.log('[Parlens] Querying for spots since:', now - 300);
-
+                    // Query past 10 mins (600s) to be safe with 5-min expiry
                     const events = await pool.querySync(
                         DEFAULT_RELAYS,
-                        { kinds: [KINDS.OPEN_SPOT_BROADCAST], '#g': geohashes, since: now - 300 } as any
+                        { kinds: [KINDS.OPEN_SPOT_BROADCAST], '#g': geohashes, since: now - 600 } as any
                     );
 
-                    console.log('[Parlens] Found', events.length, 'spot events');
                     const currentTime = Math.floor(Date.now() / 1000);
                     const newSpots: any[] = [];
 
@@ -82,7 +111,7 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
                         }
                     }
 
-                    console.log('[Parlens] Setting', newSpots.length, 'valid spots');
+                    console.log('[Parlens] Found', newSpots.length, 'valid spots');
                     setOpenSpots(newSpots);
                 } catch (e) {
                     console.error('[Parlens] Spot query error:', e);
@@ -112,44 +141,7 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
             // Clear spots when NOT in search mode
             setOpenSpots([]);
         }
-    }, [status, vehicleType, pool]); // Removed location - we use it inside but don't need to re-run effect on location change
-
-    // Session persistence: restore session on mount
-    useEffect(() => {
-        const savedSession = localStorage.getItem('parlens_session');
-        if (savedSession) {
-            try {
-                const session = JSON.parse(savedSession);
-                if (session.status === 'parked' && session.parkLocation && session.sessionStart) {
-                    console.log('[Parlens] Restoring parked session:', session);
-                    setSessionStart(session.sessionStart);
-                    setParkLocation(session.parkLocation);
-                    setStatus('parked');
-                } else if (session.status === 'search') {
-                    console.log('[Parlens] Restoring search session');
-                    setStatus('search');
-                }
-            } catch (e) {
-                console.warn('[Parlens] Failed to restore session:', e);
-                localStorage.removeItem('parlens_session');
-            }
-        }
-    }, []);
-
-    // Save session state changes to localStorage
-    useEffect(() => {
-        if (status === 'parked' && sessionStart && parkLocation) {
-            localStorage.setItem('parlens_session', JSON.stringify({
-                status: 'parked',
-                sessionStart,
-                parkLocation
-            }));
-        } else if (status === 'search') {
-            localStorage.setItem('parlens_session', JSON.stringify({ status: 'search' }));
-        } else if (status === 'idle') {
-            localStorage.removeItem('parlens_session');
-        }
-    }, [status, sessionStart, parkLocation]);
+    }, [status, vehicleType, pool, searchLocation]); // Re-run when searchLocation changes
 
     useEffect(() => {
         const detectCurrency = async () => {
@@ -159,9 +151,9 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
             setSymbol(getCurrencySymbol(localCurrency));
 
             // Then try GPS-based detection
-            if (location) {
+            if (searchLocation) {
                 try {
-                    const gpsCurrency = await getCurrencyFromLocation(location[0], location[1]);
+                    const gpsCurrency = await getCurrencyFromLocation(searchLocation[0], searchLocation[1]);
                     setCurrency(gpsCurrency);
                     setSymbol(getCurrencySymbol(gpsCurrency));
                 } catch (e) {
@@ -170,14 +162,14 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
             }
         };
         detectCurrency();
-    }, [location]);
+    }, [searchLocation]);
 
     const handleClick = async () => {
         if (status === 'idle') {
             setStatus('search');
         } else if (status === 'search') {
             setSessionStart(Math.floor(Date.now() / 1000));
-            setParkLocation([location[0], location[1]]);
+            setParkLocation(searchLocation ? [searchLocation[0], searchLocation[1]] : null);
             setStatus('parked');
         } else if (status === 'parked') {
             setCost('0'); // Reset to 0 for new session
@@ -189,8 +181,8 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
         setStatus('idle');
         setShowCostPopup(false);
 
-        const lat = parkLocation ? parkLocation[0] : location[0];
-        const lon = parkLocation ? parkLocation[1] : location[1];
+        const lat = parkLocation ? parkLocation[0] : (searchLocation ? searchLocation[0] : 0);
+        const lon = parkLocation ? parkLocation[1] : (searchLocation ? searchLocation[1] : 0);
         // Use 5-char geohash for broadcast to match search radius
         const geohash = encodeGeohash(lat, lon, 5);
         const endTime = Math.floor(Date.now() / 1000);
@@ -266,7 +258,7 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
             const durationSeconds = endTime - startTime;
             const durationHours = Math.max(Math.ceil(durationSeconds / 3600), 1); // Minimum 1 hour
             const hourlyRate = String(Math.round(parseFloat(cost) / durationHours));
-            const expirationTime = endTime + 60; // Expires in 60 seconds
+            const expirationTime = endTime + 300; // Expires in 5 minutes (300 seconds)
 
             const broadcastEventTemplate = {
                 kind: KINDS.OPEN_SPOT_BROADCAST,
@@ -314,6 +306,14 @@ export const FAB: React.FC<FABProps> = ({ status, setStatus, location, vehicleTy
                     >
                         CANCEL
                     </button>
+                )}
+
+                {status === 'parked' && (
+                    <div className="h-14 px-6 rounded-full bg-white/90 dark:bg-zinc-800/90 backdrop-blur-md border border-black/5 dark:border-white/10 shadow-2xl flex items-center justify-center animate-in slide-in-from-left-8">
+                        <span className="font-mono text-xl font-bold tabular-nums text-zinc-900 dark:text-white">
+                            {elapsedTime}
+                        </span>
+                    </div>
                 )}
 
                 <button

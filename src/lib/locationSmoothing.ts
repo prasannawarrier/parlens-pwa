@@ -50,16 +50,25 @@ export class LocationSmoother {
     private latFilter: KalmanFilter;
     private lonFilter: KalmanFilter;
     private bearingFilter: KalmanFilter;
-    private lastBearing: number = 0;
+
+    private hasLastBearing: boolean = false;
 
     constructor() {
         // Lower Q = smoother but more lag, higher Q = more responsive but noisier
         // GPS accuracy is typically 3-10m, so we tune for that
-        this.latFilter = new KalmanFilter(0.00001, 0.0001);
-        this.lonFilter = new KalmanFilter(0.00001, 0.0001);
-        // Bearing filter with higher responsiveness
-        this.bearingFilter = new KalmanFilter(0.1, 0.5);
+        // Round 4 Tuning: drastically increased R (0.0001 -> 0.005) to eliminate jitter
+        // This trusts the "Model" (Stability) 50x more than the "Measurement" (GPS)
+        this.latFilter = new KalmanFilter(0.00001, 0.005);
+        this.lonFilter = new KalmanFilter(0.00001, 0.005);
+        // Bearing filter with higher responsiveness but smoothed to prevent jitter
+        // Round 4 Tuning: Q 0.01 -> 0.005 (Slower reaction), R 0.5 -> 0.8 (More smoothing)
+        // This stops the "twitching" arrow
+        this.bearingFilter = new KalmanFilter(0.005, 0.8);
     }
+
+    // Continuous bearing state for unwrapping circular data
+    private cumulativeBearing: number = 0;
+    private lastInputBearing: number = 0;
 
     smoothLocation(lat: number, lon: number): [number, number] {
         return [
@@ -69,28 +78,44 @@ export class LocationSmoother {
     }
 
     // Smooth bearing with additional anti-spin protection
-    smoothBearing(rawBearing: number, speed: number): number | null {
+    // ignroeSpeedCheck: Set to true for device compass (magnetic), false for GPS course
+    smoothBearing(rawBearing: number, speed: number, ignoreSpeedCheck: boolean = false): number | null {
         // Don't update bearing if speed is too low (GPS heading unreliable)
-        if (speed < 2) {
+        // Unless we are tracking device orientation (compass), which works at 0 speed.
+        if (!ignoreSpeedCheck && speed < 2) {
             return null; // Keep current bearing
         }
 
-        // Normalize bearing to 0-360
-        let bearing = ((rawBearing % 360) + 360) % 360;
+        // Normalize input bearing to 0-360
+        const currentBearing = ((rawBearing % 360) + 360) % 360;
 
-        // Handle wrap-around (e.g., 359° -> 1°)
-        if (this.lastBearing !== 0) {
-            const diff = bearing - this.lastBearing;
-            if (diff > 180) bearing -= 360;
-            if (diff < -180) bearing += 360;
+        // Initialize if this is the first reading
+        if (!this.hasLastBearing) {
+            this.lastInputBearing = currentBearing;
+            this.cumulativeBearing = currentBearing;
+            this.hasLastBearing = true;
+            this.bearingFilter.reset(); // Reset filter state to start at this value
+            this.bearingFilter.filter(currentBearing); // Prime the filter
+            return currentBearing;
         }
 
-        // Apply Kalman filter
-        const smoothed = this.bearingFilter.filter(bearing);
+        // Calculate shortest path delta (unwrapping)
+        let delta = currentBearing - this.lastInputBearing;
 
-        // Normalize result back to 0-360
-        const normalizedBearing = ((smoothed % 360) + 360) % 360;
-        this.lastBearing = normalizedBearing;
+        // Handle wrap-around (shortest path)
+        if (delta > 180) delta -= 360;
+        else if (delta < -180) delta += 360;
+
+        // Apply delta to cumulative bearing (creates a continuous line for the filter)
+        this.cumulativeBearing += delta;
+        this.lastInputBearing = currentBearing;
+
+        // Feed continuous value into Kalman filter
+        // The filter now sees a linear progression (e.g. 350 -> 360 -> 370) instead of a jump
+        const smoothedContinuous = this.bearingFilter.filter(this.cumulativeBearing);
+
+        // Normalize result back to 0-360 for UI
+        const normalizedBearing = ((smoothedContinuous % 360) + 360) % 360;
 
         return normalizedBearing;
     }
@@ -99,7 +124,9 @@ export class LocationSmoother {
         this.latFilter.reset();
         this.lonFilter.reset();
         this.bearingFilter.reset();
-        this.lastBearing = 0;
+        this.cumulativeBearing = 0;
+        this.lastInputBearing = 0;
+        this.hasLastBearing = false;
     }
 }
 
@@ -142,10 +169,10 @@ export class BearingAnimator {
         return this.currentRotation;
     }
 
-    reset() {
-        this.currentRotation = 0;
-        this.lastRawBearing = 0;
-        this.initialized = false;
+    reset(currentStartBearing: number = 0) {
+        this.currentRotation = currentStartBearing;
+        this.lastRawBearing = ((currentStartBearing % 360) + 360) % 360;
+        this.initialized = true; // Initialize immediately to avoid jump on first setBearing
     }
 }
 
@@ -155,6 +182,8 @@ export class PositionAnimator {
     private startLon: number = 0;
     private targetLat: number = 0;
     private targetLon: number = 0;
+    private currentLat: number = 0; // Track actual current position
+    private currentLon: number = 0;
     private startTime: number = 0;
     private duration: number = 300; // ms
     private animationId: number | null = null;
@@ -174,15 +203,18 @@ export class PositionAnimator {
         if (this.targetLat === 0 && this.targetLon === 0) {
             this.targetLat = lat;
             this.targetLon = lon;
+            this.currentLat = lat;
+            this.currentLon = lon;
             if (this.onUpdate) {
                 this.onUpdate(lat, lon);
             }
             return;
         }
 
-        // Start animation from current target (smooth chaining)
-        this.startLat = this.targetLat;
-        this.startLon = this.targetLon;
+        // Start animation from CURRENT position (smooth chaining)
+        // Prevents "teleport" vibration if a new update arrives mid-animation
+        this.startLat = this.currentLat || this.targetLat;
+        this.startLon = this.currentLon || this.targetLon;
         this.targetLat = lat;
         this.targetLon = lon;
         this.startTime = performance.now();
@@ -201,6 +233,9 @@ export class PositionAnimator {
 
         const currentLat = this.startLat + (this.targetLat - this.startLat) * eased;
         const currentLon = this.startLon + (this.targetLon - this.startLon) * eased;
+
+        this.currentLat = currentLat;
+        this.currentLon = currentLon;
 
         if (this.onUpdate) {
             this.onUpdate(currentLat, currentLon);
@@ -366,6 +401,7 @@ export class StableLocationTracker {
         speedClass: SpeedClass;
         shouldUpdate: boolean;
         animationDuration: number;
+        bearing: number | null;
     } {
         const now = Date.now();
 
@@ -384,7 +420,8 @@ export class StableLocationTracker {
                 speed: 0,
                 speedClass: 'stationary',
                 shouldUpdate: true,
-                animationDuration: 0
+                animationDuration: 0,
+                bearing: null
             };
         }
 
@@ -440,21 +477,21 @@ export class StableLocationTracker {
         let newDisplayLon = this.displayLon;
 
         if (distanceFromAnchor > currentBuffer) {
-            // Outside buffer - move anchor to new position
+            // Outside buffer - move anchor to new position (Hard Buffer)
+            // Center the marker at the new raw position logic
             this.anchorLat = rawLat;
             this.anchorLon = rawLon;
             newDisplayLat = rawLat;
             newDisplayLon = rawLon;
             shouldMoveMarker = true;
-        } else if (distanceFromAnchor > currentBuffer * 0.7) {
-            // Near edge of buffer - smoothly approach new position
-            // Move display toward raw position with damping
-            const blend = 0.3;
-            newDisplayLat = this.displayLat + (rawLat - this.displayLat) * blend;
-            newDisplayLon = this.displayLon + (rawLon - this.displayLon) * blend;
-            shouldMoveMarker = true;
+        } else {
+            // Inside buffer - Strict clamping
+            // Keep marker exactly at the anchor (center of the zone)
+            // ensuring zero jitter.
+            newDisplayLat = this.anchorLat;
+            newDisplayLon = this.anchorLon;
+            shouldMoveMarker = false;
         }
-        // Else: inside buffer - keep display at current position (stable)
 
         if (shouldMoveMarker) {
             this.displayLat = newDisplayLat;
@@ -467,7 +504,8 @@ export class StableLocationTracker {
             speed: avgSpeed,
             speedClass,
             shouldUpdate: shouldMoveMarker,
-            animationDuration: this.animationDurations[speedClass]
+            animationDuration: this.animationDurations[speedClass],
+            bearing: this.predictedBearing
         };
     }
 
@@ -484,6 +522,12 @@ export class StableLocationTracker {
     // Get predicted bearing for movement direction
     getPredictedBearing(): number {
         return this.predictedBearing;
+    }
+
+    // Get average speed from history (for hysteresis checks)
+    getSpeedHistoryAverage(): number {
+        if (this.speedHistory.length === 0) return 0;
+        return this.speedHistory.reduce((a, b) => a + b, 0) / this.speedHistory.length;
     }
 
     reset() {
