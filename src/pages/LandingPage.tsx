@@ -21,28 +21,30 @@ const MAP_STYLES = {
     dark: 'https://tiles.openfreemap.org/styles/dark'
 };
 
-// Helper to generate pill icons for the map
-const createPillIcon = (color: string) => {
-    const canvas = document.createElement('canvas');
-    canvas.width = 48; // Base width
-    canvas.height = 28; // height
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return new ImageData(1, 1);
 
-    // Draw rounded rect
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    // Round rect with 12px radius
-    ctx.roundRect(0, 0, 48, 28, 14);
-    ctx.fill();
 
-    // Add a border
-    ctx.strokeStyle = 'white';
-    ctx.lineWidth = 2;
-    ctx.stroke();
 
-    return ctx.getImageData(0, 0, 48, 28);
-};
+
+// Restored Stable SpotMarkerContent
+const SpotMarkerContent = memo(({ price, emoji, currency, isHistory = false }: { price: number, emoji: string, currency: string, isHistory?: boolean }) => {
+    const symbol = getCurrencySymbol(currency);
+    return (
+        <div className="flex flex-col items-center justify-center cursor-pointer transition-transform hover:scale-110 active:scale-95">
+            <div className="text-[32px] leading-none drop-shadow-md z-10 filter">
+                {emoji}
+            </div>
+            <div
+                className={`
+                    px-2 py-0.5 rounded-full text-[11px] font-bold text-white shadow-md border-[1.5px] border-white -mt-1.5 z-0 whitespace-nowrap
+                    ${isHistory ? 'bg-zinc-500' : 'bg-[#34C759]'}
+                `}
+            >
+                {symbol}{Math.round(price)}/hr
+            </div>
+        </div>
+    );
+});
+
 
 // User Location Marker Component
 const UserLocationMarker = memo(({ bearing, mapBearing, isNavigationMode }: { bearing: number; mapBearing: number; isNavigationMode: boolean }) => {
@@ -126,80 +128,37 @@ const UserLocationMarker = memo(({ bearing, mapBearing, isNavigationMode }: { be
 });
 UserLocationMarker.displayName = 'UserLocationMarker';
 
-// Spot Marker Component
-const SpotMarkerContent = memo(({ price, currency, type }: { price: number; currency: string; type: 'open' | 'history' }) => {
-    const emoji = type === 'open' ? '🅿️' : '🅟';
-    const bgColor = type === 'open' ? '#34C759' : '#8E8E93';
-    const opacity = type === 'history' ? 0.7 : 1;
-    const symbol = getCurrencySymbol(currency);
 
-    return (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', pointerEvents: 'none' }}>
-            <div style={{ fontSize: 32, filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))', opacity }}>
-                {emoji}
-            </div>
-            <div style={{
-                background: bgColor,
-                borderRadius: 12,
-                padding: '2px 8px',
-                fontWeight: 'bold',
-                fontSize: 11,
-                boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
-                transform: 'translateY(-5px)',
-                whiteSpace: 'nowrap',
-                color: 'white'
-            }}>
-                {symbol}{Math.round(price)}/hr
-            </div>
-        </div>
-    );
-});
-SpotMarkerContent.displayName = 'SpotMarkerContent';
 
-// Cluster Marker Component  
+// Cluster Marker Component
 const ClusterMarkerContent = memo(({ count, minPrice, maxPrice, currency, type }: {
     count: number; minPrice: number; maxPrice: number; currency: string; type: 'open' | 'history'
 }) => {
     const emoji = type === 'open' ? '🅿️' : '🅟';
-    const bgColor = type === 'open' ? '#34C759' : '#8E8E93';
+    const isHistory = type === 'history';
     const symbol = getCurrencySymbol(currency);
     const priceRange = minPrice === maxPrice ? `${symbol}${minPrice}` : `${symbol}${minPrice}-${maxPrice}`;
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', pointerEvents: 'none' }}>
-            <div style={{ fontSize: 28, filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))', position: 'relative' }}>
+        <div className="flex flex-col items-center justify-center cursor-pointer transition-transform hover:scale-110 active:scale-95 pointer-events-none">
+            <div className="relative text-[32px] leading-none drop-shadow-md z-10 filter">
                 {emoji}
-                <div style={{
-                    position: 'absolute',
-                    top: -5,
-                    right: -5,
-                    background: bgColor,
-                    color: 'white',
-                    fontSize: 10,
-                    fontWeight: 'bold',
-                    borderRadius: '50%',
-                    width: 18,
-                    height: 18,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    border: '2px solid white'
-                }}>
+                {/* Count Badge */}
+                <div className={`
+                    absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] px-1
+                    text-[10px] font-bold text-white rounded-full border-2 border-white shadow-sm
+                    ${isHistory ? 'bg-zinc-500' : 'bg-[#34C759]'}
+                `}>
                     {count}
                 </div>
             </div>
-            <div style={{
-                background: bgColor,
-                borderRadius: 12,
-                padding: '2px 8px',
-                fontWeight: 'bold',
-                fontSize: 10,
-                boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
-                transform: 'translateY(-5px)',
-                whiteSpace: 'nowrap',
-                color: 'white'
-            }}>
-                {priceRange}
+            <div
+                className={`
+                    px-2 py-0.5 rounded-full text-[11px] font-bold text-white shadow-md border-[1.5px] border-white -mt-1.5 z-0 whitespace-nowrap
+                    ${isHistory ? 'bg-zinc-500' : 'bg-[#34C759]'}
+                `}
+            >
+                {priceRange}/hr
             </div>
         </div>
     );
@@ -353,6 +312,18 @@ export const LandingPage: React.FC = () => {
     const latestCompassHeading = useRef(0); // Live compass heading for smooth transitions
 
 
+    // Auto-switch to 'fixed' mode when Parking to prevent vibration
+    // 'Auto' mode (compass) can be jittery when stationary/parked.
+    // We lock map to North Up (Fixed) for stability.
+    useEffect(() => {
+        if (status === 'parked') {
+            setOrientationMode('fixed');
+            // Reset bearing to 0 for clean view
+            setViewState(prev => ({ ...prev, bearing: 0, pitch: 0 }));
+            mapRef.current?.rotateTo(0, { duration: 800 });
+        }
+    }, [status]);
+
     // Initialize location tracking with smoothing
     useEffect(() => {
         if (!navigator.geolocation) {
@@ -494,9 +465,8 @@ export const LandingPage: React.FC = () => {
                 // screen.orientation is standard
                 const orientation = (window.screen as any).orientation?.angle ?? window.orientation ?? 0;
 
-                // Subtract orientation angle to align compass with screen "up"
-                // e.g. If phone rotated 90deg clockwise, "up" is now -90deg relative to device top.
-                heading = (heading - orientation + 360) % 360;
+                // Add orientation angle to align compass with screen "up" (Fixes 180deg flip)
+                heading = (heading + orientation) % 360;
             }
 
 
@@ -831,49 +801,7 @@ export const LandingPage: React.FC = () => {
         , [processedOpenSpots, zoomLevel]);
 
     // Memoize GeoJSON Sources to prevent re-renders
-    const openSpotsSource = useMemo(() => {
-        return {
-            type: 'FeatureCollection',
-            features: clusteredOpenSpots.map(item => ({
-                type: 'Feature',
-                id: item.id,
-                geometry: { type: 'Point', coordinates: [item.lon, item.lat] },
-                properties: {
-                    type: 'open',
-                    isCluster: isCluster(item),
-                    count: isCluster(item) ? item.count : 1,
-                    price: isCluster(item) ? item.minPrice : item.price,
-                    displayPrice: isCluster(item)
-                        ? (item.minPrice === item.maxPrice ? item.minPrice : `${item.minPrice}-${item.maxPrice}`)
-                        : Math.round(item.price),
-                    currency: item.currency,
-                    symbol: getCurrencySymbol(item.currency)
-                }
-            }))
-        } as any;
-    }, [clusteredOpenSpots]);
 
-    const historySpotsSource = useMemo(() => {
-        return {
-            type: 'FeatureCollection',
-            features: clusteredHistorySpots.map(item => ({
-                type: 'Feature',
-                id: item.id,
-                geometry: { type: 'Point', coordinates: [item.lon, item.lat] },
-                properties: {
-                    type: 'history',
-                    isCluster: isCluster(item),
-                    count: isCluster(item) ? item.count : 1,
-                    price: isCluster(item) ? item.minPrice : item.price,
-                    displayPrice: isCluster(item)
-                        ? (item.minPrice === item.maxPrice ? item.minPrice : `${item.minPrice}-${item.maxPrice}`)
-                        : Math.round(item.price),
-                    currency: item.currency,
-                    symbol: getCurrencySymbol(item.currency)
-                }
-            }))
-        } as any;
-    }, [clusteredHistorySpots]);
 
     // Map style based on theme
     const mapStyle = isDarkMode ? MAP_STYLES.dark : MAP_STYLES.light;
@@ -994,13 +922,12 @@ export const LandingPage: React.FC = () => {
 
                 <Map
                     ref={mapRef}
-                    onLoad={() => {
+                    {...viewState}
+                    onLoad={(e) => {
                         setIsMapLoaded(true);
-                        const map = mapRef.current?.getMap();
+                        const map = e.target;
                         if (map) {
-                            // Add icons
-                            if (!map.hasImage('green-pill')) map.addImage('green-pill', createPillIcon('#34C759'), { pixelRatio: 2 });
-                            if (!map.hasImage('grey-pill')) map.addImage('grey-pill', createPillIcon('#8E8E93'), { pixelRatio: 2 });
+
 
                             // Dark Mode Filter
                             const layers = map.getStyle().layers;
@@ -1011,64 +938,15 @@ export const LandingPage: React.FC = () => {
                             });
                         }
                     }}
-                    // ... handlers ...
-                    {...viewState}
                     onMove={handleMove}
                     onMoveStart={handleMoveStart}
                     onMoveEnd={handleMoveEnd}
                     onZoomStart={handleZoomStart}
                     onZoomEnd={handleZoomEnd}
                     onClick={(e) => {
-                        // Handle interactions with layers
-                        const map = mapRef.current?.getMap();
-                        if (!map) {
-                            handleClick(e);
-                            return;
-                        }
-
-                        // Query rendered features to see if we clicked a spot/cluster
-                        const features = map.queryRenderedFeatures(e.point, {
-                            layers: ['open-spots-layer', 'history-spots-layer', 'open-cluster-layer', 'history-cluster-layer']
-                        });
-
-                        if (features.length > 0) {
-                            const feature = features[0];
-                            const props = feature.properties;
-
-                            if (props?.isCluster) {
-                                // Zoom to cluster
-                                const newZoom = viewState.zoom + 2;
-                                map.flyTo({
-                                    center: (feature.geometry as any).coordinates,
-                                    zoom: newZoom,
-                                    duration: 500
-                                });
-                            } else {
-                                // Handle spot click (implement selection if needed, currently handleClick handles global map click)
-                                // If handleClick logic handles spot selection via lat/lon match, it might need updating.
-                                // But original logic passed click on Map, not marker usually? 
-                                // Original Marker had no onClick. Map had onClick.
-                                // If markers blocked click, now they don't?
-                                // "Click the main button once to see... Click again to mark."
-                                // It seems interaction with spots was purely visual?
-                                // Actually, `SpotMarkerContent` had `pointerEvents: none`.
-                                // This means they were strictly visual indicators. 
-                                // So we just pass the click through to the map handler.
-                                handleClick({
-                                    lngLat: {
-                                        lng: (feature.geometry as any).coordinates[0],
-                                        lat: (feature.geometry as any).coordinates[1]
-                                    },
-                                    point: e.point,
-                                    originalEvent: e.originalEvent,
-                                    target: map.getCanvas(),
-                                    type: 'click'
-                                } as any);
-                            }
-                        } else {
-                            // Empty map click
-                            handleClick(e);
-                        }
+                        // Handle empty map click
+                        // DOM Markers handle their own clicks via onClick prop
+                        handleClick(e);
                     }}
                     style={{ width: '100%', height: '100%' }}
                     mapStyle={mapStyle}
@@ -1110,76 +988,82 @@ export const LandingPage: React.FC = () => {
                         </Source>
                     )}
 
-                    {/* Open Spots Layer */}
-                    <Source id="open-spots-source" type="geojson" data={openSpotsSource}>
-                        {/* 1. Emoji (Always on top?) No, text layouts can collide. */}
-                        {/* We use one symbol layer with formatted text or multiple layers. */}
-                        {/* Multiple layers: Emoji Top, Price Bottom. */}
-                        <Layer
-                            id="open-spots-emoji"
-                            type="symbol"
-                            layout={{
-                                'text-field': '🅿️', // Open Spot Emoji
-                                'text-size': 28,
-                                'text-offset': [0, -0.6], // Shift up slightly
-                                'text-allow-overlap': true,
-                                'text-ignore-placement': false
-                            }}
-                        />
-                        <Layer
-                            id="open-spots-price"
-                            type="symbol"
-                            layout={{
-                                'text-field': ['concat', ['get', 'symbol'], ['get', 'displayPrice'], '/hr'],
-                                'text-size': 12,
-                                'text-offset': [0, 1.2], // Shift down
-                                'icon-image': 'green-pill',
-                                'icon-text-fit': 'both',
-                                'icon-text-fit-padding': [2, 8, 2, 8],
-                                'text-allow-overlap': true,
-                                'text-ignore-placement': false,
-                                'icon-allow-overlap': true, // Allow overlapping icons? Maybe dangerous.
-                                'icon-ignore-placement': false
-                            }}
-                            paint={{
-                                'text-color': '#ffffff'
-                            }}
-                        />
-                    </Source>
+                    {/* Open Spots Markers */}
+                    {status === 'search' && clusteredOpenSpots.map(item => {
+                        const isClusterItem = isCluster(item);
+                        return (
+                            <Marker
+                                key={`open-${item.id}`}
+                                longitude={item.lon}
+                                latitude={item.lat}
+                                anchor="center"
+                                style={{ willChange: 'transform' }} // Stabilization
+                                onClick={(e) => {
+                                    e.originalEvent.stopPropagation();
+                                    if (isClusterItem) {
+                                        mapRef.current?.flyTo({ center: [item.lon, item.lat], zoom: viewState.zoom + 2 });
+                                    } else {
+                                        handleClick({
+                                            lngLat: { lng: item.lon, lat: item.lat }
+                                        } as any);
+                                    }
+                                }}
+                            >
+                                {isClusterItem ? (
+                                    <ClusterMarkerContent
+                                        count={item.count}
+                                        minPrice={item.minPrice}
+                                        maxPrice={item.maxPrice}
+                                        currency={item.currency}
+                                        type="open"
+                                    />
+                                ) : (
+                                    <SpotMarkerContent
+                                        price={item.price}
+                                        currency={item.currency}
+                                        emoji="🅿️"
+                                    />
+                                )}
+                            </Marker>
+                        );
+                    })}
 
-                    {/* History Spots Layer */}
-                    <Source id="history-spots-source" type="geojson" data={historySpotsSource}>
-                        <Layer
-                            id="history-spots-emoji"
-                            type="symbol"
-                            layout={{
-                                'text-field': '🅟', // History Spot Emoji
-                                'text-size': 28,
-                                'text-offset': [0, -0.6],
-                                'text-allow-overlap': true
-                            }}
-                            paint={{
-                                'text-opacity': 0.7
-                            }}
-                        />
-                        <Layer
-                            id="history-spots-price"
-                            type="symbol"
-                            layout={{
-                                'text-field': ['concat', ['get', 'symbol'], ['get', 'displayPrice'], '/hr'],
-                                'text-size': 12,
-                                'text-offset': [0, 1.2],
-                                'icon-image': 'grey-pill',
-                                'icon-text-fit': 'both',
-                                'icon-text-fit-padding': [2, 8, 2, 8],
-                                'text-allow-overlap': true
-                            }}
-                            paint={{
-                                'text-color': '#ffffff',
-                                'icon-opacity': 1
-                            }}
-                        />
-                    </Source>
+                    {/* History Spots Markers */}
+                    {clusteredHistorySpots.map(item => {
+                        const isClusterItem = isCluster(item);
+                        return (
+                            <Marker
+                                key={`history-${item.id}`}
+                                longitude={item.lon}
+                                latitude={item.lat}
+                                anchor="center"
+                                style={{ willChange: 'transform' }}
+                                onClick={(e) => {
+                                    e.originalEvent.stopPropagation();
+                                    if (isClusterItem) {
+                                        mapRef.current?.flyTo({ center: [item.lon, item.lat], zoom: viewState.zoom + 2 });
+                                    }
+                                }}
+                            >
+                                {isClusterItem ? (
+                                    <ClusterMarkerContent
+                                        count={item.count}
+                                        minPrice={item.minPrice}
+                                        maxPrice={item.maxPrice}
+                                        currency={item.currency}
+                                        type="history"
+                                    />
+                                ) : (
+                                    <SpotMarkerContent
+                                        price={item.price}
+                                        currency={item.currency}
+                                        emoji="🅟"
+                                        isHistory={true}
+                                    />
+                                )}
+                            </Marker>
+                        );
+                    })}
 
                     {/* Route waypoints */}
                     {showRoute && routeWaypoints?.map((wp, index) => (
@@ -1208,7 +1092,7 @@ export const LandingPage: React.FC = () => {
                         </Marker>
                     ))}
 
-                    {/* Parked vehicle marker */}
+                    {/* Parked Vehicle Marker */}
                     {status === 'parked' && parkLocation && (
                         <Marker
                             longitude={parkLocation[1]}
@@ -1365,7 +1249,22 @@ export const LandingPage: React.FC = () => {
                         // Pan -> Fixed (Handled in handleMove)
 
                         if (orientationMode === 'recentre') {
-                            // Recentre -> Auto
+                            // If PARKED, skip Auto mode and go back to Fixed
+                            if (status === 'parked') {
+                                isTransitioning.current = true;
+                                mapRef.current?.flyTo({
+                                    bearing: 0,
+                                    pitch: 0,
+                                    zoom: 16.5,
+                                    duration: 800,
+                                    essential: true
+                                });
+                                mapRef.current?.once('moveend', () => { isTransitioning.current = false; });
+                                setOrientationMode('fixed');
+                                return;
+                            }
+
+                            // Normal behavior: Recentre -> Auto
                             // Smoothly rotate map to current compass heading BEFORE switching mode
                             // This prevents the "snap" from 0 to current heading
                             const targetBearing = userHeading || 0;
@@ -1478,7 +1377,7 @@ export const LandingPage: React.FC = () => {
                                     <HelpCircle size={32} />
                                 </div>
                                 <h2 className="text-2xl font-bold text-zinc-900 dark:text-white">How to use Parlens</h2>
-                                <p className="text-sm text-zinc-500 dark:text-zinc-400">Find free parking spots near you</p>
+                                <p className="text-sm text-zinc-500 dark:text-zinc-400">Decentralized Route & Parking Management</p>
                             </div>
 
 
