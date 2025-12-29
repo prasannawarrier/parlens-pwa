@@ -867,7 +867,7 @@ export const LandingPage: React.FC = () => {
 
             {/* Active Session Indicator (Parked Mode) - Green Pill Top Center */}
             {status === 'parked' && (
-                <div className="absolute top-6 left-1/2 -translate-x-1/2 z-[1000] h-12 px-6 bg-[#34C759] rounded-full shadow-lg flex items-center gap-3 animate-in slide-in-from-top-4">
+                <div className="absolute top-6 left-1/2 -translate-x-1/2 z-[1000] h-12 px-6 bg-[#34C759] rounded-full shadow-lg flex items-center gap-3 animate-in slide-in-from-top-4 pointer-events-none">
                     <div className="text-xl">
                         {vehicleType === 'bicycle' ? '🚲' : vehicleType === 'motorcycle' ? '🏍️' : '🚗'}
                     </div>
@@ -877,7 +877,7 @@ export const LandingPage: React.FC = () => {
 
             {/* Searching Bubble (Search Mode) - White Pill with Orange Dot */}
             {status === 'search' && (
-                <div className="absolute top-6 left-1/2 -translate-x-1/2 z-[1000] h-12 px-6 bg-white dark:bg-zinc-800 rounded-full shadow-lg flex items-center gap-3 animate-in slide-in-from-top-4">
+                <div className="absolute top-6 left-1/2 -translate-x-1/2 z-[1000] h-12 px-6 bg-white dark:bg-zinc-800 rounded-full shadow-lg flex items-center gap-3 animate-in slide-in-from-top-4 pointer-events-none">
                     <div className="w-2.5 h-2.5 rounded-full bg-[#FF9500] animate-pulse" />
                     <span className="font-bold text-zinc-900 dark:text-white whitespace-nowrap">Searching for spots</span>
                 </div>
@@ -909,14 +909,35 @@ export const LandingPage: React.FC = () => {
                 // This guarantees we mark interaction BEFORE MapLibre or React updates processing
                 onPointerDownCapture={() => {
                     isUserInteracting.current = true;
-                    // Stop strict centering animations immediately
                     positionAnimator.current.stop();
-                    // Stop any programmatic FlyTo/EaseTo
                     if (isTransitioning.current) {
                         mapRef.current?.stop();
                         isTransitioning.current = false;
                     }
                 }}
+                // CAPTURE TOUCH GESTURES (Multi-touch Zoom/Rotate)
+                onTouchStartCapture={() => {
+                    isUserInteracting.current = true;
+                    positionAnimator.current.stop();
+                    if (isTransitioning.current) {
+                        mapRef.current?.stop();
+                        isTransitioning.current = false;
+                    }
+                }}
+                // CAPTURE WHEEL/TRACKPAD ZOOM EARLY
+                onWheelCapture={() => {
+                    isUserInteracting.current = true;
+                    if (isTransitioning.current) {
+                        mapRef.current?.stop();
+                        isTransitioning.current = false;
+                    }
+                    if ((window as any).wheelDebounce) clearTimeout((window as any).wheelDebounce);
+                    (window as any).wheelDebounce = setTimeout(() => {
+                        isUserInteracting.current = false;
+                    }, 1000);
+                }}
+                // Ensure browser doesn't hijack gestures (e.g. pull-to-refresh)
+                style={{ touchAction: 'none' }}
             >
 
 
@@ -943,6 +964,10 @@ export const LandingPage: React.FC = () => {
                     onMoveEnd={handleMoveEnd}
                     onZoomStart={handleZoomStart}
                     onZoomEnd={handleZoomEnd}
+                    onRotateStart={() => { isUserInteracting.current = true; positionAnimator.current.stop(); }}
+                    onRotateEnd={handleMoveEnd} // Reuse debounce logic
+                    onPitchStart={() => { isUserInteracting.current = true; positionAnimator.current.stop(); }}
+                    onPitchEnd={handleMoveEnd} // Reuse debounce logic
                     onClick={(e) => {
                         // Handle empty map click
                         // DOM Markers handle their own clicks via onClick prop

@@ -309,7 +309,7 @@ export const FAB: React.FC<FABProps> = ({
                 )}
 
                 {status === 'parked' && (
-                    <div className="h-14 px-6 rounded-full bg-white/90 dark:bg-zinc-800/90 backdrop-blur-md border border-black/5 dark:border-white/10 shadow-2xl flex items-center justify-center animate-in slide-in-from-left-8">
+                    <div className="h-14 px-6 rounded-full bg-white/90 dark:bg-zinc-800/90 backdrop-blur-md border border-black/5 dark:border-white/10 shadow-2xl flex items-center justify-center animate-in slide-in-from-left-8 pointer-events-none">
                         <span className="font-mono text-xl font-bold tabular-nums text-zinc-900 dark:text-white">
                             {elapsedTime}
                         </span>
