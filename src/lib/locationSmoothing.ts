@@ -309,29 +309,31 @@ export class StableLocationTracker {
 
     // Dynamic buffer zones based on speed (in meters)
     // Larger buffer = more stable but less responsive
+    // Research: Urban geofences can be 100m, but we use tighter for precision navigation
     private bufferZones: Record<SpeedClass, number> = {
-        stationary: 15,      // Large buffer to prevent GPS jitter
-        walking: 10,         // Moderate buffer for smooth walking
-        vehicle: 5,          // Smaller buffer for accurate driving
-        fast_vehicle: 3      // Minimal buffer for highway speeds
+        stationary: 20,      // Larger buffer to eliminate GPS jitter when stopped
+        walking: 12,         // Moderate buffer for smooth walking (~1-2m/s)
+        vehicle: 6,          // Accurate tracking needed for driving
+        fast_vehicle: 4      // Minimal buffer for highway speeds (>36km/h)
     };
 
     // Polling intervals based on speed (in ms)
-    // Faster speed = more frequent updates
+    // Research: >50mph: 5s, 20-50mph: 10s, <20mph: 15s (for fleet tracking)
+    // We use more aggressive polling for real-time navigation feel
     private pollIntervals: Record<SpeedClass, number> = {
-        stationary: 10000,   // 10s when not moving
+        stationary: 15000,   // 15s when not moving (battery optimization)
         walking: 5000,       // 5s at walking pace
-        vehicle: 2000,       // 2s in vehicle
-        fast_vehicle: 1000   // 1s at high speed
+        vehicle: 2000,       // 2s in vehicle (20-50mph equivalent)
+        fast_vehicle: 1000   // 1s at high speed (>50mph equivalent)
     };
 
     // Animation durations based on speed (in ms)
     // Faster speed = shorter, snappier animations
     private animationDurations: Record<SpeedClass, number> = {
-        stationary: 1000,
-        walking: 700,
-        vehicle: 400,
-        fast_vehicle: 250
+        stationary: 1200,    // Slow, smooth for stationary
+        walking: 800,        // Medium for walking
+        vehicle: 400,        // Quick for driving
+        fast_vehicle: 200    // Snap for highway
     };
 
     // Haversine distance in meters

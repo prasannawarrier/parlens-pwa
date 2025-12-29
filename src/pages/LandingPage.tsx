@@ -12,6 +12,7 @@ import { ProfileButton } from '../components/ProfileButton';
 import { RouteButton } from '../components/RouteButton';
 import { clusterSpots, isCluster } from '../lib/clustering';
 import { getCurrencySymbol } from '../lib/currency';
+import { StableLocationTracker } from '../lib/locationSmoothing';
 
 // Free vector tile styles - using simpler styles that match better
 const MAP_STYLES = {
@@ -279,7 +280,12 @@ export const LandingPage: React.FC = () => {
     const lastBearing = useRef(0);
     const [cumulativeRotation, setCumulativeRotation] = useState(0);
 
-    // Initialize location tracking with simple geolocation
+    // Location smoothing with dynamic buffer zones
+    const locationTracker = useRef(new StableLocationTracker());
+    const [_userSpeed, setUserSpeed] = useState(0); // Available for future speed indicator UI
+    const initialLocationSet = useRef(false); // Track if we've set initial location
+
+    // Initialize location tracking with smoothing
     useEffect(() => {
         if (!navigator.geolocation) {
             setLocationError('Geolocation is not supported by your browser');
@@ -289,14 +295,26 @@ export const LandingPage: React.FC = () => {
         const watchId = navigator.geolocation.watchPosition(
             (position) => {
                 const { latitude, longitude } = position.coords;
-                setLocation([latitude, longitude]);
 
-                // Initialize view state on first location
-                if (!location) {
+                // Apply location smoothing with dynamic buffer zone
+                const result = locationTracker.current.updateLocation(latitude, longitude);
+
+                // Only update state if marker should move (outside buffer zone)
+                if (result.shouldUpdate) {
+                    setLocation([result.displayLat, result.displayLon]);
+                }
+
+                // Track speed for potential UI feedback
+                setUserSpeed(result.speed);
+
+                // Initialize view state ONLY on first location (using ref to avoid stale closure)
+                if (!initialLocationSet.current) {
+                    initialLocationSet.current = true;
+                    setLocation([result.displayLat, result.displayLon]);
                     setViewState(prev => ({
                         ...prev,
-                        latitude,
-                        longitude
+                        latitude: result.displayLat,
+                        longitude: result.displayLon
                     }));
                 }
             },
@@ -366,25 +384,25 @@ export const LandingPage: React.FC = () => {
         }
     };
 
-    // Update map view when following user location
+    // Update map view in tracking modes (auto and recentre)
+    // auto = follows position + rotates with device heading
+    // recentre = follows position only, keeps current bearing
     useEffect(() => {
-        // Don't update when: user interacting, transitioning, showing route, or not in tracking mode
+        // Only update if we're in a tracking mode and not being interrupted
         if (!isUserInteracting.current && !isTransitioning.current && !showRoute && location && (orientationMode === 'auto' || orientationMode === 'recentre')) {
-            const newState: any = {
-                longitude: location[1],
-                latitude: location[0],
-                pitch: 0 // Keep top-down view always
-            };
-
-            if (orientationMode === 'auto') {
-                // In auto mode, use cumulative rotation for smooth 360 transitions
-                newState.bearing = cumulativeRotation;
-            }
-
-            setViewState(prev => ({
-                ...prev,
-                ...newState
-            }));
+            setViewState(prev => {
+                const newState = {
+                    ...prev,
+                    longitude: location[1],
+                    latitude: location[0],
+                    pitch: 0
+                };
+                // Only auto mode rotates with device
+                if (orientationMode === 'auto') {
+                    newState.bearing = cumulativeRotation;
+                }
+                return newState;
+            });
         }
     }, [location, cumulativeRotation, orientationMode, showRoute]);
 
@@ -409,13 +427,9 @@ export const LandingPage: React.FC = () => {
 
     const handleMoveStart = useCallback(() => {
         isUserInteracting.current = true;
-        // ANY map interaction immediately switches to fixed mode
-        // User must click location button to re-enable tracking
-        if (orientationMode !== 'fixed') {
-            setOrientationMode('fixed');
-            setNeedsRecenter(true);
-        }
-    }, [orientationMode]);
+        // Don't switch modes here - let handleMove check if location is off-center
+        // This preserves auto/recentre modes during zoom, rotation, and small pans
+    }, []);
 
     const handleMoveEnd = useCallback(() => {
         isUserInteracting.current = false;
@@ -837,9 +851,10 @@ export const LandingPage: React.FC = () => {
                         }
 
                         // Case 3: Cycle Modes
+                        // fixed -> recentre -> auto -> fixed
                         setOrientationMode(m => {
                             if (m === 'recentre') {
-                                // Switch to Auto (Navigation) - SMOOTH TRANSITION
+                                // Switch to Auto (Navigation) - SMOOTH TRANSITION with device bearing
                                 isTransitioning.current = true;
                                 mapRef.current?.flyTo({
                                     bearing: cumulativeRotation,
@@ -850,17 +865,13 @@ export const LandingPage: React.FC = () => {
                                 return 'auto';
                             }
                             if (m === 'auto') {
-                                // Reset to North when exiting navigation smoothy
-                                // "fix the orientation" -> rotate to 0
-                                // Important: We use rotateTo for animation, and DO NOT manually set viewState.bearing
-                                // Let the map update viewState via onMove
+                                // Clicking out of auto -> go to FIXED with North orientation
+                                isTransitioning.current = true;
                                 mapRef.current?.rotateTo(0, { duration: 600 });
-                                // Don't return 'fixed' immediately if we want to ensure animation completes?
-                                // Actually, returning 'fixed' is fine because we want to stop 'auto' tracking updates.
-                                // isTransitioning is NOT needed here because useEffect is disabled for 'fixed' anyway.
-                                return 'fixed';
+                                mapRef.current?.once('moveend', () => { isTransitioning.current = false; });
+                                return 'fixed'; // Stop all tracking
                             }
-                            // From Fixed -> Recentre
+                            // From Fixed -> Recentre (start following again)
                             return 'recentre';
                         });
                     }}
