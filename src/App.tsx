@@ -87,7 +87,8 @@ const Login: React.FC = () => {
             className="mx-auto h-24 w-24 rounded-[22%] shadow-2xl shadow-[#007AFF]/20"
           />
           <h1 className="text-5xl font-extrabold tracking-tighter">Parlens</h1>
-          <p className="text-sm font-medium text-white/40 tracking-tight">Route and Parking Management</p>
+          {/* UPDATED: User requested "Decentralized Route & Parking Management" */}
+          <p className="text-sm font-medium text-white/40 tracking-tight">Decentralized Route & Parking Management</p>
         </div>
 
         <div className="space-y-4">

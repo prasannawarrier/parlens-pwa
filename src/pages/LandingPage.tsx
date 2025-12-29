@@ -21,6 +21,29 @@ const MAP_STYLES = {
     dark: 'https://tiles.openfreemap.org/styles/dark'
 };
 
+// Helper to generate pill icons for the map
+const createPillIcon = (color: string) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 48; // Base width
+    canvas.height = 28; // height
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return new ImageData(1, 1);
+
+    // Draw rounded rect
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    // Round rect with 12px radius
+    ctx.roundRect(0, 0, 48, 28, 14);
+    ctx.fill();
+
+    // Add a border
+    ctx.strokeStyle = 'white';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    return ctx.getImageData(0, 0, 48, 28);
+};
+
 // User Location Marker Component
 const UserLocationMarker = memo(({ bearing, mapBearing, isNavigationMode }: { bearing: number; mapBearing: number; isNavigationMode: boolean }) => {
     // In navigation mode, map is rotated "Up" (Bearing). User matches Bearing. Relative = 0.
@@ -456,24 +479,24 @@ export const LandingPage: React.FC = () => {
 
             let heading: number | null = null;
 
+
             if ((event as any).webkitCompassHeading) {
                 // iOS
                 heading = (event as any).webkitCompassHeading;
-                // Adjust for landscape
-                if ((window.screen as any).orientation && (window.screen as any).orientation.type.includes('landscape')) {
-                    heading = (heading! + 90) % 360;
-                } else if (window.orientation === 90) {
-                    heading = (heading! + 90) % 360;
-                } else if (window.orientation === -90) {
-                    heading = (heading! - 90 + 360) % 360;
-                }
             } else if (event.alpha !== null) {
                 // Android (absolute)
                 heading = 360 - (event.alpha as number);
-                // Adjust for landscape
-                if ((window.screen as any).orientation && (window.screen as any).orientation.type.includes('landscape')) {
-                    heading = (heading + 90) % 360;
-                }
+            }
+
+            if (heading !== null) {
+                // Adjust for screen orientation
+                // window.orientation is deprecated but required for iOS Safari
+                // screen.orientation is standard
+                const orientation = (window.screen as any).orientation?.angle ?? window.orientation ?? 0;
+
+                // Subtract orientation angle to align compass with screen "up"
+                // e.g. If phone rotated 90deg clockwise, "up" is now -90deg relative to device top.
+                heading = (heading - orientation + 360) % 360;
             }
 
 
@@ -807,6 +830,51 @@ export const LandingPage: React.FC = () => {
         clusterSpots(processedOpenSpots, zoomLevel)
         , [processedOpenSpots, zoomLevel]);
 
+    // Memoize GeoJSON Sources to prevent re-renders
+    const openSpotsSource = useMemo(() => {
+        return {
+            type: 'FeatureCollection',
+            features: clusteredOpenSpots.map(item => ({
+                type: 'Feature',
+                id: item.id,
+                geometry: { type: 'Point', coordinates: [item.lon, item.lat] },
+                properties: {
+                    type: 'open',
+                    isCluster: isCluster(item),
+                    count: isCluster(item) ? item.count : 1,
+                    price: isCluster(item) ? item.minPrice : item.price,
+                    displayPrice: isCluster(item)
+                        ? (item.minPrice === item.maxPrice ? item.minPrice : `${item.minPrice}-${item.maxPrice}`)
+                        : Math.round(item.price),
+                    currency: item.currency,
+                    symbol: getCurrencySymbol(item.currency)
+                }
+            }))
+        } as any;
+    }, [clusteredOpenSpots]);
+
+    const historySpotsSource = useMemo(() => {
+        return {
+            type: 'FeatureCollection',
+            features: clusteredHistorySpots.map(item => ({
+                type: 'Feature',
+                id: item.id,
+                geometry: { type: 'Point', coordinates: [item.lon, item.lat] },
+                properties: {
+                    type: 'history',
+                    isCluster: isCluster(item),
+                    count: isCluster(item) ? item.count : 1,
+                    price: isCluster(item) ? item.minPrice : item.price,
+                    displayPrice: isCluster(item)
+                        ? (item.minPrice === item.maxPrice ? item.minPrice : `${item.minPrice}-${item.maxPrice}`)
+                        : Math.round(item.price),
+                    currency: item.currency,
+                    symbol: getCurrencySymbol(item.currency)
+                }
+            }))
+        } as any;
+    }, [clusteredHistorySpots]);
+
     // Map style based on theme
     const mapStyle = isDarkMode ? MAP_STYLES.dark : MAP_STYLES.light;
 
@@ -922,23 +990,92 @@ export const LandingPage: React.FC = () => {
                     }
                 }}
             >
+
+
                 <Map
                     ref={mapRef}
-                    onLoad={() => setIsMapLoaded(true)}
+                    onLoad={() => {
+                        setIsMapLoaded(true);
+                        const map = mapRef.current?.getMap();
+                        if (map) {
+                            // Add icons
+                            if (!map.hasImage('green-pill')) map.addImage('green-pill', createPillIcon('#34C759'), { pixelRatio: 2 });
+                            if (!map.hasImage('grey-pill')) map.addImage('grey-pill', createPillIcon('#8E8E93'), { pixelRatio: 2 });
+
+                            // Dark Mode Filter
+                            const layers = map.getStyle().layers;
+                            layers?.forEach(layer => {
+                                if (layer.id.includes('oneway') || layer.id.includes('arrow') || layer.id.includes('direction')) {
+                                    map.setLayoutProperty(layer.id, 'visibility', 'none');
+                                }
+                            });
+                        }
+                    }}
+                    // ... handlers ...
                     {...viewState}
                     onMove={handleMove}
                     onMoveStart={handleMoveStart}
                     onMoveEnd={handleMoveEnd}
                     onZoomStart={handleZoomStart}
                     onZoomEnd={handleZoomEnd}
-                    onClick={handleClick}
+                    onClick={(e) => {
+                        // Handle interactions with layers
+                        const map = mapRef.current?.getMap();
+                        if (!map) {
+                            handleClick(e);
+                            return;
+                        }
+
+                        // Query rendered features to see if we clicked a spot/cluster
+                        const features = map.queryRenderedFeatures(e.point, {
+                            layers: ['open-spots-layer', 'history-spots-layer', 'open-cluster-layer', 'history-cluster-layer']
+                        });
+
+                        if (features.length > 0) {
+                            const feature = features[0];
+                            const props = feature.properties;
+
+                            if (props?.isCluster) {
+                                // Zoom to cluster
+                                const newZoom = viewState.zoom + 2;
+                                map.flyTo({
+                                    center: (feature.geometry as any).coordinates,
+                                    zoom: newZoom,
+                                    duration: 500
+                                });
+                            } else {
+                                // Handle spot click (implement selection if needed, currently handleClick handles global map click)
+                                // If handleClick logic handles spot selection via lat/lon match, it might need updating.
+                                // But original logic passed click on Map, not marker usually? 
+                                // Original Marker had no onClick. Map had onClick.
+                                // If markers blocked click, now they don't?
+                                // "Click the main button once to see... Click again to mark."
+                                // It seems interaction with spots was purely visual?
+                                // Actually, `SpotMarkerContent` had `pointerEvents: none`.
+                                // This means they were strictly visual indicators. 
+                                // So we just pass the click through to the map handler.
+                                handleClick({
+                                    lngLat: {
+                                        lng: (feature.geometry as any).coordinates[0],
+                                        lat: (feature.geometry as any).coordinates[1]
+                                    },
+                                    point: e.point,
+                                    originalEvent: e.originalEvent,
+                                    target: map.getCanvas(),
+                                    type: 'click'
+                                } as any);
+                            }
+                        } else {
+                            // Empty map click
+                            handleClick(e);
+                        }
+                    }}
                     style={{ width: '100%', height: '100%' }}
                     mapStyle={mapStyle}
                     attributionControl={false}
-                    // Optimize interaction handlers
-                    dragPan={!isTransitioning.current} // Disable pan during auto-transitions to prevent state fighting
+                    dragPan={!isTransitioning.current}
                 >
-                    {/* Alternate route */}
+                    {/* Routes */}
                     {showRoute && alternateRouteCoords && alternateRouteCoords.length > 1 && (
                         <Source
                             id="alternate-route"
@@ -956,7 +1093,6 @@ export const LandingPage: React.FC = () => {
                         </Source>
                     )}
 
-                    {/* Main route */}
                     {showRoute && routeCoords && routeCoords.length > 1 && (
                         <Source
                             id="route"
@@ -974,57 +1110,76 @@ export const LandingPage: React.FC = () => {
                         </Source>
                     )}
 
-                    {/* History spots */}
-                    {clusteredHistorySpots.map(item => (
-                        <Marker
-                            key={item.id}
-                            longitude={item.lon}
-                            latitude={item.lat}
-                            anchor="bottom"
-                        >
-                            {isCluster(item) ? (
-                                <ClusterMarkerContent
-                                    count={item.count}
-                                    minPrice={item.minPrice}
-                                    maxPrice={item.maxPrice}
-                                    currency={item.currency}
-                                    type="history"
-                                />
-                            ) : (
-                                <SpotMarkerContent
-                                    price={item.price}
-                                    currency={item.currency}
-                                    type="history"
-                                />
-                            )}
-                        </Marker>
-                    ))}
+                    {/* Open Spots Layer */}
+                    <Source id="open-spots-source" type="geojson" data={openSpotsSource}>
+                        {/* 1. Emoji (Always on top?) No, text layouts can collide. */}
+                        {/* We use one symbol layer with formatted text or multiple layers. */}
+                        {/* Multiple layers: Emoji Top, Price Bottom. */}
+                        <Layer
+                            id="open-spots-emoji"
+                            type="symbol"
+                            layout={{
+                                'text-field': '🅿️', // Open Spot Emoji
+                                'text-size': 28,
+                                'text-offset': [0, -0.6], // Shift up slightly
+                                'text-allow-overlap': true,
+                                'text-ignore-placement': false
+                            }}
+                        />
+                        <Layer
+                            id="open-spots-price"
+                            type="symbol"
+                            layout={{
+                                'text-field': ['concat', ['get', 'symbol'], ['get', 'displayPrice'], '/hr'],
+                                'text-size': 12,
+                                'text-offset': [0, 1.2], // Shift down
+                                'icon-image': 'green-pill',
+                                'icon-text-fit': 'both',
+                                'icon-text-fit-padding': [2, 8, 2, 8],
+                                'text-allow-overlap': true,
+                                'text-ignore-placement': false,
+                                'icon-allow-overlap': true, // Allow overlapping icons? Maybe dangerous.
+                                'icon-ignore-placement': false
+                            }}
+                            paint={{
+                                'text-color': '#ffffff'
+                            }}
+                        />
+                    </Source>
 
-                    {/* Open spots */}
-                    {clusteredOpenSpots.map(item => (
-                        <Marker
-                            key={item.id}
-                            longitude={item.lon}
-                            latitude={item.lat}
-                            anchor="bottom"
-                        >
-                            {isCluster(item) ? (
-                                <ClusterMarkerContent
-                                    count={item.count}
-                                    minPrice={item.minPrice}
-                                    maxPrice={item.maxPrice}
-                                    currency={item.currency}
-                                    type="open"
-                                />
-                            ) : (
-                                <SpotMarkerContent
-                                    price={item.price}
-                                    currency={item.currency}
-                                    type="open"
-                                />
-                            )}
-                        </Marker>
-                    ))}
+                    {/* History Spots Layer */}
+                    <Source id="history-spots-source" type="geojson" data={historySpotsSource}>
+                        <Layer
+                            id="history-spots-emoji"
+                            type="symbol"
+                            layout={{
+                                'text-field': '🅟', // History Spot Emoji
+                                'text-size': 28,
+                                'text-offset': [0, -0.6],
+                                'text-allow-overlap': true
+                            }}
+                            paint={{
+                                'text-opacity': 0.7
+                            }}
+                        />
+                        <Layer
+                            id="history-spots-price"
+                            type="symbol"
+                            layout={{
+                                'text-field': ['concat', ['get', 'symbol'], ['get', 'displayPrice'], '/hr'],
+                                'text-size': 12,
+                                'text-offset': [0, 1.2],
+                                'icon-image': 'grey-pill',
+                                'icon-text-fit': 'both',
+                                'icon-text-fit-padding': [2, 8, 2, 8],
+                                'text-allow-overlap': true
+                            }}
+                            paint={{
+                                'text-color': '#ffffff',
+                                'icon-opacity': 1
+                            }}
+                        />
+                    </Source>
 
                     {/* Route waypoints */}
                     {showRoute && routeWaypoints?.map((wp, index) => (
@@ -1386,8 +1541,9 @@ export const LandingPage: React.FC = () => {
                                 </p>
 
                                 <p>
-                                    <strong className="text-zinc-900 dark:text-white block mb-1">3. Find and log parking spots</strong>
-                                    Click the main button once to see open spots reported by others live or within the last minute. Click again to mark your location. When leaving, click once more to end the session and report the fee. Use the profile button to see your parking history.
+                                    {/* UPDATED: Title and "last minute" -> "last 5 minutes" */}
+                                    <strong className="text-zinc-900 dark:text-white block mb-1">3. Decentralized Route & Parking Management</strong>
+                                    Click the main button once to see open spots reported by others live or within the last 5 minutes. Click again to mark your location. When leaving, click once more to end the session and report the fee. Use the profile button to see your parking history.
                                 </p>
 
                                 <p>
