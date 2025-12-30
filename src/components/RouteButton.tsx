@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Route, X, Trash2, MapPin, Eye, EyeOff, Navigation, FolderOpen, Clock, MapPinned, Save, Pencil, Check } from 'lucide-react';
+import { Route, X, Trash2, MapPin, Eye, EyeOff, Navigation, FolderOpen, Clock, MapPinned, Save, Pencil, Check, ArrowUpDown, ChevronUp, ChevronDown } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { KINDS, DEFAULT_RELAYS } from '../lib/nostr';
 import type { RouteLogContent } from '../lib/nostr';
 import { encryptParkingLog, decryptParkingLog } from '../lib/encryption';
+import { parseCoordinate, formatCoords } from '../lib/geo';
 
 interface Waypoint {
     id: string;
@@ -28,6 +29,93 @@ interface RouteButtonProps {
     onDropPinConsumed?: () => void;
     onOpenChange?: (isOpen: boolean) => void;
 }
+
+
+
+interface NominatimResult {
+    place_id: number;
+    lat: string;
+    lon: string;
+    display_name: string;
+    type: string;
+}
+
+const OnlineSearch: React.FC<{ query: string; onSelect: (result: NominatimResult) => void; countryCode: string | null; currentLocation: [number, number] | null }> = ({ query, onSelect, countryCode, currentLocation }) => {
+    const [result, setResult] = useState<NominatimResult | null>(null);
+    const [loading, setLoading] = useState(false);
+
+    useEffect(() => {
+        const fetchLocation = async () => {
+            if (!query || query.length < 4) return;
+            setLoading(true);
+            try {
+                let url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`;
+
+                // Restrict to country if known
+                if (countryCode) {
+                    url += `&countrycodes=${countryCode}`;
+                }
+
+                // Bias results to user location (viewbox preference without bounded=1)
+                // Use a modest box (+/- 1 degree, approx 100km) to prioritize local results
+                if (currentLocation) {
+                    const [lat, lon] = currentLocation;
+                    const viewbox = `${lon - 1},${lat + 1},${lon + 1},${lat - 1}`; // minLon,maxLat,maxLon,minLat
+                    url += `&viewbox=${viewbox}`;
+                }
+
+                const response = await fetch(url);
+                const data = await response.json();
+                if (data && data.length > 0) {
+                    setResult(data[0]);
+                } else {
+                    setResult(null);
+                }
+            } catch (e) {
+                console.error(e);
+                setResult(null);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        const timeoutId = setTimeout(fetchLocation, 2000); // 2000ms debounce
+        return () => clearTimeout(timeoutId);
+    }, [query, countryCode, currentLocation]);
+
+    if (loading) {
+        return (
+            <div className="mb-2 p-3 text-xs text-zinc-400 dark:text-white/40 italic flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full border-2 border-zinc-300 border-t-zinc-600 animate-spin" />
+                Searching...
+            </div>
+        );
+    }
+
+    if (!result) return null;
+
+    return (
+        <div className="mb-2 rounded-2xl overflow-hidden bg-purple-50 dark:bg-purple-500/10 border border-purple-500/20">
+            <div className="px-3 py-1.5 text-xs font-medium text-purple-700 dark:text-purple-400 bg-purple-100/50 dark:bg-purple-500/5">
+                🌍 Global Search Result
+            </div>
+            <button
+                onClick={() => onSelect(result)}
+                className="w-full p-3 flex items-center gap-3 transition-colors text-left"
+            >
+                <MapPin size={16} className="text-purple-600 dark:text-purple-400 shrink-0" />
+                <div className="flex-1 truncate">
+                    <div className="text-sm font-bold text-zinc-900 dark:text-white truncate">
+                        {result.display_name.split(',')[0]}
+                    </div>
+                    <div className="text-xs text-zinc-500 dark:text-white/60 truncate">
+                        {result.display_name}
+                    </div>
+                </div>
+            </button>
+        </div>
+    );
+};
 
 export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteChange, currentLocation, onDropPinModeChange, pendingDropPin, onDropPinConsumed, onOpenChange }) => {
     const { pool, pubkey, signEvent } = useAuth();
@@ -55,9 +143,28 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
     const [editingWaypointId, setEditingWaypointId] = useState<string | null>(null);
     const [editingName, setEditingName] = useState('');
     const [isDeleting, setIsDeleting] = useState(false);
+    const [countryCode, setCountryCode] = useState<string | null>(null);
 
     // Track locally deleted d-tags to prevent re-appearing after refetch
     const deletedDTagsRef = useRef<Set<string>>(new Set());
+
+    // Fetch country code once when location is available
+    useEffect(() => {
+        const fetchCountry = async () => {
+            if (!currentLocation || countryCode) return;
+            try {
+                const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${currentLocation[0]}&lon=${currentLocation[1]}&format=json`);
+                const data = await res.json();
+                if (data && data.address && data.address.country_code) {
+                    console.log('[Parlens] Detected Country:', data.address.country_code);
+                    setCountryCode(data.address.country_code);
+                }
+            } catch (e) {
+                console.error('[Parlens] Failed to detect country:', e);
+            }
+        };
+        fetchCountry();
+    }, [currentLocation, countryCode]);
 
     // Search saved waypoints from routes (offline search)
     const savedWaypointMatches = React.useMemo(() => {
@@ -99,6 +206,30 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
         onRouteChange(null, null, null, false);
     };
 
+
+
+    const moveWaypoint = (index: number, direction: -1 | 1) => {
+        if (index + direction < 0 || index + direction >= waypoints.length) return;
+        const newWaypoints = [...waypoints];
+        // Swap
+        [newWaypoints[index], newWaypoints[index + direction]] = [newWaypoints[index + direction], newWaypoints[index]];
+        setWaypoints(newWaypoints);
+
+        // Clear route state on change
+        setRouteCoords(null);
+        setAlternateRouteCoords(null);
+        setShowOnMap(false);
+        onRouteChange(null, null, null, false);
+    };
+
+    const reverseWaypoints = () => {
+        setWaypoints(prev => [...prev].reverse());
+        setRouteCoords(null);
+        setAlternateRouteCoords(null);
+        setShowOnMap(false);
+        onRouteChange(null, null, null, false);
+    };
+
     const createRoute = async () => {
         if (waypoints.length < 2) {
             alert('Add at least 2 waypoints to create a route');
@@ -109,7 +240,7 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
         try {
             // Map vehicle type to OSRM profile
             const osrmProfileMap: Record<string, string> = {
-                'bicycle': 'cycling',
+                'bicycle': 'bike',
                 'motorcycle': 'driving',
                 'car': 'driving'
             };
@@ -248,6 +379,14 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
 
             // Sort by created_at descending
             routes.sort((a, b) => b.created_at - a.created_at);
+
+            // Save to local cache
+            try {
+                localStorage.setItem('parlens_route_cache_v1', JSON.stringify(routes));
+            } catch (e) {
+                console.warn('[Parlens] Failed to cache routes:', e);
+            }
+
             setSavedRoutes(routes);
         } catch (error) {
             console.error('Error fetching saved routes:', error);
@@ -259,6 +398,18 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
     // Load saved routes when modal opens
     useEffect(() => {
         if (isOpen && pubkey) {
+            // 1. Load from cache first for immediate display
+            try {
+                const cached = localStorage.getItem('parlens_route_cache_v1');
+                if (cached) {
+                    const parsed = JSON.parse(cached);
+                    setSavedRoutes(parsed);
+                }
+            } catch (e) {
+                console.warn('[Parlens] Failed to load cached routes:', e);
+            }
+
+            // 2. Fetch from network to sync
             fetchSavedRoutes();
         }
     }, [isOpen, pubkey, fetchSavedRoutes]);
@@ -345,9 +496,25 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                 console.warn('[Parlens] All relays reported failure, but data may still be saved (iOS quirk)');
             }
 
+            // Update Local Cache immediately with the new route
+            const newSavedRoute: SavedRoute = {
+                id: signedEvent.id,
+                dTag,
+                decryptedContent: routeContent,
+                created_at: signedEvent.created_at
+            };
+
+            setSavedRoutes(prev => {
+                const updated = [newSavedRoute, ...prev];
+                try {
+                    localStorage.setItem('parlens_route_cache_v1', JSON.stringify(updated));
+                } catch (e) { console.warn('Cache update failed', e); }
+                return updated;
+            });
+
             setRouteName('');
-            // Brief delay to allow relay propagation, then refetch
-            setTimeout(() => fetchSavedRoutes(), 500);
+            // No need to fetch immediately if we updated cache, but good for sync consistency
+            // setTimeout(() => fetchSavedRoutes(), 500); 
         } catch (error) {
             console.error('[Parlens] Error saving route:', error);
             alert('Failed to save route, try again later');
@@ -436,7 +603,13 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
             // Mark as deleted locally so it won't reappear after refetch
             deletedDTagsRef.current.add(saved.dTag);
 
-            setSavedRoutes(prev => prev.filter(r => r.id !== saved.id));
+            setSavedRoutes(prev => {
+                const updated = prev.filter(r => r.id !== saved.id);
+                try {
+                    localStorage.setItem('parlens_route_cache_v1', JSON.stringify(updated));
+                } catch (e) { console.warn('Cache update failed', e); }
+                return updated;
+            });
         } catch (error) {
             console.error('Error deleting route:', error);
             alert('Failed to delete route');
@@ -449,7 +622,7 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
         <>
             <button
                 onClick={() => setIsOpen(true)}
-                className="h-12 w-12 flex items-center justify-center rounded-[1.5rem] bg-white/80 dark:bg-white/10 backdrop-blur-md text-zinc-600 dark:text-white/70 hover:bg-white dark:hover:bg-white/20 active:scale-95 transition-all shadow-lg border border-black/5 dark:border-white/10"
+                className="h-12 w-12 flex items-center justify-center rounded-[1.5rem] bg-white/80 dark:bg-white/10 backdrop-blur-md text-zinc-600 dark:text-white/70 active:scale-95 transition-all shadow-lg border border-black/5 dark:border-white/10"
                 title="Create Route"
             >
                 <Route size={20} />
@@ -491,7 +664,7 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                             </h2>
                             <button
                                 onClick={() => setIsOpen(false)}
-                                className="p-2 rounded-full bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/20 transition-colors"
+                                className="p-2 rounded-full bg-black/5 dark:bg-white/10 transition-colors"
                             >
                                 <X size={20} className="text-black/60 dark:text-white/60" />
                             </button>
@@ -506,12 +679,77 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                                 <input
                                     ref={inputRef}
                                     type="text"
-                                    placeholder="Search waypoints from saved routes"
+                                    placeholder="Search waypoint or coordinate"
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
                                     className="w-full h-14 rounded-2xl bg-zinc-100 dark:bg-white/5 border border-black/5 dark:border-white/10 px-4 text-zinc-900 dark:text-white placeholder:text-zinc-400 dark:placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-blue-500"
                                 />
                             </div>
+
+                            {/* Coordinate / Plus Code Match (Sync) */}
+                            {(() => {
+                                const parsed = parseCoordinate(searchQuery);
+                                if (parsed) {
+                                    return (
+                                        <div className="mb-2 rounded-2xl overflow-hidden bg-blue-50 dark:bg-blue-500/10 border border-blue-500/20">
+                                            <div className="px-3 py-1.5 text-xs font-medium text-blue-700 dark:text-blue-400 bg-blue-100/50 dark:bg-blue-500/5">
+                                                📍 {parsed.type === 'plus_code' ? 'Plus Code Location' : 'Coordinate'}
+                                            </div>
+                                            <button
+                                                onClick={() => {
+                                                    const newWaypoint: Waypoint = {
+                                                        id: crypto.randomUUID(),
+                                                        name: parsed.type === 'plus_code' ? `Plus Code: ${searchQuery}` : `Loc: ${formatCoords(parsed.lat, parsed.lon)}`,
+                                                        lat: parsed.lat,
+                                                        lon: parsed.lon
+                                                    };
+                                                    setWaypoints(prev => [...prev, newWaypoint]);
+                                                    setSearchQuery('');
+                                                    setRouteCoords(null);
+                                                    setAlternateRouteCoords(null);
+                                                    setShowOnMap(false);
+                                                    onRouteChange(null, null, null, false);
+                                                }}
+                                                className="w-full p-3 flex items-center gap-3 transition-colors text-left"
+                                            >
+                                                <MapPin size={16} className="text-blue-600 dark:text-blue-400 shrink-0" />
+                                                <div className="flex-1 truncate">
+                                                    <div className="text-sm font-bold text-zinc-900 dark:text-white">
+                                                        Add Location
+                                                    </div>
+                                                    <div className="text-xs text-zinc-500 dark:text-white/60">
+                                                        {parsed.lat.toFixed(6)}, {parsed.lon.toFixed(6)}
+                                                    </div>
+                                                </div>
+                                            </button>
+                                        </div>
+                                    );
+                                }
+                                return null;
+                            })()}
+
+                            {/* Online / Nominatim Result (Async) - Only matches if no local results */}
+                            {searchQuery.length > 3 && !parseCoordinate(searchQuery) && savedWaypointMatches.length === 0 && (
+                                <OnlineSearch
+                                    query={searchQuery}
+                                    countryCode={countryCode}
+                                    currentLocation={currentLocation}
+                                    onSelect={(result) => {
+                                        const newWaypoint: Waypoint = {
+                                            id: crypto.randomUUID(),
+                                            name: result.display_name.split(',')[0], // Use first part of address
+                                            lat: parseFloat(result.lat),
+                                            lon: parseFloat(result.lon)
+                                        };
+                                        setWaypoints(prev => [...prev, newWaypoint]);
+                                        setSearchQuery('');
+                                        setRouteCoords(null);
+                                        setAlternateRouteCoords(null);
+                                        setShowOnMap(false);
+                                        onRouteChange(null, null, null, false);
+                                    }}
+                                />
+                            )}
 
                             {/* Saved Waypoint Matches (offline/local) */}
                             {savedWaypointMatches.length > 0 && (
@@ -536,7 +774,7 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                                                 setShowOnMap(false);
                                                 onRouteChange(null, null, null, false);
                                             }}
-                                            className="w-full p-3 flex items-center gap-3 hover:bg-green-100 dark:hover:bg-green-500/10 transition-colors text-left border-b border-green-500/10 last:border-0"
+                                            className="w-full p-3 flex items-center gap-3 transition-colors text-left border-b border-green-500/10 last:border-0"
                                         >
                                             <MapPin size={16} className="text-green-600 dark:text-green-400 shrink-0" />
                                             <span className="flex-1 text-sm text-zinc-700 dark:text-white/80 truncate">
@@ -563,7 +801,7 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                                         setShowOnMap(false);
                                         onRouteChange(null, null, null, false);
                                     }}
-                                    className="w-full p-3 flex items-center gap-3 rounded-2xl bg-blue-500/10 dark:bg-blue-500/20 border border-blue-500/20 hover:bg-blue-500/20 transition-colors"
+                                    className="w-full p-3 flex items-center gap-3 rounded-2xl bg-blue-500/10 dark:bg-blue-500/20 border border-blue-500/20 transition-colors"
                                 >
                                     <Navigation size={16} className="text-blue-500" />
                                     <span className="text-sm font-medium text-blue-600 dark:text-blue-400">Add Current Location</span>
@@ -573,7 +811,7 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                             {/* Drop Pin on Map Button */}
                             <button
                                 onClick={toggleDropPinMode}
-                                className="w-full p-3 flex items-center gap-3 rounded-2xl bg-orange-500/10 dark:bg-orange-500/20 border border-orange-500/20 hover:bg-orange-500/20 transition-colors"
+                                className="w-full p-3 flex items-center gap-3 rounded-2xl bg-orange-500/10 dark:bg-orange-500/20 border border-orange-500/20 transition-colors"
                             >
                                 <MapPinned size={16} className="text-orange-500" />
                                 <span className="text-sm font-medium text-orange-600 dark:text-orange-400">Drop Pin on Map</span>
@@ -582,9 +820,20 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
 
                         {/* Waypoints List */}
                         <div className="space-y-2 flex-1">
-                            <label className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-white/30 ml-2">
-                                Waypoints ({waypoints.length})
-                            </label>
+                            <div className="flex items-center justify-between ml-2 mr-2">
+                                <label className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-white/30">
+                                    Waypoints ({waypoints.length})
+                                </label>
+                                {waypoints.length > 1 && (
+                                    <button
+                                        onClick={reverseWaypoints}
+                                        className="p-1 rounded-md transition-colors"
+                                        title="Reverse Order"
+                                    >
+                                        <ArrowUpDown size={14} className="text-zinc-400 dark:text-white/30" />
+                                    </button>
+                                )}
+                            </div>
 
                             {waypoints.length === 0 ? (
                                 <div className="p-8 text-center text-zinc-400 dark:text-white/30 text-sm">
@@ -597,6 +846,26 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                                             key={waypoint.id}
                                             className="flex items-center gap-3 p-3 rounded-2xl bg-zinc-100 dark:bg-white/5 border border-black/5 dark:border-white/10"
                                         >
+                                            {/* Reorder Buttons */}
+                                            <div className="flex flex-col gap-0.5 -ml-1 mr-1">
+                                                <button
+                                                    onClick={() => moveWaypoint(index, -1)}
+                                                    disabled={index === 0}
+                                                    className="p-0.5 text-zinc-400 dark:text-white/30 disabled:opacity-20 outline-none focus:outline-none"
+                                                    style={{ WebkitTapHighlightColor: 'transparent' }}
+                                                >
+                                                    <ChevronUp size={12} />
+                                                </button>
+                                                <button
+                                                    onClick={() => moveWaypoint(index, 1)}
+                                                    disabled={index === waypoints.length - 1}
+                                                    className="p-0.5 text-zinc-400 dark:text-white/30 disabled:opacity-20 outline-none focus:outline-none"
+                                                    style={{ WebkitTapHighlightColor: 'transparent' }}
+                                                >
+                                                    <ChevronDown size={12} />
+                                                </button>
+                                            </div>
+
                                             <div className="w-6 h-6 rounded-full bg-blue-500 text-white text-xs font-bold flex items-center justify-center shrink-0">
                                                 {index + 1}
                                             </div>
@@ -608,6 +877,7 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                                                         onChange={(e) => setEditingName(e.target.value)}
                                                         className="flex-1 text-sm bg-white dark:bg-white/10 rounded-lg px-2 py-1 text-zinc-700 dark:text-white border border-blue-500"
                                                         autoFocus
+                                                        onFocus={(e) => e.currentTarget.select()}
                                                         onKeyDown={(e) => {
                                                             if (e.key === 'Enter') updateWaypointName(waypoint.id, editingName);
                                                             if (e.key === 'Escape') setEditingWaypointId(null);

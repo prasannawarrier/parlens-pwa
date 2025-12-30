@@ -157,7 +157,7 @@ const Login: React.FC = () => {
                 <h4 className="text-xs font-bold uppercase tracking-widest text-white/30 ml-2">Your Keys</h4>
                 <div className="space-y-0.5 rounded-[2rem] overflow-hidden bg-white/[0.03] border border-white/10">
                   <div
-                    className="p-5 flex items-center justify-between hover:bg-white/5 transition-colors cursor-pointer active:bg-white/10"
+                    className="p-5 flex items-center justify-between transition-colors cursor-pointer active:bg-white/10"
                     onClick={() => {
                       if (generatedKeys) {
                         navigator.clipboard.writeText(generatedKeys.npub);
@@ -173,7 +173,7 @@ const Login: React.FC = () => {
                   </div>
                   <div className="h-[1px] bg-white/5 mx-4" />
                   <div
-                    className="p-5 flex items-center justify-between hover:bg-white/5 transition-colors cursor-pointer active:bg-white/10"
+                    className="p-5 flex items-center justify-between transition-colors cursor-pointer active:bg-white/10"
                     onClick={() => {
                       if (generatedKeys) {
                         navigator.clipboard.writeText(generatedKeys.nsec);
@@ -243,7 +243,7 @@ const Login: React.FC = () => {
               <button onClick={() => {
                 const el = document.getElementById('login-android-guide');
                 el?.classList.toggle('hidden');
-              }} className="w-full flex items-center justify-between p-4 font-bold text-sm text-left hover:bg-white/5 text-white/80 transition-colors" style={{ WebkitTapHighlightColor: 'transparent' }}>
+              }} className="w-full flex items-center justify-between p-4 font-bold text-sm text-left text-white/80 transition-colors" style={{ WebkitTapHighlightColor: 'transparent' }}>
                 <span>Using Browser Menu (Android)</span>
                 <ChevronDown size={16} className="text-white/50" />
               </button>
@@ -267,7 +267,7 @@ const Login: React.FC = () => {
               <button onClick={() => {
                 const el = document.getElementById('login-ios-guide');
                 el?.classList.toggle('hidden');
-              }} className="w-full flex items-center justify-between p-4 font-bold text-sm text-left hover:bg-white/5 text-white/80 transition-colors" style={{ WebkitTapHighlightColor: 'transparent' }}>
+              }} className="w-full flex items-center justify-between p-4 font-bold text-sm text-left text-white/80 transition-colors" style={{ WebkitTapHighlightColor: 'transparent' }}>
                 <span>Using Share Button (iOS)</span>
                 <ChevronDown size={16} className="text-white/50" />
               </button>

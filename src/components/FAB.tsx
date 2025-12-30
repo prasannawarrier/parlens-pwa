@@ -361,13 +361,13 @@ export const FAB: React.FC<FABProps> = ({
                             <div className="flex flex-col gap-1.5">
                                 <button
                                     onClick={() => setCost(String(Math.max(0, parseFloat(cost || '0') + 1)))}
-                                    className="h-10 w-10 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-white/10 dark:hover:bg-white/20 active:scale-95 transition-all flex items-center justify-center"
+                                    className="h-10 w-10 rounded-xl bg-zinc-100 dark:bg-white/10 active:scale-95 transition-all flex items-center justify-center"
                                 >
                                     <ChevronUp size={22} className="text-zinc-600 dark:text-white/70" />
                                 </button>
                                 <button
                                     onClick={() => setCost(String(Math.max(0, parseFloat(cost || '0') - 1)))}
-                                    className="h-10 w-10 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-white/10 dark:hover:bg-white/20 active:scale-95 transition-all flex items-center justify-center"
+                                    className="h-10 w-10 rounded-xl bg-zinc-100 dark:bg-white/10 active:scale-95 transition-all flex items-center justify-center"
                                 >
                                     <ChevronDown size={22} className="text-zinc-600 dark:text-white/70" />
                                 </button>
@@ -384,7 +384,7 @@ export const FAB: React.FC<FABProps> = ({
 
                             <button
                                 onClick={() => setShowCostPopup(false)}
-                                className="w-full text-xs font-bold text-zinc-400 dark:text-white/30 tracking-widest uppercase py-3 hover:text-zinc-600 dark:hover:text-white/50 transition-colors"
+                                className="w-full text-xs font-bold text-zinc-400 dark:text-white/30 tracking-widest uppercase py-3 transition-colors"
                             >
                                 Cancel
                             </button>

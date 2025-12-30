@@ -29,7 +29,7 @@ const MAP_STYLES = {
 const SpotMarkerContent = memo(({ price, emoji, currency, isHistory = false }: { price: number, emoji: string, currency: string, isHistory?: boolean }) => {
     const symbol = getCurrencySymbol(currency);
     return (
-        <div className="flex flex-col items-center justify-center cursor-pointer transition-transform hover:scale-110 active:scale-95">
+        <div className="flex flex-col items-center justify-center cursor-pointer transition-transform active:scale-95">
             <div className="text-[32px] leading-none drop-shadow-md z-10 filter">
                 {emoji}
             </div>
@@ -140,7 +140,7 @@ const ClusterMarkerContent = memo(({ count, minPrice, maxPrice, currency, type }
     const priceRange = minPrice === maxPrice ? `${symbol}${minPrice}` : `${symbol}${minPrice}-${maxPrice}`;
 
     return (
-        <div className="flex flex-col items-center justify-center cursor-pointer transition-transform hover:scale-110 active:scale-95 pointer-events-none">
+        <div className="flex flex-col items-center justify-center cursor-pointer transition-transform active:scale-95 pointer-events-none">
             <div className="relative text-[32px] leading-none drop-shadow-md z-10 filter">
                 {emoji}
                 {/* Count Badge */}
@@ -209,7 +209,7 @@ const VehicleToggle = memo(({
                             }}
                             className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${vehicleType === type
                                 ? 'bg-blue-500/20 shadow-inner'
-                                : 'hover:bg-black/5 dark:hover:bg-white/10'
+                                : 'transition-colors'
                                 }`}
                         >
                             <span className={`text-lg ${vehicleType === type ? '' : 'opacity-50'}`}>
@@ -220,7 +220,7 @@ const VehicleToggle = memo(({
                     {/* Collapse arrow */}
                     <button
                         onClick={() => setIsExpanded(false)}
-                        className="w-10 h-6 flex items-center justify-center text-zinc-400 dark:text-white/40 hover:text-zinc-600 dark:hover:text-white/60 transition-colors"
+                        className="w-10 h-6 flex items-center justify-center text-zinc-400 dark:text-white/40 transition-colors"
                     >
                         <ChevronUp size={16} />
                     </button>
@@ -737,8 +737,14 @@ export const LandingPage: React.FC = () => {
 
         // Fit bounds to route
         if (main && main.length > 1 && mapRef.current && showOnMap) {
-            const lngs = main.map(c => c[1]);
-            const lats = main.map(c => c[0]);
+            // Combine coordinates from both main and alternate routes for bounds
+            const allCoords = [...main];
+            if (alternate && alternate.length > 0) {
+                allCoords.push(...alternate);
+            }
+
+            const lngs = allCoords.map(c => c[1]);
+            const lats = allCoords.map(c => c[0]);
             const bounds = new maplibregl.LngLatBounds(
                 [Math.min(...lngs), Math.min(...lats)],
                 [Math.max(...lngs), Math.max(...lats)]
@@ -977,6 +983,10 @@ export const LandingPage: React.FC = () => {
                     mapStyle={mapStyle}
                     attributionControl={false}
                     dragPan={!isTransitioning.current}
+                    // Fix for "Map breaks on zoom out" - Restrict zoom and ensure copies
+                    minZoom={3} // Prevents zooming out too far (perf killer)
+                    maxZoom={20}
+                    renderWorldCopies={true}
                 >
                     {/* Routes */}
                     {showRoute && alternateRouteCoords && alternateRouteCoords.length > 1 && (
@@ -1392,7 +1402,7 @@ export const LandingPage: React.FC = () => {
                         >
                             <button
                                 onClick={() => setShowHelp(false)}
-                                className="absolute top-6 right-6 p-2 rounded-full bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/20 transition-colors"
+                                className="absolute top-6 right-6 p-2 rounded-full bg-black/5 dark:bg-white/10 transition-colors"
                             >
                                 <X size={20} className="text-black/60 dark:text-white/60" />
                             </button>
@@ -1415,7 +1425,7 @@ export const LandingPage: React.FC = () => {
                                     <button onClick={() => {
                                         const el = document.getElementById('android-guide');
                                         el?.classList.toggle('hidden');
-                                    }} className="w-full flex items-center justify-between p-4 font-bold text-sm text-left hover:bg-zinc-200 dark:hover:bg-white/5 text-zinc-800 dark:text-zinc-200 transition-colors rounded-2xl" style={{ WebkitTapHighlightColor: 'transparent' }}>
+                                    }} className="w-full flex items-center justify-between p-4 font-bold text-sm text-left text-zinc-800 dark:text-zinc-200 transition-colors rounded-2xl" style={{ WebkitTapHighlightColor: 'transparent' }}>
                                         <span>Using Browser Menu (Android)</span>
                                         <ChevronDown size={16} className="text-zinc-400 dark:text-white/50" />
                                     </button>
@@ -1439,7 +1449,7 @@ export const LandingPage: React.FC = () => {
                                     <button onClick={() => {
                                         const el = document.getElementById('ios-guide');
                                         el?.classList.toggle('hidden');
-                                    }} className="w-full flex items-center justify-between p-4 font-bold text-sm text-left hover:bg-zinc-200 dark:hover:bg-white/5 text-zinc-800 dark:text-zinc-200 transition-colors rounded-2xl" style={{ WebkitTapHighlightColor: 'transparent' }}>
+                                    }} className="w-full flex items-center justify-between p-4 font-bold text-sm text-left text-zinc-800 dark:text-zinc-200 transition-colors rounded-2xl" style={{ WebkitTapHighlightColor: 'transparent' }}>
                                         <span>Using Share Button (iOS)</span>
                                         <ChevronDown size={16} className="text-zinc-400 dark:text-white/50" />
                                     </button>
@@ -1461,12 +1471,11 @@ export const LandingPage: React.FC = () => {
 
                                 <p>
                                     <strong className="text-zinc-900 dark:text-white block mb-1">2. Plan your route (optional)</strong>
-                                    Tap the route button to add waypoints and create a route. Click the location button to re-centre and turn on follow-me or navigation mode for route tracking.
+                                    Tap the route button to add waypoints and create a route. If the system generated route(s) between your start and end points are not to your liking, add additional waypoints in locations you would prefer travelling through. Click the location button to re-centre and turn on follow-me or navigation mode for route tracking.
                                 </p>
 
                                 <p>
-                                    {/* UPDATED: Title and "last minute" -> "last 5 minutes" */}
-                                    <strong className="text-zinc-900 dark:text-white block mb-1">3. Decentralized Route & Parking Management</strong>
+                                    <strong className="text-zinc-900 dark:text-white block mb-1">3. Find and log parking</strong>
                                     Click the main button once to see open spots reported by others live or within the last 5 minutes. Click again to mark your location. When leaving, click once more to end the session and report the fee. Use the profile button to see your parking history.
                                 </p>
 
@@ -1476,7 +1485,7 @@ export const LandingPage: React.FC = () => {
                                         href="https://github.com/prasannawarrier/parlens-pwa/blob/main/MIRROR_CREATION.md"
                                         target="_blank"
                                         rel="noopener noreferrer"
-                                        className="text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 underline"
+                                        className="text-blue-500 dark:text-blue-400 underline"
                                     >
                                         Follow these steps
                                     </a> to create your own mirror of the Parlens app to distribute the bandwidth load while sharing with your friends.

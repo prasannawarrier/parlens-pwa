@@ -123,3 +123,111 @@ export function geohashToBounds(geohash: string): { sw: [number, number], ne: [n
         ne: [latMax, lngMax]
     };
 }
+
+/**
+ * Parses a string input to attempt to find a coordinate.
+ * Supports:
+ * - Decimal coordinates (lat, lon) or (lat lon)
+ * - Google Plus Codes (Open Location Code)
+ */
+import OpenLocationCode from 'open-location-code';
+
+// Cast to any to avoid type definition mismatches
+const OLC_LIB = OpenLocationCode as any;
+// Handle likely CJS/ESM interop issues where the library might be on .default
+const OLC = OLC_LIB.default || OLC_LIB;
+
+export function parseCoordinate(input: string): { lat: number, lon: number, type: 'coordinate' | 'plus_code' } | null {
+    const trimmed = input.trim();
+
+    // 1. Try Decimal Degrees with Directions: "13.00° N, 77.66° E" or "-12.34, 56.78"
+    // Clean up input by removing degree symbols
+    const cleanInput = trimmed.replace(/°/g, '').replace(/,/g, ' ');
+
+    // Split by whitespace to find parts
+    const parts = cleanInput.split(/\s+/).filter(p => p.length > 0);
+
+    // If we have 2 numbers (standard decimal) or 2 numbers + directions
+    if (parts.length >= 2) {
+        let lat: number | null = null;
+        let lon: number | null = null;
+
+        // Pattern A: Classic "Lat, Lon" (numbers only, handled by simple parse)
+        const simpleMatch = trimmed.match(/^(-?\d+(\.\d+)?)[,\s]+(-?\d+(\.\d+)?)$/);
+        if (simpleMatch) {
+            lat = parseFloat(simpleMatch[1]);
+            lon = parseFloat(simpleMatch[3]);
+        }
+        // Pattern B: "13.0 N 77.6 E" style parsing
+        else {
+            // Try to find two numbers and optional direction letters
+            // Regex to grab number + optional letter
+            const coordMatches = trimmed.matchAll(/([0-9.-]+)\s*°?\s*([NSEWnsew])?/g);
+            const found = Array.from(coordMatches);
+
+            if (found.length === 2) {
+                const val1 = parseFloat(found[0][1]);
+                const dir1 = found[0][2]?.toUpperCase();
+                const val2 = parseFloat(found[1][1]);
+                const dir2 = found[1][2]?.toUpperCase();
+
+                // Helper to assign based on dir
+                const assign = (val: number, dir?: string) => {
+                    let signed = val;
+                    if (dir === 'S' || dir === 'W') signed = -val;
+
+                    if (dir === 'N' || dir === 'S') return { type: 'lat', val: signed };
+                    if (dir === 'E' || dir === 'W') return { type: 'lon', val: signed };
+                    return { type: 'unknown', val: signed }; // Assume order if unknown?
+                };
+
+                // Logic: 
+                // If directions are present, use them.
+                // If one is Lat and one is Lon, great.
+                // Common format: Lat then Lon.
+
+                const p1 = assign(val1, dir1);
+                const p2 = assign(val2, dir2);
+
+                if (p1.type === 'lat' && p2.type === 'lon') { lat = p1.val; lon = p2.val; }
+                else if (p1.type === 'lon' && p2.type === 'lat') { lon = p1.val; lat = p2.val; }
+                else if (p1.type === 'unknown' && p2.type === 'unknown') {
+                    // Fallback to Order: Lat, Lon
+                    lat = p1.val;
+                    lon = p2.val;
+                }
+            }
+        }
+
+        if (lat !== null && lon !== null) {
+            // Basic validation
+            if (!isNaN(lat) && !isNaN(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {
+                return { lat, lon, type: 'coordinate' };
+            }
+        }
+    }
+
+    // 2. Try Plus Code
+    try {
+        // Attempt 1: Raw trimmed input
+        if (OLC && OLC.isValid && OLC.isValid(trimmed)) {
+            if (OLC.isFull(trimmed)) {
+                const decoded = OLC.decode(trimmed);
+                return { lat: decoded.latitudeCenter, lon: decoded.longitudeCenter, type: 'plus_code' };
+            }
+        }
+
+        // Attempt 2: Handle "8FVC GH" -> "8FVC+GH" format
+        const query = trimmed.toUpperCase().replace(/\s+/g, '+');
+        if (query !== trimmed && OLC && OLC.isValid && OLC.isValid(query)) {
+            if (OLC.isFull(query)) {
+                const decoded = OLC.decode(query);
+                return { lat: decoded.latitudeCenter, lon: decoded.longitudeCenter, type: 'plus_code' };
+            }
+        }
+    } catch (e) {
+        // Ignore
+    }
+
+    return null;
+}

@@ -143,7 +143,7 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
         <>
             <button
                 onClick={() => { refetch(); setIsOpen(true); }}
-                className="h-12 w-12 flex items-center justify-center rounded-[1.5rem] bg-white/80 dark:bg-white/10 backdrop-blur-md text-zinc-600 dark:text-white/70 hover:bg-white dark:hover:bg-white/20 active:scale-95 transition-all shadow-lg border border-black/5 dark:border-white/10"
+                className="h-12 w-12 flex items-center justify-center rounded-[1.5rem] bg-white/80 dark:bg-white/10 backdrop-blur-md text-zinc-600 dark:text-white/70 active:scale-95 transition-all shadow-lg border border-black/5 dark:border-white/10"
                 title="Activity Log"
             >
                 <User size={20} />
@@ -175,7 +175,7 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                             </h2>
                             <button
                                 onClick={() => setIsOpen(false)}
-                                className="p-2 rounded-full bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/20 transition-colors"
+                                className="p-2 rounded-full bg-black/5 dark:bg-white/10 transition-colors"
                             >
                                 <X size={20} className="text-black/60 dark:text-white/60" />
                             </button>
@@ -184,7 +184,7 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                         <div className="space-y-4">
                             <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-white/20 ml-2">Keys</h4>
                             <div className="space-y-0.5 rounded-[2rem] overflow-hidden bg-zinc-50 dark:bg-white/[0.03] border border-black/5 dark:border-white/5">
-                                <div className="p-5 flex items-center justify-between hover:bg-black/5 dark:hover:bg-white/5 transition-colors cursor-pointer" onClick={() => {
+                                <div className="p-5 flex items-center justify-between transition-colors cursor-pointer" onClick={() => {
                                     navigator.clipboard.writeText(profile?.npub);
                                     alert('Copied to clipboard');
                                 }}>
@@ -199,7 +199,7 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                                         <div className="h-[1px] bg-black/5 dark:bg-white/5 mx-4" />
                                         <div
                                             onClick={handleBackupKey}
-                                            className="flex items-center justify-between p-4 cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 transition-colors active:bg-black/10 dark:active:bg-white/10"
+                                            className="flex items-center justify-between p-4 cursor-pointer transition-colors active:bg-black/10 dark:active:bg-white/10"
                                         >
                                             <div className="flex items-center gap-3">
                                                 <div className="p-2.5 rounded-xl bg-red-500/10 dark:bg-red-500/20 text-red-500"><Shield size={20} /></div>
@@ -258,7 +258,7 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                                                         <span className="text-2xl">{getCountryFlag(content.currency || 'USD')}</span>
                                                         <button
                                                             onClick={() => handleDeleteLog(log)}
-                                                            className="p-1.5 text-zinc-400 dark:text-white/30 hover:text-zinc-600 dark:hover:text-white/50 transition-colors"
+                                                            className="p-1.5 text-zinc-400 dark:text-white/30 transition-colors"
                                                             title="Delete entry"
                                                         >
                                                             <Trash2 size={16} />
@@ -296,7 +296,7 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
 
                         <button
                             onClick={() => { logout(); setIsOpen(false); }}
-                            className="w-full py-5 rounded-[2rem] bg-zinc-100 dark:bg-zinc-800 text-red-500 font-bold tracking-wide border border-black/5 dark:border-white/5 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all active:scale-95 text-center mt-4"
+                            className="w-full py-5 rounded-[2rem] bg-zinc-100 dark:bg-zinc-800 text-red-500 font-bold tracking-wide border border-black/5 dark:border-white/5 transition-all active:scale-95 text-center mt-4"
                         >
                             Logout
                         </button>
