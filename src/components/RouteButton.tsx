@@ -25,9 +25,10 @@ interface RouteButtonProps {
     onRouteChange: (route: [number, number][] | null, alternateRoute: [number, number][] | null, waypoints: { lat: number; lon: number }[] | null, showOnMap: boolean) => void;
     currentLocation: [number, number] | null;
     onDropPinModeChange?: (enabled: boolean) => void;
-    pendingDropPin?: { lat: number; lon: number } | null;
+    pendingWaypoints?: { lat: number; lon: number; name?: string }[] | null;
     onDropPinConsumed?: () => void;
     onOpenChange?: (isOpen: boolean) => void;
+    onWaypointsChange?: (waypoints: Waypoint[]) => void;
 }
 
 
@@ -79,7 +80,7 @@ const OnlineSearch: React.FC<{ query: string; onSelect: (result: NominatimResult
             }
         };
 
-        const timeoutId = setTimeout(fetchLocation, 2000); // 2000ms debounce
+        const timeoutId = setTimeout(fetchLocation, 1000); // 1000ms debounce (Nominatim limit is 1s)
         return () => clearTimeout(timeoutId);
     }, [query, countryCode, currentLocation]);
 
@@ -117,7 +118,7 @@ const OnlineSearch: React.FC<{ query: string; onSelect: (result: NominatimResult
     );
 };
 
-export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteChange, currentLocation, onDropPinModeChange, pendingDropPin, onDropPinConsumed, onOpenChange }) => {
+export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteChange, currentLocation, onDropPinModeChange, pendingWaypoints, onDropPinConsumed, onOpenChange, onWaypointsChange }) => {
     const { pool, pubkey, signEvent } = useAuth();
     const [isOpen, setIsOpen] = useState(false);
 
@@ -126,6 +127,12 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
         onOpenChange?.(isOpen);
     }, [isOpen, onOpenChange]);
     const [waypoints, setWaypoints] = useState<Waypoint[]>([]);
+
+    // Notify parent on waypoints change
+    useEffect(() => {
+        onWaypointsChange?.(waypoints);
+    }, [waypoints, onWaypointsChange]);
+
     const [searchQuery, setSearchQuery] = useState('');
     const [showOnMap, setShowOnMap] = useState(false);
     const [routeCoords, setRouteCoords] = useState<[number, number][] | null>(null);
@@ -144,6 +151,7 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
     const [editingName, setEditingName] = useState('');
     const [isDeleting, setIsDeleting] = useState(false);
     const [countryCode, setCountryCode] = useState<string | null>(null);
+    const [snappedWaypoints, setSnappedWaypoints] = useState<{ [index: number]: { lat: number, lon: number } }>({});
 
     // Track locally deleted d-tags to prevent re-appearing after refetch
     const deletedDTagsRef = useRef<Set<string>>(new Set());
@@ -190,12 +198,13 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
     }, [searchQuery, savedRoutes]);
 
     const removeWaypoint = (id: string) => {
-        setWaypoints(prev => prev.filter(w => w.id !== id));
+        const newWaypoints = waypoints.filter(w => w.id !== id);
+        setWaypoints(newWaypoints);
         // Clear existing route when waypoints change
         setRouteCoords(null);
         setAlternateRouteCoords(null);
         setShowOnMap(false);
-        onRouteChange(null, null, null, false);
+        onRouteChange(null, null, newWaypoints, false);
     };
 
     const clearAllWaypoints = () => {
@@ -203,7 +212,7 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
         setRouteCoords(null);
         setAlternateRouteCoords(null);
         setShowOnMap(false);
-        onRouteChange(null, null, null, false);
+        onRouteChange(null, null, [], false);
     };
 
 
@@ -219,15 +228,16 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
         setRouteCoords(null);
         setAlternateRouteCoords(null);
         setShowOnMap(false);
-        onRouteChange(null, null, null, false);
+        onRouteChange(null, null, newWaypoints, false);
     };
 
     const reverseWaypoints = () => {
-        setWaypoints(prev => [...prev].reverse());
+        const reversed = [...waypoints].reverse();
+        setWaypoints(reversed);
         setRouteCoords(null);
         setAlternateRouteCoords(null);
         setShowOnMap(false);
-        onRouteChange(null, null, null, false);
+        onRouteChange(null, null, reversed, false);
     };
 
     const createRoute = async () => {
@@ -248,7 +258,16 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
 
             // For each segment between waypoints, get primary and alternate routes
             const primarySegments: [number, number][][] = [];
-            const alternateSegments: [number, number][][] = [];
+            const alternateSegments: any[] = [];
+            const newSnappedWaypoints: { [index: number]: { lat: number, lon: number } } = {};
+
+            // OSRM only supports route between 2 points perfectly with alternatives
+            // For multiple waypoints, we might need to stitch.
+            // But OSRM route service CAN take multiple coordinates: /route/v1/driving/lon1,lat1;lon2,lat2;lon3,lat3
+            // However, our loop below logic seems to be manually segmenting.
+            // Let's check the loop. It iterates `i < waypoints.length - 1`. Yes, it's manual segmentation.
+            // This is actually suboptimal for OSRM (it handles multi-waypoints better itself), but refactoring that is out of scope.
+            // We proceed with segment-based logic.
 
             for (let i = 0; i < waypoints.length - 1; i++) {
                 const start = waypoints[i];
@@ -267,8 +286,26 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
 
                 const data = await response.json();
 
-                if (data.routes && data.routes[0]) {
-                    // Get primary route for this segment
+                if (data.code === 'Ok' && data.routes && data.routes[0]) {
+                    // Extract snapped waypoints if available
+                    // OSRM returns waypoints array corresponding to input order for this segment
+                    if (data.waypoints && data.waypoints.length >= 2) {
+                        const start = data.waypoints[0].location; // [lon, lat]
+                        const end = data.waypoints[1].location;   // [lon, lat]
+
+                        // Store snapped coordinates. 
+                        // Note: For multi-segment routes, we accumulate. 
+                        // i is start index, i+1 is end index.
+
+                        // Always set start
+                        if (!newSnappedWaypoints[i]) {
+                            newSnappedWaypoints[i] = { lat: start[1], lon: start[0] };
+                        }
+                        // Always set end (which will be start of next segment)
+                        newSnappedWaypoints[i + 1] = { lat: end[1], lon: end[0] };
+                    }
+
+
                     const primaryCoords = data.routes[0].geometry.coordinates.map(
                         (coord: [number, number]) => [coord[1], coord[0]] as [number, number]
                     );
@@ -307,8 +344,16 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
 
             setRouteCoords(primaryCoords);
             setAlternateRouteCoords(altCoords);
+            setSnappedWaypoints(newSnappedWaypoints);
             setShowOnMap(true);
-            onRouteChange(primaryCoords, altCoords, waypoints.map(w => ({ lat: w.lat, lon: w.lon })), true);
+
+            // If we have snapped waypoints for all points, use them for visualization only
+            // Fallback to original waypoints if snapping failed for some reason
+            const displayWaypoints = Object.keys(newSnappedWaypoints).length === waypoints.length
+                ? waypoints.map((wp, idx) => ({ ...wp, ...newSnappedWaypoints[idx] }))
+                : waypoints;
+
+            onRouteChange(primaryCoords, altCoords, displayWaypoints.map(w => ({ lat: w.lat, lon: w.lon })), true);
 
             // Close the route page (user can reopen to save if desired)
             setIsOpen(false);
@@ -318,6 +363,7 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
             const straightLineCoords = waypoints.map(w => [w.lat, w.lon] as [number, number]);
             setRouteCoords(straightLineCoords);
             setAlternateRouteCoords(null);
+            setSnappedWaypoints({}); // Clear snapped waypoints on error
             setShowOnMap(true);
             onRouteChange(straightLineCoords, null, waypoints.map(w => ({ lat: w.lat, lon: w.lon })), true);
             setIsOpen(false);
@@ -329,7 +375,14 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
     const toggleShowOnMap = () => {
         const newValue = !showOnMap;
         setShowOnMap(newValue);
-        onRouteChange(routeCoords, alternateRouteCoords, waypoints.map(w => ({ lat: w.lat, lon: w.lon })), newValue);
+        // If we have snapped waypoints for all points, use them for visualization only
+        // Fallback to original waypoints if snapping failed for some reason
+        const displayWaypoints = Object.keys(snappedWaypoints).length === waypoints.length
+            ? waypoints.map((wp, idx) => ({ ...wp, ...snappedWaypoints[idx] }))
+            : waypoints;
+
+        // Pass snapped waypoints to parent for map rendering
+        onRouteChange(routeCoords, alternateRouteCoords, displayWaypoints.map(w => ({ lat: w.lat, lon: w.lon })), newValue);
     };
 
     // Fetch saved routes on mount
@@ -421,31 +474,38 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
         onDropPinModeChange?.(newMode);
         if (newMode) {
             setIsOpen(false); // Close modal so user can see map
+            // Force immediate sync of current waypoints to map
+            onWaypointsChange?.(waypoints);
         }
     };
 
-    // Handle pending drop pin from map
     useEffect(() => {
-        if (pendingDropPin) {
-            const newWaypoint: Waypoint = {
-                id: crypto.randomUUID(),
-                name: `Pin ${waypoints.length + 1}`,
-                lat: pendingDropPin.lat,
-                lon: pendingDropPin.lon,
-            };
-            setWaypoints(prev => [...prev, newWaypoint]);
-            setRouteCoords(null);
-            setAlternateRouteCoords(null);
-            setShowOnMap(false);
-            onRouteChange(null, null, null, false);
+        if (pendingWaypoints) {
+            if (pendingWaypoints.length > 0) {
+                const newWaypoints = pendingWaypoints.map((wp, index) => ({
+                    id: crypto.randomUUID(),
+                    name: wp.name || `Pin ${waypoints.length + index + 1}`,
+                    lat: wp.lat,
+                    lon: wp.lon
+                }));
+
+                setWaypoints(prev => [...prev, ...newWaypoints]);
+                setRouteCoords(null);
+                setAlternateRouteCoords(null);
+                setShowOnMap(false);
+                // Pass UPDATED waypoints list (current + new) to parent so they appear on map
+                // Note: 'waypoints' state is stale here, so we construct the new list
+                onRouteChange(null, null, [...waypoints, ...newWaypoints], false);
+                setSnappedWaypoints({});
+            }
+
             onDropPinConsumed?.();
 
-            // Reopen modal to show new waypoint
+            // Reopen modal to show route creation UI
             setIsOpen(true);
-            setDropPinMode(false);
             onDropPinModeChange?.(false);
         }
-    }, [pendingDropPin]);
+    }, [pendingWaypoints, onDropPinConsumed, onDropPinModeChange, onRouteChange]);
 
     // Save current route
     const saveRoute = async () => {
@@ -458,9 +518,14 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
 
         setIsSaving(true);
         try {
+            // Use snapped waypoints if available for saving
+            const waypointsToSave = Object.keys(snappedWaypoints).length === waypoints.length
+                ? waypoints.map((wp, idx) => ({ name: wp.name, lat: snappedWaypoints[idx].lat, lon: snappedWaypoints[idx].lon }))
+                : waypoints.map(w => ({ name: w.name, lat: w.lat, lon: w.lon }));
+
             const routeContent: RouteLogContent = {
                 name,
-                waypoints: waypoints.map(w => ({ name: w.name, lat: w.lat, lon: w.lon })),
+                waypoints: waypointsToSave,
                 routeCoords,
                 alternateRouteCoords: alternateRouteCoords || undefined,
                 vehicleType,
@@ -551,6 +616,7 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
         setWaypoints(restoredWaypoints);
         setRouteCoords(content.routeCoords);
         setAlternateRouteCoords(content.alternateRouteCoords || null);
+        setSnappedWaypoints({}); // Clear snapped waypoints when loading a saved route
         setShowOnMap(true);
         setShowSavedRoutes(false);
 
@@ -709,6 +775,7 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                                                     setAlternateRouteCoords(null);
                                                     setShowOnMap(false);
                                                     onRouteChange(null, null, null, false);
+                                                    setSnappedWaypoints({});
                                                 }}
                                                 className="w-full p-3 flex items-center gap-3 transition-colors text-left"
                                             >
@@ -747,6 +814,7 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                                         setAlternateRouteCoords(null);
                                         setShowOnMap(false);
                                         onRouteChange(null, null, null, false);
+                                        setSnappedWaypoints({});
                                     }}
                                 />
                             )}
@@ -773,6 +841,7 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                                                 setAlternateRouteCoords(null);
                                                 setShowOnMap(false);
                                                 onRouteChange(null, null, null, false);
+                                                setSnappedWaypoints({});
                                             }}
                                             className="w-full p-3 flex items-center gap-3 transition-colors text-left border-b border-green-500/10 last:border-0"
                                         >
@@ -800,6 +869,7 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                                         setAlternateRouteCoords(null);
                                         setShowOnMap(false);
                                         onRouteChange(null, null, null, false);
+                                        setSnappedWaypoints({});
                                     }}
                                     className="w-full p-3 flex items-center gap-3 rounded-2xl bg-blue-500/10 dark:bg-blue-500/20 border border-blue-500/20 transition-colors"
                                 >
@@ -844,7 +914,7 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                                     {waypoints.map((waypoint, index) => (
                                         <div
                                             key={waypoint.id}
-                                            className="flex items-center gap-3 p-3 rounded-2xl bg-zinc-100 dark:bg-white/5 border border-black/5 dark:border-white/10"
+                                            className="flex items-center gap-2 p-3 rounded-2xl bg-zinc-100 dark:bg-white/5 border border-black/5 dark:border-white/10"
                                         >
                                             {/* Reorder Buttons */}
                                             <div className="flex flex-col gap-0.5 -ml-1 mr-1">
@@ -870,12 +940,13 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                                                 {index + 1}
                                             </div>
                                             {editingWaypointId === waypoint.id ? (
+                                                // Editing Mode: Input + Tick + X
                                                 <>
                                                     <input
                                                         type="text"
                                                         value={editingName}
                                                         onChange={(e) => setEditingName(e.target.value)}
-                                                        className="flex-1 text-sm bg-white dark:bg-white/10 rounded-lg px-2 py-1 text-zinc-700 dark:text-white border border-blue-500"
+                                                        className="flex-1 min-w-0 text-sm bg-white dark:bg-white/10 rounded-lg px-2 py-1 text-zinc-700 dark:text-white border border-blue-500"
                                                         autoFocus
                                                         onFocus={(e) => e.currentTarget.select()}
                                                         onKeyDown={(e) => {
@@ -889,8 +960,15 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                                                     >
                                                         <Check size={16} />
                                                     </button>
+                                                    <button
+                                                        onClick={() => setEditingWaypointId(null)}
+                                                        className="p-2 rounded-xl text-zinc-400 hover:bg-zinc-500/10 transition-colors"
+                                                    >
+                                                        <X size={16} />
+                                                    </button>
                                                 </>
                                             ) : (
+                                                // View Mode: Name + Pencil + Trash
                                                 <>
                                                     <span className="flex-1 text-sm text-zinc-700 dark:text-white font-medium truncate">
                                                         {waypoint.name}
@@ -901,14 +979,14 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                                                     >
                                                         <Pencil size={14} />
                                                     </button>
+                                                    <button
+                                                        onClick={() => removeWaypoint(waypoint.id)}
+                                                        className="p-2 rounded-xl text-zinc-400 dark:text-white/40 active:scale-95 transition-transform"
+                                                    >
+                                                        <Trash2 size={16} />
+                                                    </button>
                                                 </>
                                             )}
-                                            <button
-                                                onClick={() => removeWaypoint(waypoint.id)}
-                                                className="p-2 rounded-xl text-zinc-400 dark:text-white/40 active:scale-95 transition-transform"
-                                            >
-                                                <Trash2 size={16} />
-                                            </button>
                                         </div>
                                     ))}
                                 </div>

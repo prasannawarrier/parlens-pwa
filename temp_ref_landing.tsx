@@ -3,7 +3,7 @@
  * Replaces Leaflet for native vector map rotation and smooth zoom
  */
 import React, { useState, useEffect, useRef, useCallback, memo, useMemo } from 'react';
-import { HelpCircle, X, MapPin, Locate, ChevronUp, ChevronDown, ArrowUp, Trash, Check, Pencil } from 'lucide-react';
+import { HelpCircle, X, MapPin, Locate, ChevronUp, ChevronDown, ArrowUp } from 'lucide-react';
 import Map, { Marker, Source, Layer, type MapRef } from 'react-map-gl/maplibre';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
@@ -271,7 +271,8 @@ export const LandingPage: React.FC = () => {
     const [alternateRouteCoords, setAlternateRouteCoords] = useState<[number, number][] | null>(null);
     const [routeWaypoints, setRouteWaypoints] = useState<{ lat: number; lon: number }[] | null>(null);
     const [showRoute, setShowRoute] = useState(false);
-
+    const [dropPinMode, setDropPinMode] = useState(false);
+    const [pendingDropPin, setPendingDropPin] = useState<{ lat: number; lon: number } | null>(null);
 
 
 
@@ -292,59 +293,6 @@ export const LandingPage: React.FC = () => {
     const isUserInteracting = useRef(false);
     const isTransitioning = useRef(false);
     const isDarkMode = window.matchMedia('(prefers-color-scheme: dark)').matches;
-
-    // Drop Pin Mode State (Multi-waypoint) - Moved here to have access to viewState
-    const [dropPinMode, setDropPinMode] = useState(false);
-    const [tempWaypoints, setTempWaypoints] = useState<{ id: string; lat: number; lon: number; name: string }[]>([]);
-    const [pendingWaypoints, setPendingWaypoints] = useState<{ lat: number; lon: number; name?: string }[] | null>(null);
-    const [activeEditingId, setActiveEditingId] = useState<string | null>(null);
-    const [renamingId, setRenamingId] = useState<string | null>(null);
-    const [editingName, setEditingName] = useState('');
-    const [, setRouteButtonOpen] = useState(false);
-    const [listWaypoints, setListWaypoints] = useState<{ id: string; lat: number; lon: number; name: string }[]>([]);
-
-    // Handlers for Drop Pin
-    const handleDropPin = useCallback(() => {
-        const center = viewState;
-        const newWaypoint = {
-            id: crypto.randomUUID(),
-            lat: center.latitude,
-            lon: center.longitude,
-            name: `Waypoint ${tempWaypoints.length + 1}` // Simple initial naming
-        };
-        setTempWaypoints(prev => [...prev, newWaypoint]);
-    }, [viewState, tempWaypoints.length]);
-
-    const updateTempWaypointName = (id: string, newName: string) => {
-        setTempWaypoints(prev => prev.map(wp => wp.id === id ? { ...wp, name: newName } : wp));
-    };
-
-    const removeTempWaypoint = (id: string) => {
-        setTempWaypoints(prev => {
-            const filtered = prev.filter(wp => wp.id !== id);
-            // Renumber remaining waypoints if they used default names
-            return filtered.map((wp, index) => {
-                if (wp.name.startsWith('Waypoint ')) {
-                    return { ...wp, name: `Waypoint ${index + 1}` };
-                }
-                return wp;
-            });
-        });
-        if (activeEditingId === id) setActiveEditingId(null);
-    };
-
-
-    const confirmDrop = useCallback(() => {
-        const waypointsToPass = tempWaypoints.map(wp => ({
-            lat: wp.lat,
-            lon: wp.lon,
-            name: wp.name
-        }));
-        setPendingWaypoints(waypointsToPass);
-        setTempWaypoints([]);
-        setDropPinMode(false); // Helper will consume pendingWaypoints
-        // Note: RouteButton handles the actual routing update when it receives pendingWaypoints
-    }, [tempWaypoints]);
 
     // Orientation permission state (for iOS)
     const [orientationNeedsPermission, setOrientationNeedsPermission] = useState(false);
@@ -387,19 +335,23 @@ export const LandingPage: React.FC = () => {
             (position) => {
                 const { latitude, longitude } = position.coords;
 
-                // PRECISION MODE: Bypass all smoothing, use raw GPS coordinates
-                // Only use animator for smooth visual transitions (no position drift)
-                // This ensures the marker stays precisely at the GPS position
+                // 1. Smooth the raw GPS coordinates using Kalman Filter
+                const [smoothedLat, smoothedLon] = locationSmoother.current.smoothLocation(latitude, longitude);
 
-                // Animate to raw GPS position with quick animation for responsiveness
-                positionAnimator.current.animateTo(
-                    latitude,
-                    longitude,
-                    300 // Quick 300ms animation for smooth visual transition
-                );
+                // 2. Pass smoothed coordinates to StableLocationTracker (Buffer Logic)
+                const result = locationTracker.current.updateLocation(smoothedLat, smoothedLon);
 
-                // Track speed for analytics (still use locationTracker for speed calc only)
-                const result = locationTracker.current.updateLocation(latitude, longitude);
+                // Only update state if marker should move (outside buffer zone)
+                if (result.shouldUpdate) {
+                    // Use Animator to smoothly interpolate to the new position
+                    // This creates 60fps movement instead of 1Hz jumps
+                    // IMPORTANT: Stop any previous animation first (handled inside animateTo)
+                    positionAnimator.current.animateTo(
+                        result.displayLat,
+                        result.displayLon,
+                        result.animationDuration
+                    );
+                }
 
                 // Track speed for potential UI feedback
                 setUserSpeed(result.speed);
@@ -587,14 +539,6 @@ export const LandingPage: React.FC = () => {
                     zoom: liveZoom, // Use live zoom
                     pitch: 0
                 };
-
-                // NEW: If drop pin mode is active, center on the crosshair?
-                // Actually, in drop pin mode, we want the user to pan FREELY.
-                // So we should NOT track user location in dropPinMode if they are moving the map.
-                // But if they are just driving?
-                // Let's Disable auto-tracking updates during dropPinMode to let user pan.
-                if (dropPinMode) return prev;
-
                 // Only auto mode rotates with device
                 if (orientationMode === 'auto') {
                     // Smooth bearing is already applied to cumulativeRotation
@@ -607,7 +551,7 @@ export const LandingPage: React.FC = () => {
                 return newState;
             });
         }
-    }, [location, cumulativeRotation, orientationMode, showRoute, dropPinMode]);
+    }, [location, cumulativeRotation, orientationMode, showRoute]);
 
 
 
@@ -659,22 +603,6 @@ export const LandingPage: React.FC = () => {
             setSessionStart(null);
         }
     }, [status, sessionStart, parkLocation]);
-
-
-    // Update needsRecenter based on distance from user location
-    useEffect(() => {
-        if (!location) {
-            setNeedsRecenter(false);
-            return;
-        }
-        const [userLat, userLon] = location;
-        const dist = Math.sqrt(
-            Math.pow(viewState.latitude - userLat, 2) +
-            Math.pow(viewState.longitude - userLon, 2)
-        );
-        // Fade icon if > 50m away (approx 0.0005 degrees)
-        setNeedsRecenter(dist > 0.0005);
-    }, [location, viewState.latitude, viewState.longitude]);
 
 
     // Handle map move - Update state immediately when user moves map
@@ -778,7 +706,12 @@ export const LandingPage: React.FC = () => {
         }, 1000);
     }, []);
 
-
+    // Handle map click for drop pin
+    const handleClick = useCallback((evt: maplibregl.MapMouseEvent) => {
+        if (dropPinMode) {
+            setPendingDropPin({ lat: evt.lngLat.lat, lon: evt.lngLat.lng });
+        }
+    }, [dropPinMode]);
 
     // Handle vehicle type change
     const handleVehicleChange = (type: 'bicycle' | 'motorcycle' | 'car') => {
@@ -931,7 +864,12 @@ export const LandingPage: React.FC = () => {
                     </div>
                 </div>
             )}
-
+            {/* Drop Pin Mode Indicator */}
+            {dropPinMode && (
+                <div className="absolute top-0 left-0 right-0 z-[1000] bg-orange-500 text-white py-3 px-4 text-center font-medium shadow-lg animate-pulse">
+                    📍 Tap anywhere on the map to drop a pin
+                </div>
+            )}
 
             {/* Active Session Indicator (Parked Mode) - Green Pill Top Center */}
             {status === 'parked' && (
@@ -1036,7 +974,11 @@ export const LandingPage: React.FC = () => {
                     onRotateEnd={handleMoveEnd} // Reuse debounce logic
                     onPitchStart={() => { isUserInteracting.current = true; positionAnimator.current.stop(); }}
                     onPitchEnd={handleMoveEnd} // Reuse debounce logic
-
+                    onClick={(e) => {
+                        // Handle empty map click
+                        // DOM Markers handle their own clicks via onClick prop
+                        handleClick(e);
+                    }}
                     style={{ width: '100%', height: '100%' }}
                     mapStyle={mapStyle}
                     attributionControl={false}
@@ -1096,10 +1038,9 @@ export const LandingPage: React.FC = () => {
                                     if (isClusterItem) {
                                         mapRef.current?.flyTo({ center: [item.lon, item.lat], zoom: viewState.zoom + 2 });
                                     } else {
-                                        // Was handleClick for drop pin, now no-op or handle specific spot selection if needed?
-                                        // Current logic: markers are just visual unless cluster expands.
-                                        // If we need to open details, that logic should be here.
-                                        // But for now, removing the broken call.
+                                        handleClick({
+                                            lngLat: { lng: item.lon, lat: item.lat }
+                                        } as any);
                                     }
                                 }}
                             >
@@ -1122,201 +1063,7 @@ export const LandingPage: React.FC = () => {
                         );
                     })}
 
-                    {/* Routes Layer */}
-                    {(showRoute || dropPinMode) && (routeWaypoints || listWaypoints.length > 0) && (
-                        <>
-                            {/* Render List Waypoints (synced from RouteButton) OR Route Waypoints (if calculated) */}
-                            {/* In drop pin mode: prefer listWaypoints. Outside: use routeWaypoints */}
-                            {(dropPinMode ? (listWaypoints.length > 0 ? listWaypoints : routeWaypoints || []) : routeWaypoints || []).map((wp, i) => (
-                                <Marker
-                                    key={`wp-${(wp as any).id || i}`}
-                                    longitude={wp.lon}
-                                    latitude={wp.lat}
-                                    anchor="center"
-                                    onClick={(e: any) => {
-                                        e.originalEvent?.preventDefault();
-                                        e.originalEvent?.stopPropagation();
-                                        // Toggle selection
-                                        const id = (wp as any).id;
-                                        setActiveEditingId(activeEditingId === id ? null : id);
-                                        setEditingName((wp as any).name || `Stop ${i + 1}`);
-                                    }}
-                                    className="cursor-pointer"
-                                    style={{ zIndex: activeEditingId === (wp as any).id ? 2000 : 1000 }}
-                                >
-                                    <div className="relative flex flex-col items-center">
-                                        {/* Waypoint Label with Edit/Delete - Always visible in Drop Pin Mode */}
-                                        {dropPinMode && (
-                                            <div
-                                                className="absolute bottom-full mb-1 bg-[#1c1c1e] text-white rounded-xl shadow-2xl flex items-center gap-1 p-1.5 min-w-[max-content] border border-white/10 z-[2000]"
-                                                onClick={(e) => e.stopPropagation()}
-                                            >
-                                                {renamingId === (wp as any).id ? (
-                                                    // Renaming Mode
-                                                    <>
-                                                        <input
-                                                            type="text"
-                                                            value={editingName}
-                                                            onChange={(e) => setEditingName(e.target.value)}
-                                                            className="w-28 bg-zinc-800 rounded-lg px-2 py-1 text-xs outline-none border border-zinc-600 focus:border-blue-500 transition-colors"
-                                                            autoFocus
-                                                            onKeyDown={(e) => {
-                                                                if (e.key === 'Enter') {
-                                                                    const id = (wp as any).id;
-                                                                    if (id) {
-                                                                        setListWaypoints(prev => prev.map(p => p.id === id ? { ...p, name: editingName } : p));
-                                                                    }
-                                                                    setRenamingId(null);
-                                                                }
-                                                            }}
-                                                        />
-                                                        <button
-                                                            onClick={() => {
-                                                                const id = (wp as any).id;
-                                                                if (id) {
-                                                                    setListWaypoints(prev => prev.map(p => p.id === id ? { ...p, name: editingName } : p));
-                                                                }
-                                                                setRenamingId(null);
-                                                            }}
-                                                            className="p-1 bg-green-500/20 text-green-500 hover:bg-green-500 hover:text-white rounded-lg transition-colors"
-                                                        >
-                                                            <Check size={12} strokeWidth={3} />
-                                                        </button>
-                                                        <button
-                                                            onClick={() => setRenamingId(null)}
-                                                            className="p-1 bg-zinc-700 text-zinc-400 hover:bg-zinc-600 hover:text-white rounded-lg transition-colors"
-                                                        >
-                                                            <X size={12} />
-                                                        </button>
-                                                    </>
-                                                ) : (
-                                                    // View Mode - Name + Edit + Delete always visible
-                                                    <>
-                                                        <span className="font-semibold text-xs px-1 max-w-[120px] truncate">{(wp as any).name || `Stop ${i + 1}`}</span>
-                                                        <button
-                                                            onClick={() => {
-                                                                setEditingName((wp as any).name || `Stop ${i + 1}`);
-                                                                setRenamingId((wp as any).id);
-                                                            }}
-                                                            className="p-1 rounded-lg transition-colors"
-                                                        >
-                                                            <Pencil size={12} />
-                                                        </button>
-                                                        <button
-                                                            onClick={() => {
-                                                                const id = (wp as any).id;
-                                                                if (id) {
-                                                                    setListWaypoints(prev => prev.filter(p => p.id !== id));
-                                                                }
-                                                            }}
-                                                            className="p-1 rounded-lg transition-colors"
-                                                        >
-                                                            <Trash size={12} />
-                                                        </button>
-                                                    </>
-                                                )}
-                                            </div>
-                                        )}
-
-                                        {/* Standard Blue Dot (Start, End, Intermediate - All Blue) */}
-                                        <div className={`w-6 h-6 rounded-full bg-[#007AFF] border-2 border-white shadow-md flex items-center justify-center text-white font-bold text-xs transition-transform hover:scale-110 ${activeEditingId === (wp as any).id ? 'scale-125 ring-4 ring-blue-500/30' : ''}`} style={{ zIndex: 10 }}>
-                                            {i + 1}
-                                        </div>
-                                    </div>
-                                </Marker>
-                            ))}
-                        </>
-                    )}
-
-                    {/* Temporary Waypoints (Drop Pin Mode) */}
-                    {dropPinMode && tempWaypoints.map((wp, index) => {
-                        const globalIndex = (routeWaypoints?.length || 0) + index + 1;
-
-                        return (
-                            <Marker
-                                key={wp.id}
-                                longitude={wp.lon}
-                                latitude={wp.lat}
-                                anchor="center" // Center anchor for dots
-                                onClick={(e: any) => {
-                                    e.originalEvent?.preventDefault();
-                                    e.originalEvent?.stopPropagation();
-                                    // Toggle selection
-                                    setActiveEditingId(activeEditingId === wp.id ? null : wp.id);
-                                    setEditingName(wp.name);
-                                }}
-                                className="cursor-pointer"
-                                style={{ zIndex: activeEditingId === wp.id ? 2000 : 1000 }} // Bring to front if selected
-                            >
-                                <div className="relative flex flex-col items-center">
-                                    {/* Waypoint Label with Edit/Delete - Always visible */}
-                                    <div
-                                        className="absolute bottom-full mb-1 bg-[#1c1c1e] text-white rounded-xl shadow-2xl flex items-center gap-1 p-1.5 min-w-[max-content] border border-white/10 z-[2000]"
-                                        onClick={(e) => e.stopPropagation()}
-                                    >
-                                        {renamingId === wp.id ? (
-                                            // Renaming Mode
-                                            <>
-                                                <input
-                                                    type="text"
-                                                    value={editingName}
-                                                    onChange={(e) => setEditingName(e.target.value)}
-                                                    className="w-28 bg-zinc-800 rounded-lg px-2 py-1 text-xs outline-none border border-zinc-600 focus:border-blue-500 transition-colors"
-                                                    autoFocus
-                                                    onKeyDown={(e) => {
-                                                        if (e.key === 'Enter') {
-                                                            updateTempWaypointName(wp.id, editingName);
-                                                            setRenamingId(null);
-                                                        }
-                                                    }}
-                                                />
-                                                <button
-                                                    onClick={() => {
-                                                        updateTempWaypointName(wp.id, editingName);
-                                                        setRenamingId(null);
-                                                    }}
-                                                    className="p-1 bg-green-500/20 text-green-500 hover:bg-green-500 hover:text-white rounded-lg transition-colors"
-                                                >
-                                                    <Check size={12} strokeWidth={3} />
-                                                </button>
-                                                <button
-                                                    onClick={() => setRenamingId(null)}
-                                                    className="p-1 bg-zinc-700 text-zinc-400 hover:bg-zinc-600 hover:text-white rounded-lg transition-colors"
-                                                >
-                                                    <X size={12} />
-                                                </button>
-                                            </>
-                                        ) : (
-                                            // View Mode - Name + Edit + Delete always visible
-                                            <>
-                                                <span className="font-semibold text-xs px-1 max-w-[120px] truncate">{wp.name}</span>
-                                                <button
-                                                    onClick={() => {
-                                                        setEditingName(wp.name);
-                                                        setRenamingId(wp.id);
-                                                    }}
-                                                    className="p-1 rounded-lg transition-colors"
-                                                >
-                                                    <Pencil size={12} />
-                                                </button>
-                                                <button
-                                                    onClick={() => removeTempWaypoint(wp.id)}
-                                                    className="p-1 rounded-lg transition-colors"
-                                                >
-                                                    <Trash size={12} />
-                                                </button>
-                                            </>
-                                        )}
-                                    </div>
-
-                                    {/* Marker Dot */}
-                                    <div className={`w-6 h-6 rounded-full bg-[#007AFF] border-2 border-white shadow-md flex items-center justify-center text-white font-bold text-xs transition-transform hover:scale-110 ${activeEditingId === wp.id ? 'scale-125 ring-4 ring-blue-500/30' : ''}`}>
-                                        {globalIndex}
-                                    </div>
-                                </div>
-                            </Marker>
-                        );
-                    })}     {/* History Spots Markers */}
+                    {/* History Spots Markers */}
                     {clusteredHistorySpots.map(item => {
                         const isClusterItem = isCluster(item);
                         return (
@@ -1353,6 +1100,33 @@ export const LandingPage: React.FC = () => {
                         );
                     })}
 
+                    {/* Route waypoints */}
+                    {showRoute && routeWaypoints?.map((wp, index) => (
+                        <Marker
+                            key={`waypoint-${index}`}
+                            longitude={wp.lon}
+                            latitude={wp.lat}
+                            anchor="center"
+                        >
+                            <div style={{
+                                width: 20,
+                                height: 20,
+                                background: '#007AFF',
+                                border: '2px solid white',
+                                borderRadius: '50%',
+                                boxShadow: '0 2px 6px rgba(0,0,0,0.3)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                color: 'white',
+                                fontSize: 10,
+                                fontWeight: 'bold'
+                            }}>
+                                {index + 1}
+                            </div>
+                        </Marker>
+                    ))}
+
                     {/* Parked Vehicle Marker */}
                     {status === 'parked' && parkLocation && (
                         <Marker
@@ -1380,58 +1154,13 @@ export const LandingPage: React.FC = () => {
                         </Marker>
                     )}
                 </Map>
-
-                {/* Drop Pin Mode UI Overlays */}
-                {dropPinMode && (
-                    <>
-                        {/* Center Crosshair (Static over map) */}
-                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none z-[1600]">
-                            {/* Elegant Crosshair Design */}
-                            <div className="relative flex items-center justify-center">
-                                {/* Outer Glow/Ring */}
-                                <div className="absolute w-8 h-8 rounded-full bg-blue-500/10 dark:bg-blue-400/10 animate-pulse" />
-
-                                {/* Center Dot */}
-                                <div className="w-1.5 h-1.5 bg-[#007AFF] rounded-full shadow-sm z-10" />
-
-                                {/* Cross Lines */}
-                                <div className="absolute w-6 h-[1.5px] bg-[#007AFF]/60 rounded-full" />
-                                <div className="absolute h-6 w-[1.5px] bg-[#007AFF]/60 rounded-full" />
-                            </div>
-                        </div>
-
-                        {/* "Drop Pin Here" Button below crosshair */}
-                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 translate-y-12 z-[1500]">
-                            <button
-                                onClick={handleDropPin}
-                                className="bg-white dark:bg-zinc-800 text-[#007AFF] px-6 py-2.5 rounded-full font-bold text-sm shadow-xl backdrop-blur-md active:scale-95 transition-all flex items-center gap-2 border border-black/5 dark:border-white/10"
-                            >
-                                <MapPin size={16} className="fill-current" />
-                                Drop Pin Here
-                            </button>
-                        </div>
-
-                        {/* Top Right "Done" Button */}
-                        <div className="absolute top-4 right-4 z-[2000] animate-in slide-in-from-top-4 fade-in">
-                            <button
-                                onClick={confirmDrop}
-                                className="bg-[#007AFF] text-white px-6 py-2.5 rounded-full font-bold shadow-lg flex items-center gap-2 transition-transform active:scale-95 active:bg-[#007AFF]"
-                            >
-                                <Check size={18} strokeWidth={3} />
-                                Done
-                            </button>
-                        </div>
-
-
-                    </>
-                )}
             </div>
 
 
 
 
             {/* Bottom Left Controls */}
-            <div className={`absolute z-[1000] flex flex-col items-start gap-3 animate-in slide-in-from-left-6 transition-opacity duration-300 ${dropPinMode ? 'opacity-0 pointer-events-none' : 'opacity-100'}`} style={{
+            <div className="absolute z-[1000] flex flex-col items-start gap-3 animate-in slide-in-from-left-6" style={{
                 bottom: 'max(1.5rem, calc(env(safe-area-inset-bottom) + 0.5rem))',
                 left: 'max(1rem, env(safe-area-inset-left))'
             }}>
@@ -1451,7 +1180,7 @@ export const LandingPage: React.FC = () => {
                 </button>
             </div>
 
-            {/* Bottom Right Controls - Positioned ABOVE Drop Pin 'Done' button if needed? No, Done is top right. */}
+            {/* Bottom Right Controls */}
             <div className="absolute z-[1000] flex flex-col items-end gap-3 animate-in slide-in-from-right-6" style={{
                 bottom: 'max(1.5rem, calc(env(safe-area-inset-bottom) + 0.5rem))',
                 right: 'max(1rem, env(safe-area-inset-right))'
@@ -1489,19 +1218,6 @@ export const LandingPage: React.FC = () => {
                     onClick={async () => {
                         if (orientationNeedsPermission) {
                             await requestOrientationPermission();
-                            return;
-                        }
-
-                        // Drop Pin Mode: One-shot Recenter ONLY (No Auto/Follow modes)
-                        if (dropPinMode) {
-                            if (location) {
-                                mapRef.current?.flyTo({
-                                    center: [location[1], location[0]],
-                                    zoom: 17,
-                                    duration: 800,
-                                    essential: true
-                                });
-                            }
                             return;
                         }
 
@@ -1627,55 +1343,47 @@ export const LandingPage: React.FC = () => {
                         }`}
                 >
                     {orientationNeedsPermission ? (
-                        <Locate size={20} className="text-orange-500 animate-pulse" />
-                    ) : dropPinMode ? (
-                        <Locate size={20} className="text-zinc-600 dark:text-white/70" />
+                        <MapPin size={20} />
                     ) : (orientationMode === 'auto' || pendingAutoMode) ? (
                         <ArrowUp size={20} className="text-blue-500" />
                     ) : orientationMode === 'recentre' ? (
                         <Locate size={20} fill="currentColor" className="text-green-500" />
                     ) : (
-                        <Locate size={20} className={`text-zinc-600 dark:text-white/70 ${needsRecenter ? 'opacity-50' : ''}`} />
+                        <MapPin size={20} />
                     )}
                 </button>
 
-                {/* Route Button and Search - Hidden (not unmounted) in Drop Pin Mode */}
-                <div className={dropPinMode ? 'hidden' : 'block'}>
-                    <RouteButton
-                        vehicleType={vehicleType}
-                        onRouteChange={handleRouteChange}
-                        currentLocation={location}
-                        onDropPinModeChange={setDropPinMode}
-                        pendingWaypoints={pendingWaypoints}
-                        onDropPinConsumed={() => setPendingWaypoints(null)}
-                        onOpenChange={setRouteButtonOpen} // Track open state
-                        onWaypointsChange={setListWaypoints} // Sync waypoints
+                {/* Route Button */}
+                <RouteButton
+                    vehicleType={vehicleType}
+                    onRouteChange={handleRouteChange}
+                    currentLocation={location}
+                    onDropPinModeChange={setDropPinMode}
+                    pendingDropPin={pendingDropPin}
+                    onDropPinConsumed={() => setPendingDropPin(null)}
+                />
+
+                {/* Profile Button - Moved back here */}
+                <div className="relative z-[1010]">
+                    <ProfileButton
+                        setHistorySpots={setHistorySpots}
                     />
                 </div>
 
-                {/* Profile Button - Hidden in Drop Pin Mode */}
-                {!dropPinMode && (
-                    <div className="relative z-[1010]">
-                        <ProfileButton
-                            setHistorySpots={setHistorySpots}
-                        />
-                    </div>
-                )}
+                {/* FAB */}
+                {/* Ensure we pass a valid location tuple if available, or default to 0,0 (FAB won't search if null anyway) */}
 
-                {/* FAB - Hidden in Drop Pin Mode */}
-                {!dropPinMode && (
-                    <FAB
-                        status={status}
-                        setStatus={setStatus}
-                        searchLocation={location}
-                        vehicleType={vehicleType}
-                        setOpenSpots={setOpenSpots}
-                        parkLocation={parkLocation}
-                        setParkLocation={setParkLocation}
-                        sessionStart={sessionStart}
-                        setSessionStart={setSessionStart}
-                    />
-                )}
+                <FAB
+                    status={status}
+                    setStatus={setStatus}
+                    searchLocation={location} // Pass null if location not ready
+                    vehicleType={vehicleType}
+                    setOpenSpots={setOpenSpots}
+                    parkLocation={parkLocation}
+                    setParkLocation={setParkLocation}
+                    sessionStart={sessionStart}
+                    setSessionStart={setSessionStart}
+                />
             </div>
 
 

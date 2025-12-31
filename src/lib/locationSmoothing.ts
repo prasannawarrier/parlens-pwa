@@ -56,10 +56,10 @@ export class LocationSmoother {
     constructor() {
         // Lower Q = smoother but more lag, higher Q = more responsive but noisier
         // GPS accuracy is typically 3-10m, so we tune for that
-        // Round 4 Tuning: drastically increased R (0.0001 -> 0.005) to eliminate jitter
-        // This trusts the "Model" (Stability) 50x more than the "Measurement" (GPS)
-        this.latFilter = new KalmanFilter(0.00001, 0.005);
-        this.lonFilter = new KalmanFilter(0.00001, 0.005);
+        // Round 5 Tuning: reduced R (0.005 -> 0.002) for better accuracy and less offset drift
+        // This still smooths GPS noise but stays closer to the true position
+        this.latFilter = new KalmanFilter(0.00001, 0.002);
+        this.lonFilter = new KalmanFilter(0.00001, 0.002);
         // Bearing filter with higher responsiveness but smoothed to prevent jitter
         // Round 4 Tuning: Q 0.01 -> 0.005 (Slower reaction), R 0.5 -> 0.8 (More smoothing)
         // This stops the "twitching" arrow
@@ -344,12 +344,13 @@ export class StableLocationTracker {
 
     // Dynamic buffer zones based on speed (in meters)
     // Larger buffer = more stable but less responsive
-    // Research: Urban geofences can be 100m, but we use tighter for precision navigation
+    // Round 5 Tuning: significantly reduced buffer zones for higher precision
+    // User needs accurate positioning for navigation
     private bufferZones: Record<SpeedClass, number> = {
-        stationary: 20,      // Larger buffer to eliminate GPS jitter when stopped
-        walking: 12,         // Moderate buffer for smooth walking (~1-2m/s)
-        vehicle: 6,          // Accurate tracking needed for driving
-        fast_vehicle: 4      // Minimal buffer for highway speeds (>36km/h)
+        stationary: 5,       // Reduced from 20m to 5m - still eliminates GPS jitter when stopped
+        walking: 4,          // Reduced from 12m to 4m - accurate walking tracking
+        vehicle: 3,          // Reduced from 6m to 3m - precise vehicle tracking
+        fast_vehicle: 2      // Reduced from 4m to 2m - minimal buffer at highway speeds
     };
 
     // Polling intervals based on speed (in ms)
