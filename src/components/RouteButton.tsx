@@ -795,8 +795,8 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                                 return null;
                             })()}
 
-                            {/* Online / Nominatim Result (Async) - Only matches if no local results */}
-                            {searchQuery.length > 3 && !parseCoordinate(searchQuery) && savedWaypointMatches.length === 0 && (
+                            {/* Online / Nominatim Result (Async) - Always show for global search */}
+                            {searchQuery.length > 3 && !parseCoordinate(searchQuery) && (
                                 <OnlineSearch
                                     query={searchQuery}
                                     countryCode={countryCode}

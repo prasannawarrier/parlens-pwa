@@ -306,14 +306,16 @@ export const LandingPage: React.FC = () => {
     // Handlers for Drop Pin
     const handleDropPin = useCallback(() => {
         const center = viewState;
+        // Calculate global index: listWaypoints count + current tempWaypoints count + 1
+        const globalNumber = listWaypoints.length + tempWaypoints.length + 1;
         const newWaypoint = {
             id: crypto.randomUUID(),
             lat: center.latitude,
             lon: center.longitude,
-            name: `Waypoint ${tempWaypoints.length + 1}` // Simple initial naming
+            name: `Waypoint ${globalNumber}` // Name matches marker number
         };
         setTempWaypoints(prev => [...prev, newWaypoint]);
-    }, [viewState, tempWaypoints.length]);
+    }, [viewState, listWaypoints.length, tempWaypoints.length]);
 
     const updateTempWaypointName = (id: string, newName: string) => {
         setTempWaypoints(prev => prev.map(wp => wp.id === id ? { ...wp, name: newName } : wp));
@@ -1160,6 +1162,7 @@ export const LandingPage: React.FC = () => {
                                                             onChange={(e) => setEditingName(e.target.value)}
                                                             className="w-28 bg-zinc-800 rounded-lg px-2 py-1 text-xs outline-none border border-zinc-600 focus:border-blue-500 transition-colors"
                                                             autoFocus
+                                                            onFocus={(e) => e.currentTarget.select()}
                                                             onKeyDown={(e) => {
                                                                 if (e.key === 'Enter') {
                                                                     const id = (wp as any).id;
@@ -1230,7 +1233,8 @@ export const LandingPage: React.FC = () => {
 
                     {/* Temporary Waypoints (Drop Pin Mode) */}
                     {dropPinMode && tempWaypoints.map((wp, index) => {
-                        const globalIndex = (routeWaypoints?.length || 0) + index + 1;
+                        // Continue numbering from listWaypoints (not routeWaypoints)
+                        const globalIndex = listWaypoints.length + index + 1;
 
                         return (
                             <Marker
@@ -1263,6 +1267,7 @@ export const LandingPage: React.FC = () => {
                                                     onChange={(e) => setEditingName(e.target.value)}
                                                     className="w-28 bg-zinc-800 rounded-lg px-2 py-1 text-xs outline-none border border-zinc-600 focus:border-blue-500 transition-colors"
                                                     autoFocus
+                                                    onFocus={(e) => e.currentTarget.select()}
                                                     onKeyDown={(e) => {
                                                         if (e.key === 'Enter') {
                                                             updateTempWaypointName(wp.id, editingName);
