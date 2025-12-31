@@ -1222,7 +1222,7 @@ export const LandingPage: React.FC = () => {
                                         )}
 
                                         {/* Standard Blue Dot (Start, End, Intermediate - All Blue) */}
-                                        <div className={`w-6 h-6 rounded-full bg-[#007AFF] border-2 border-white shadow-md flex items-center justify-center text-white font-bold text-xs transition-transform hover:scale-110 ${activeEditingId === (wp as any).id ? 'scale-125 ring-4 ring-blue-500/30' : ''}`} style={{ zIndex: 10 }}>
+                                        <div className="w-6 h-6 rounded-full bg-[#007AFF] border-2 border-white shadow-md flex items-center justify-center text-white font-bold text-xs" style={{ zIndex: 10 }}>
                                             {i + 1}
                                         </div>
                                     </div>
@@ -1315,7 +1315,7 @@ export const LandingPage: React.FC = () => {
                                     </div>
 
                                     {/* Marker Dot */}
-                                    <div className={`w-6 h-6 rounded-full bg-[#007AFF] border-2 border-white shadow-md flex items-center justify-center text-white font-bold text-xs transition-transform hover:scale-110 ${activeEditingId === wp.id ? 'scale-125 ring-4 ring-blue-500/30' : ''}`}>
+                                    <div className="w-6 h-6 rounded-full bg-[#007AFF] border-2 border-white shadow-md flex items-center justify-center text-white font-bold text-xs">
                                         {globalIndex}
                                     </div>
                                 </div>
