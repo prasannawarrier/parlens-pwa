@@ -29,6 +29,7 @@ interface RouteButtonProps {
     onDropPinConsumed?: () => void;
     onOpenChange?: (isOpen: boolean) => void;
     onWaypointsChange?: (waypoints: Waypoint[]) => void;
+    onRequestOrientationPermission?: () => void;
 }
 
 
@@ -164,7 +165,7 @@ const OnlineSearch: React.FC<{ query: string; onSelect: (result: NominatimResult
     );
 };
 
-export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteChange, currentLocation, onDropPinModeChange, pendingWaypoints, onDropPinConsumed, onOpenChange, onWaypointsChange }) => {
+export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteChange, currentLocation, onDropPinModeChange, pendingWaypoints, onDropPinConsumed, onOpenChange, onWaypointsChange, onRequestOrientationPermission }) => {
     const { pool, pubkey, signEvent } = useAuth();
     const [isOpen, setIsOpen] = useState(false);
 
@@ -400,6 +401,12 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                 : waypoints;
 
             onRouteChange(primaryCoords, altCoords, displayWaypoints.map(w => ({ lat: w.lat, lon: w.lon })), true);
+
+            // Request iOS orientation permission for navigation (compass heading)
+            // This must be triggered by user interaction, route creation counts
+            if (onRequestOrientationPermission) {
+                onRequestOrientationPermission();
+            }
 
             // Close the route page (user can reopen to save if desired)
             setIsOpen(false);

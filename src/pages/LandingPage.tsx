@@ -1763,6 +1763,7 @@ export const LandingPage: React.FC = () => {
                         onDropPinConsumed={() => setPendingWaypoints(null)}
                         onOpenChange={setRouteButtonOpen} // Track open state
                         onWaypointsChange={setListWaypoints} // Sync waypoints
+                        onRequestOrientationPermission={requestOrientationPermission} // iOS compass permission
                     />
                 </div>
 
