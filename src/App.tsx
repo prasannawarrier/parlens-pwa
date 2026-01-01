@@ -86,7 +86,7 @@ const Login: React.FC = () => {
             alt="Parlens"
             className="mx-auto h-24 w-24 rounded-[22%] shadow-2xl shadow-[#007AFF]/20"
           />
-          <h1 className="text-5xl font-extrabold tracking-tighter font-serif">Parlens</h1>
+          <h1 className="text-5xl font-extrabold tracking-tighter">Parlens</h1>
           {/* UPDATED: User requested "Decentralized Route & Parking Management" */}
           <p className="text-sm font-medium text-white/40 tracking-tight">Decentralized Route & Parking Management</p>
         </div>
@@ -200,65 +200,26 @@ const Login: React.FC = () => {
                   <p className="text-sm text-white/60">Follow these steps to get the most out of Parlens.</p>
                 </div>
 
-                {/* Add to Homescreen - Reused Styles adjusted for App.tsx */}
-                <div className="space-y-3">
-                  <h4 className="font-bold text-sm text-white/80">1. Add to your homescreen</h4>
-                  {/* Android */}
-                  <div className="rounded-2xl bg-white/5 overflow-hidden">
-                    <button onClick={() => {
-                      const el = document.getElementById('backup-android-guide');
-                      el?.classList.toggle('hidden');
-                    }} className="w-full flex items-center justify-between p-4 font-bold text-sm text-left text-white/80 transition-colors" style={{ WebkitTapHighlightColor: 'transparent' }}>
-                      <span>Using Browser Menu (Android)</span>
-                      <ChevronDown size={16} className="text-white/50" />
-                    </button>
-                    <div id="backup-android-guide" className="hidden p-4 pt-0 text-xs text-white/60 space-y-2">
-                      <p className="font-semibold text-white">Chrome & Brave:</p>
-                      <ol className="list-decimal pl-5 space-y-1">
-                        <li>Tap menu button (three dots)</li>
-                        <li>Tap <strong>Add to Home screen</strong></li>
-                        <li>Tap <strong>Add</strong> to confirm</li>
-                      </ol>
-                      <p className="font-semibold text-white mt-3">Firefox:</p>
-                      <ol className="list-decimal pl-5 space-y-1">
-                        <li>Tap menu button (three dots)</li>
-                        <li>Tap <strong>Install</strong></li>
-                      </ol>
-                    </div>
-                  </div>
-
-                  {/* iOS */}
-                  <div className="rounded-2xl bg-white/5 overflow-hidden">
-                    <button onClick={() => {
-                      const el = document.getElementById('backup-ios-guide');
-                      el?.classList.toggle('hidden');
-                    }} className="w-full flex items-center justify-between p-4 font-bold text-sm text-left text-white/80 transition-colors" style={{ WebkitTapHighlightColor: 'transparent' }}>
-                      <span>Using Share Button (iOS)</span>
-                      <ChevronDown size={16} className="text-white/50" />
-                    </button>
-                    <div id="backup-ios-guide" className="hidden p-4 pt-0 text-xs text-white/60 space-y-2">
-                      <ol className="list-decimal pl-5 space-y-1">
-                        <li>Tap the <strong>Share</strong> button in Safari menu bar.</li>
-                        <li>Scroll down and tap <strong>Add to Home Screen</strong>.</li>
-                        <li>Launch Parlens from your home screen.</li>
-                      </ol>
-                    </div>
-                  </div>
-                </div>
+                {/* Add to Homescreen - Removed as per user request (redundant) */}
 
                 <div className="space-y-4 text-sm text-white/60 leading-relaxed">
                   <p>
-                    <strong className="text-white block mb-1">2. Select vehicle type</strong>
+                    <strong className="text-white block mb-1">1. Select vehicle type</strong>
                     Use the vertical toggle on the bottom-left to switch between Bicycle 🚲, Motorcycle 🏍️, or Car 🚗.
                   </p>
 
                   <p>
-                    <strong className="text-white block mb-1">3. Finding and Logging Parking</strong>
-                    Click the main button once to see open spots reported by others. Click again to mark your location. When leaving, click once more to end the session and report the fee.
+                    <strong className="text-white block mb-1">2. Plan your route (optional)</strong>
+                    Tap the route button to add waypoints and create a route. If the system generated route(s) between your start and end points are not to your liking, add additional waypoints in locations you would prefer travelling through. Click the location button to re-centre and turn on follow-me or navigation mode for route tracking.
                   </p>
 
                   <p>
-                    <strong className="text-white block mb-1">4. Create your own mirror</strong>
+                    <strong className="text-white block mb-1">3. Find and log parking</strong>
+                    Click the main button once to see open spots reported by others live or within the last 5 minutes. Click again to mark your location. When leaving, click once more to end the session and report the fee. Use the profile button to see your parking history.
+                  </p>
+
+                  <p>
+                    <strong className="text-white block mb-1">4. Create your own mirror (optional)</strong>
                     <a
                       href="https://github.com/prasannawarrier/parlens-pwa/blob/main/MIRROR_CREATION.md"
                       target="_blank"
@@ -270,15 +231,15 @@ const Login: React.FC = () => {
                   </p>
 
                   <p>
-                    <strong className="text-white block mb-1">5. User Privacy</strong>
-                    Parlens does not collect or share any user data. Your log and route data is encrypted by your keys and only accessible by you.
+                    <strong className="text-white block mb-1">5. User privacy</strong>
+                    Parlens does not collect or share any user data. Your log and route data is encrypted by your keys and only accessible by you. Open spot broadcasts are ephemeral and not linked to any personal identifiers.
                   </p>
 
                   {/* Tip */}
                   <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 mt-4">
                     <p className="text-xs text-amber-500/90 leading-relaxed">
                       <span className="font-bold">Tip: </span>
-                      Use Parlens over your cellular internet connection to prevent IP association.
+                      Use Parlens over your cellular internet connection to prevent personal IP address(es) from being associated with your data.
                     </p>
                   </div>
                 </div>
