@@ -430,17 +430,27 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                 }
             }
 
-            // Sort by created_at descending
-            routes.sort((a, b) => b.created_at - a.created_at);
+            // Merge with existing routes to prevent data loss (e.g. offline creations)
+            setSavedRoutes(prev => {
+                const mergedMap = new Map<string, SavedRoute>();
+                
+                // Keep existing (cached) routes
+                prev.forEach(r => mergedMap.set(r.id, r));
+                
+                // Merge/Overwrite with fresh network data
+                routes.forEach(r => mergedMap.set(r.id, r));
 
-            // Save to local cache
-            try {
-                localStorage.setItem('parlens_route_cache_v1', JSON.stringify(routes));
-            } catch (e) {
-                console.warn('[Parlens] Failed to cache routes:', e);
-            }
+                const merged = Array.from(mergedMap.values()).sort((a, b) => b.created_at - a.created_at);
 
-            setSavedRoutes(routes);
+                // Update local cache with the merged result
+                try {
+                    localStorage.setItem('parlens_route_cache_v1', JSON.stringify(merged));
+                } catch (e) {
+                    console.warn('[Parlens] Failed to cache routes:', e);
+                }
+
+                return merged;
+            });
         } catch (error) {
             console.error('Error fetching saved routes:', error);
         } finally {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Search, MapPin, ArrowRight, ChevronUp, ChevronDown } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { KINDS, DEFAULT_RELAYS } from '../lib/nostr';
@@ -37,6 +37,11 @@ export const FAB: React.FC<FABProps> = ({
     const [symbol, setSymbol] = useState('$');
     const [elapsedTime, setElapsedTime] = useState('00:00:00');
 
+    // Track cumulative geohashes for the current session
+    const [sessionGeohashes, setSessionGeohashes] = useState<Set<string>>(new Set());
+    // Use a ref to store spots to avoid blinking/reflickering on every update
+    const spotsMapRef = useRef<Map<string, any>>(new Map());
+
     // Timer for stopwatch
     useEffect(() => {
         if (status === 'parked' && sessionStart) {
@@ -56,92 +61,95 @@ export const FAB: React.FC<FABProps> = ({
         }
     }, [status, sessionStart]);
 
-    // Search for open spots when entering search mode - POLLING (iOS compatible)
+    // Update cumulative geohashes when search location changes
     useEffect(() => {
         if (status === 'search' && searchLocation) {
-            // Get center + 8 neighboring geohashes for boundary-safe discovery
-            const geohashes = getGeohashNeighbors(searchLocation[0], searchLocation[1], 5);
-            console.log('[Parlens] Starting spot search with polling in geohashes:', geohashes);
-
-            // Use querySync (HTTP-like, works on iOS) instead of subscribeMany (WebSocket issues on iOS)
-            const searchSpots = async () => {
-                try {
-                    const now = Math.floor(Date.now() / 1000);
-                    // Query past 10 mins (600s) to be safe with 5-min expiry
-                    const events = await pool.querySync(
-                        DEFAULT_RELAYS,
-                        { kinds: [KINDS.OPEN_SPOT_BROADCAST], '#g': geohashes, since: now - 600 } as any
-                    );
-
-                    const currentTime = Math.floor(Date.now() / 1000);
-                    const newSpots: any[] = [];
-
-                    for (const event of events) {
-                        // Check expiration tag
-                        const expirationTag = event.tags.find((t: string[]) => t[0] === 'expiration');
-                        if (expirationTag) {
-                            const expTime = parseInt(expirationTag[1]);
-                            if (expTime < currentTime) {
-                                continue; // Skip expired
-                            }
-                        }
-
-                        try {
-                            const tags = event.tags;
-                            const locTag = tags.find((t: string[]) => t[0] === 'location');
-                            const priceTag = tags.find((t: string[]) => t[0] === 'hourly_rate');
-                            const currencyTag = tags.find((t: string[]) => t[0] === 'currency');
-                            const typeTag = tags.find((t: string[]) => t[0] === 'type');
-
-                            if (locTag) {
-                                const [lat, lon] = locTag[1].split(',').map(Number);
-                                const spotType = typeTag ? typeTag[1] : 'car';
-
-                                newSpots.push({
-                                    id: event.id,
-                                    lat,
-                                    lon,
-                                    price: priceTag ? parseFloat(priceTag[1]) : 0,
-                                    currency: currencyTag ? currencyTag[1] : 'USD',
-                                    type: spotType
-                                });
-                            }
-                        } catch (e) {
-                            console.warn('[Parlens] Error parsing spot:', e);
-                        }
-                    }
-
-                    console.log('[Parlens] Found', newSpots.length, 'valid spots');
-                    setOpenSpots(newSpots);
-                } catch (e) {
-                    console.error('[Parlens] Spot query error:', e);
-                }
-            };
-
-            // Search immediately
-            searchSpots();
-
-            // Poll every 10 seconds for new spots
-            const intervalId = setInterval(searchSpots, 10000);
-
-            // Also trigger search when app returns from background (iOS)
-            const handleVisibilityRefresh = () => {
-                console.log('[Parlens] Visibility refresh triggered, searching spots...');
-                searchSpots();
-            };
-            window.addEventListener('visibility-refresh', handleVisibilityRefresh);
-
-            return () => {
-                console.log('[Parlens] Stopping spot search');
-                clearInterval(intervalId);
-                window.removeEventListener('visibility-refresh', handleVisibilityRefresh);
-                // Note: Don't clear spots here - spots are cleared when status changes away from 'search'
-            };
-        } else {
-            // Clear spots when NOT in search mode
+            const newGeohashes = getGeohashNeighbors(searchLocation[0], searchLocation[1], 5);
+            setSessionGeohashes(prev => {
+                const next = new Set(prev);
+                newGeohashes.forEach(g => next.add(g));
+                // Only update if size changed to avoid unnecessary re-renders
+                if (next.size !== prev.size) return next;
+                return prev;
+            });
+        } else if (status === 'idle') {
+            setSessionGeohashes(new Set());
+            spotsMapRef.current.clear();
             setOpenSpots([]);
         }
-    }, [status, vehicleType, pool, searchLocation]); // Re-run when searchLocation changes
+    }, [status, searchLocation, setOpenSpots]);
+
+    // REAL-TIME SUBSCRIPTION for open spots
+    useEffect(() => {
+        if (status === 'search' && sessionGeohashes.size > 0) {
+            console.log('[Parlens] Subscribing to spots in geohashes:', Array.from(sessionGeohashes));
+
+            const now = Math.floor(Date.now() / 1000);
+            // Subscribe to open spots in all accumulated geohashes
+            // Query past 10 mins to catch recently published valid spots
+            const sub = pool.subscribeMany(
+                DEFAULT_RELAYS,
+                [
+                    {
+                        kinds: [KINDS.OPEN_SPOT_BROADCAST],
+                        '#g': Array.from(sessionGeohashes),
+                        since: now - 600
+                    }
+                ] as any,
+                {
+                    onevent(event) {
+                        try {
+                            const currentTime = Math.floor(Date.now() / 1000);
+
+                            // Check expiration
+                            const expirationTag = event.tags.find((t: string[]) => t[0] === 'expiration');
+                            if (expirationTag) {
+                                const expTime = parseInt(expirationTag[1]);
+                                if (expTime < currentTime) return; // Expired
+                            }
+
+                            // Check valid location
+                            const locTag = event.tags.find((t: string[]) => t[0] === 'location');
+                            if (!locTag) return;
+
+                            const priceTag = event.tags.find((t: string[]) => t[0] === 'hourly_rate');
+                            const currencyTag = event.tags.find((t: string[]) => t[0] === 'currency');
+                            const typeTag = event.tags.find((t: string[]) => t[0] === 'type');
+
+                            const [lat, lon] = locTag[1].split(',').map(Number);
+                            const spotType = typeTag ? typeTag[1] : 'car';
+
+                            const spot = {
+                                id: event.id,
+                                lat,
+                                lon,
+                                price: priceTag ? parseFloat(priceTag[1]) : 0,
+                                currency: currencyTag ? currencyTag[1] : 'USD',
+                                type: spotType
+                            };
+
+                            // Update map ref and trigger state update
+                            // Using ref + debounce-like update prevents flickering
+                            if (!spotsMapRef.current.has(event.id)) {
+                                spotsMapRef.current.set(event.id, spot);
+                                setOpenSpots(Array.from(spotsMapRef.current.values()));
+                            }
+                        } catch (e) {
+                            console.warn('[Parlens] Error parsing spot event:', e);
+                        }
+                    },
+                    oneose() {
+                        // End of stored events, real-time mode starts
+                    }
+                }
+            );
+
+            return () => {
+                console.log('[Parlens] Unsubscribing from spots');
+                sub.close();
+            };
+        }
+    }, [status, sessionGeohashes, pool, setOpenSpots]);
 
     useEffect(() => {
         const detectCurrency = async () => {
