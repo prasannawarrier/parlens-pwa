@@ -86,7 +86,7 @@ const Login: React.FC = () => {
             alt="Parlens"
             className="mx-auto h-24 w-24 rounded-[22%] shadow-2xl shadow-[#007AFF]/20"
           />
-          <h1 className="text-5xl font-extrabold tracking-tighter">Parlens</h1>
+          <h1 className="text-5xl font-extrabold tracking-tighter font-serif">Parlens</h1>
           {/* UPDATED: User requested "Decentralized Route & Parking Management" */}
           <p className="text-sm font-medium text-white/40 tracking-tight">Decentralized Route & Parking Management</p>
         </div>
@@ -113,7 +113,7 @@ const Login: React.FC = () => {
                 className="w-full h-16 rounded-3xl bg-[#007AFF] text-white font-bold text-lg shadow-lg shadow-[#007AFF]/20 active:scale-95 transition-all flex items-center justify-center gap-2"
               >
                 <Key size={18} />
-                Login with Secret Key
+                Login with Nostr Account
               </button>
             </>
           ) : view === 'setup' ? (
@@ -191,6 +191,97 @@ const Login: React.FC = () => {
                 <p className="text-xs text-white/30 mt-2 ml-2 leading-relaxed text-center">
                   ⚠️ Store these keys securely. They cannot be recovered if lost.
                 </p>
+              </div>
+
+              {/* Onboarding Help Content */}
+              <div className="space-y-6 pt-6 border-t border-white/10">
+                <div className="space-y-2">
+                  <h3 className="text-lg font-bold text-white">Getting Started</h3>
+                  <p className="text-sm text-white/60">Follow these steps to get the most out of Parlens.</p>
+                </div>
+
+                {/* Add to Homescreen - Reused Styles adjusted for App.tsx */}
+                <div className="space-y-3">
+                  <h4 className="font-bold text-sm text-white/80">1. Add to your homescreen</h4>
+                  {/* Android */}
+                  <div className="rounded-2xl bg-white/5 overflow-hidden">
+                    <button onClick={() => {
+                      const el = document.getElementById('backup-android-guide');
+                      el?.classList.toggle('hidden');
+                    }} className="w-full flex items-center justify-between p-4 font-bold text-sm text-left text-white/80 transition-colors" style={{ WebkitTapHighlightColor: 'transparent' }}>
+                      <span>Using Browser Menu (Android)</span>
+                      <ChevronDown size={16} className="text-white/50" />
+                    </button>
+                    <div id="backup-android-guide" className="hidden p-4 pt-0 text-xs text-white/60 space-y-2">
+                      <p className="font-semibold text-white">Chrome & Brave:</p>
+                      <ol className="list-decimal pl-5 space-y-1">
+                        <li>Tap menu button (three dots)</li>
+                        <li>Tap <strong>Add to Home screen</strong></li>
+                        <li>Tap <strong>Add</strong> to confirm</li>
+                      </ol>
+                      <p className="font-semibold text-white mt-3">Firefox:</p>
+                      <ol className="list-decimal pl-5 space-y-1">
+                        <li>Tap menu button (three dots)</li>
+                        <li>Tap <strong>Install</strong></li>
+                      </ol>
+                    </div>
+                  </div>
+
+                  {/* iOS */}
+                  <div className="rounded-2xl bg-white/5 overflow-hidden">
+                    <button onClick={() => {
+                      const el = document.getElementById('backup-ios-guide');
+                      el?.classList.toggle('hidden');
+                    }} className="w-full flex items-center justify-between p-4 font-bold text-sm text-left text-white/80 transition-colors" style={{ WebkitTapHighlightColor: 'transparent' }}>
+                      <span>Using Share Button (iOS)</span>
+                      <ChevronDown size={16} className="text-white/50" />
+                    </button>
+                    <div id="backup-ios-guide" className="hidden p-4 pt-0 text-xs text-white/60 space-y-2">
+                      <ol className="list-decimal pl-5 space-y-1">
+                        <li>Tap the <strong>Share</strong> button in Safari menu bar.</li>
+                        <li>Scroll down and tap <strong>Add to Home Screen</strong>.</li>
+                        <li>Launch Parlens from your home screen.</li>
+                      </ol>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-4 text-sm text-white/60 leading-relaxed">
+                  <p>
+                    <strong className="text-white block mb-1">2. Select vehicle type</strong>
+                    Use the vertical toggle on the bottom-left to switch between Bicycle 🚲, Motorcycle 🏍️, or Car 🚗.
+                  </p>
+
+                  <p>
+                    <strong className="text-white block mb-1">3. Finding and Logging Parking</strong>
+                    Click the main button once to see open spots reported by others. Click again to mark your location. When leaving, click once more to end the session and report the fee.
+                  </p>
+
+                  <p>
+                    <strong className="text-white block mb-1">4. Create your own mirror</strong>
+                    <a
+                      href="https://github.com/prasannawarrier/parlens-pwa/blob/main/MIRROR_CREATION.md"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-400 underline"
+                    >
+                      Follow these steps
+                    </a> to create your own mirror of the Parlens app to distribute the bandwidth load while sharing with your friends.
+                  </p>
+
+                  <p>
+                    <strong className="text-white block mb-1">5. User Privacy</strong>
+                    Parlens does not collect or share any user data. Your log and route data is encrypted by your keys and only accessible by you.
+                  </p>
+
+                  {/* Tip */}
+                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 mt-4">
+                    <p className="text-xs text-amber-500/90 leading-relaxed">
+                      <span className="font-bold">Tip: </span>
+                      Use Parlens over your cellular internet connection to prevent IP association.
+                    </p>
+                  </div>
+                </div>
               </div>
 
               <button
