@@ -1158,7 +1158,7 @@ export const LandingPage: React.FC = () => {
                     maxZoom={20}
                     renderWorldCopies={true}
                     // Improve tile loading performance - larger cache for faster zoom out
-                    maxTileCacheSize={300}
+                    maxTileCacheSize={500}
                 >
                     {/* Routes */}
                     {showRoute && alternateRouteCoords && alternateRouteCoords.length > 1 && (
