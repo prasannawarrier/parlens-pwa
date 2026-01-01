@@ -139,14 +139,18 @@ const OLC = OLC_LIB.default || OLC_LIB;
 
 export function recoverPlusCode(code: string, lat: number, lon: number): { lat: number, lon: number, type: 'plus_code' } | null {
     try {
-        // Recover nearest (short code -> full code)
-        if (OLC && OLC.isValid(code)) {
+        // Try to recover the short code using the reference location
+        // Don't check isValid first - it may fail for short codes but recoverNearest can still work
+        if (OLC && OLC.recoverNearest) {
+            console.log('[Parlens] Attempting Plus Code recovery:', code, 'near', lat, lon);
             const recovered = OLC.recoverNearest(code, lat, lon);
+            console.log('[Parlens] Recovered full code:', recovered);
             const decoded = OLC.decode(recovered);
+            console.log('[Parlens] Decoded coordinates:', decoded.latitudeCenter, decoded.longitudeCenter);
             return { lat: decoded.latitudeCenter, lon: decoded.longitudeCenter, type: 'plus_code' };
         }
     } catch (e) {
-        // Ignore errors
+        console.error('[Parlens] Plus Code recovery failed:', e);
     }
     return null;
 }
