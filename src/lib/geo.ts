@@ -132,10 +132,10 @@ export function geohashToBounds(geohash: string): { sw: [number, number], ne: [n
  */
 import OpenLocationCode from 'open-location-code';
 
-// Cast to any to avoid type definition mismatches
-const OLC_LIB = OpenLocationCode as any;
-// Handle likely CJS/ESM interop issues where the library might be on .default
-const OLC = OLC_LIB.default || OLC_LIB;
+// The library exports OpenLocationCode as a class constructor
+const OLCLib = OpenLocationCode as any;
+const OLCClass = OLCLib.OpenLocationCode || OLCLib.default?.OpenLocationCode || OLCLib;
+const OLC = new OLCClass();
 
 export function recoverPlusCode(code: string, lat: number, lon: number): { lat: number, lon: number, type: 'plus_code' } | null {
     try {
