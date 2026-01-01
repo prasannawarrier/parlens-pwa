@@ -619,11 +619,15 @@ export const LandingPage: React.FC = () => {
                 if (orientationMode === 'auto') {
                     // Smooth bearing is already applied to cumulativeRotation
                     newState.bearing = cumulativeRotation;
-                    // Apply a small transition (150ms) to hide frame jitter (60Hz -> smooth)
-                    (newState as any).transitionDuration = 150;
+                    // Dynamic transition based on zoom: higher zoom = slower animation (more visible)
+                    // Zoom 17+: 300ms, Zoom 15-17: 200ms, Below 15: 150ms
+                    const zoomBasedDuration = liveZoom >= 17 ? 300 : liveZoom >= 15 ? 200 : 150;
+                    (newState as any).transitionDuration = zoomBasedDuration;
                 } else if (orientationMode === 'recentre') {
                     // Smooth position updates for recentre mode too (prevents snappy feel)
-                    (newState as any).transitionDuration = 200;
+                    // Higher zoom = slower animation for smoother feel
+                    const zoomBasedDuration = liveZoom >= 17 ? 400 : liveZoom >= 15 ? 300 : 200;
+                    (newState as any).transitionDuration = zoomBasedDuration;
                 }
                 return newState;
             });
