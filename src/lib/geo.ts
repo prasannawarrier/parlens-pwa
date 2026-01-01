@@ -221,7 +221,8 @@ export function parseCoordinate(input: string): { lat: number, lon: number, type
         }
 
         // Check first part if it looks like a code (e.g. "XJ7R+GH")
-        if (potentialCode.length >= 8 && potentialCode.includes('+')) {
+        // Relaxed length check to allow valid short codes if library accepts them
+        if (potentialCode.length >= 6 && potentialCode.includes('+')) {
             if (OLC && OLC.isValid && OLC.isValid(potentialCode) && OLC.isFull(potentialCode)) {
                 const decoded = OLC.decode(potentialCode);
                 return { lat: decoded.latitudeCenter, lon: decoded.longitudeCenter, type: 'plus_code' };

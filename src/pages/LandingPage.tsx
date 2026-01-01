@@ -29,13 +29,13 @@ const MAP_STYLES = {
 const SpotMarkerContent = memo(({ price, emoji, currency, isHistory = false }: { price: number, emoji: string, currency: string, isHistory?: boolean }) => {
     const symbol = getCurrencySymbol(currency);
     return (
-        <div className="flex flex-col items-center justify-center cursor-pointer transition-transform active:scale-95">
-            <div className="text-[32px] leading-none drop-shadow-md z-10 filter">
+        <div className="flex flex-col items-center justify-center transition-transform active:scale-95 pointer-events-none group">
+            <div className="text-[32px] leading-none drop-shadow-md z-10 filter pointer-events-auto cursor-pointer">
                 {emoji}
             </div>
             <div
                 className={`
-                    px-2 py-0.5 rounded-full text-[11px] font-bold text-white shadow-md border-[1.5px] border-white -mt-1.5 z-0 whitespace-nowrap
+                    px-2 py-0.5 rounded-full text-[11px] font-bold text-white shadow-md border-[1.5px] border-white -mt-1.5 z-0 whitespace-nowrap pointer-events-auto
                     ${isHistory ? 'bg-zinc-500' : 'bg-[#34C759]'}
                 `}
             >
@@ -140,8 +140,8 @@ const ClusterMarkerContent = memo(({ count, minPrice, maxPrice, currency, type }
     const priceRange = minPrice === maxPrice ? `${symbol}${minPrice}` : `${symbol}${minPrice}-${maxPrice}`;
 
     return (
-        <div className="flex flex-col items-center justify-center cursor-pointer transition-transform active:scale-95 pointer-events-none">
-            <div className="relative text-[32px] leading-none drop-shadow-md z-10 filter">
+        <div className="flex flex-col items-center justify-center transition-transform active:scale-95 pointer-events-none group">
+            <div className="relative text-[32px] leading-none drop-shadow-md z-10 filter pointer-events-auto cursor-pointer">
                 {emoji}
                 {/* Count Badge */}
                 <div className={`
@@ -377,6 +377,15 @@ export const LandingPage: React.FC = () => {
             mapRef.current?.rotateTo(0, { duration: 800 });
         }
     }, [status]);
+
+    // Wake Lock Automation
+    useEffect(() => {
+        if (status === 'search' || status === 'parked') {
+            requestLock();
+        } else {
+            releaseLock();
+        }
+    }, [status, requestLock, releaseLock]);
 
     // Initialize location tracking with smoothing
     useEffect(() => {

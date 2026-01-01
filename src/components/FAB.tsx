@@ -85,7 +85,66 @@ export const FAB: React.FC<FABProps> = ({
             console.log('[Parlens] Subscribing to spots in geohashes:', Array.from(sessionGeohashes));
 
             const now = Math.floor(Date.now() / 1000);
-            // Subscribe to open spots in all accumulated geohashes
+
+            // 1. Immediate fetch of existing spots (Fix for "spots not showing up")
+            const initialFetch = async () => {
+                try {
+                    const events = await pool.querySync(
+                        DEFAULT_RELAYS,
+                        {
+                            kinds: [KINDS.OPEN_SPOT_BROADCAST],
+                            '#g': Array.from(sessionGeohashes),
+                            since: now - 600 // Past 10 mins
+                        } as any
+                    );
+
+                    const currentTime = Math.floor(Date.now() / 1000);
+                    for (const event of events) {
+                        try {
+                            // Check expiration
+                            const expirationTag = event.tags.find((t: string[]) => t[0] === 'expiration');
+                            if (expirationTag) {
+                                const expTime = parseInt(expirationTag[1]);
+                                if (expTime < currentTime) continue;
+                            }
+
+                            const locTag = event.tags.find((t: string[]) => t[0] === 'location');
+                            if (!locTag) continue;
+
+                            const priceTag = event.tags.find((t: string[]) => t[0] === 'hourly_rate');
+                            const currencyTag = event.tags.find((t: string[]) => t[0] === 'currency');
+                            const typeTag = event.tags.find((t: string[]) => t[0] === 'type');
+
+                            const [lat, lon] = locTag[1].split(',').map(Number);
+                            const spotType = typeTag ? typeTag[1] : 'car';
+
+                            const spot = {
+                                id: event.id,
+                                lat,
+                                lon,
+                                price: priceTag ? parseFloat(priceTag[1]) : 0,
+                                currency: currencyTag ? currencyTag[1] : 'USD',
+                                type: spotType
+                            };
+
+                            if (!spotsMapRef.current.has(event.id)) {
+                                spotsMapRef.current.set(event.id, spot);
+                            }
+                        } catch (e) {
+                            console.warn('[Parlens] Error parsing spot:', e);
+                        }
+                    }
+                    // Update state after initial fetch
+                    if (spotsMapRef.current.size > 0) {
+                        setOpenSpots(Array.from(spotsMapRef.current.values()));
+                    }
+                } catch (e) {
+                    console.error('[Parlens] Initial spot fetch failed:', e);
+                }
+            };
+            initialFetch();
+
+            // 2. Subscribe to NEW spots in real-time
             // Query past 10 mins to catch recently published valid spots
             const sub = pool.subscribeMany(
                 DEFAULT_RELAYS,
