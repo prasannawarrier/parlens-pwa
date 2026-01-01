@@ -609,10 +609,11 @@ export const LandingPage: React.FC = () => {
                 if (orientationMode === 'auto') {
                     // Smooth bearing is already applied to cumulativeRotation
                     newState.bearing = cumulativeRotation;
-                    // Apply a small transition (100ms) to hide frame jitter (60Hz -> 100ms smooth)
-                    // 0ms was too harsh and revealed react/gpu variance. 300ms was too laggy fighting user.
-                    // 100ms is the sweet spot.
-                    (newState as any).transitionDuration = 100;
+                    // Apply a small transition (150ms) to hide frame jitter (60Hz -> smooth)
+                    (newState as any).transitionDuration = 150;
+                } else if (orientationMode === 'recentre') {
+                    // Smooth position updates for recentre mode too (prevents snappy feel)
+                    (newState as any).transitionDuration = 200;
                 }
                 return newState;
             });
@@ -1142,6 +1143,8 @@ export const LandingPage: React.FC = () => {
                     minZoom={3} // Prevents zooming out too far (perf killer)
                     maxZoom={20}
                     renderWorldCopies={true}
+                    // Improve tile loading performance - larger cache for faster zoom out
+                    maxTileCacheSize={300}
                 >
                     {/* Routes */}
                     {showRoute && alternateRouteCoords && alternateRouteCoords.length > 1 && (
