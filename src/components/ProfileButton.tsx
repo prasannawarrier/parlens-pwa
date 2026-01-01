@@ -227,7 +227,7 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                                     </div>
                                     <button
                                         onClick={() => setShowHistoryOnMap(!showHistoryOnMap)}
-                                        className={`w-12 h-7 rounded-full transition-colors relative ${showHistoryOnMap ? 'bg-blue-500' : 'bg-zinc-200 dark:bg-white/20'}`}
+                                        className={`w-12 h-7 rounded-full transition-colors relative ${showHistoryOnMap ? 'bg-[#007AFF]' : 'bg-zinc-200 dark:bg-white/20'}`}
                                     >
                                         <div className={`absolute top-1 bottom-1 w-5 h-5 rounded-full bg-white transition-transform ${showHistoryOnMap ? 'left-[calc(100%-1.25rem-0.25rem)]' : 'left-1'}`} />
                                     </button>

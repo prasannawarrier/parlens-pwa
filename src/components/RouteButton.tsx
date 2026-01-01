@@ -1000,7 +1000,7 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                                                 </button>
                                             </div>
 
-                                            <div className="w-6 h-6 rounded-full bg-blue-500 text-white text-xs font-bold flex items-center justify-center shrink-0">
+                                            <div className="w-6 h-6 rounded-full bg-[#007AFF] text-white text-xs font-bold flex items-center justify-center shrink-0">
                                                 {index + 1}
                                             </div>
                                             {editingWaypointId === waypoint.id ? (
@@ -1066,7 +1066,7 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                                 </div>
                                 <button
                                     onClick={toggleShowOnMap}
-                                    className={`w-14 h-8 rounded-full transition-colors ${showOnMap ? 'bg-blue-500' : 'bg-zinc-300 dark:bg-white/20'}`}
+                                    className={`w-14 h-8 rounded-full transition-colors ${showOnMap ? 'bg-[#007AFF]' : 'bg-zinc-300 dark:bg-white/20'}`}
                                 >
                                     <div className={`w-6 h-6 rounded-full bg-white shadow-md transition-transform ${showOnMap ? 'translate-x-7' : 'translate-x-1'}`} />
                                 </button>
@@ -1111,7 +1111,7 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                             <button
                                 onClick={createRoute}
                                 disabled={waypoints.length < 2 || isCreatingRoute}
-                                className="flex-1 h-14 rounded-2xl bg-blue-500 text-white font-bold shadow-lg shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all active:scale-95"
+                                className="flex-1 h-14 rounded-2xl bg-[#007AFF] text-white font-bold shadow-lg shadow-[#007AFF]/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all active:scale-95"
                             >
                                 {isCreatingRoute ? 'Creating...' : 'Create Route'}
                             </button>

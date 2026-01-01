@@ -943,7 +943,7 @@ export const LandingPage: React.FC = () => {
                                 <p className="text-sm font-medium text-red-500 dark:text-red-400">{locationError}</p>
                                 <button
                                     onClick={() => window.location.reload()}
-                                    className="mt-2 px-6 py-2 rounded-full bg-blue-500 text-white text-sm font-medium active:scale-95 transition-transform"
+                                    className="mt-2 px-6 py-2 rounded-full bg-[#007AFF] text-white text-sm font-medium active:scale-95 transition-transform"
                                 >
                                     Try Again
                                 </button>
