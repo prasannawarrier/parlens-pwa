@@ -49,81 +49,86 @@ const OnlineSearch: React.FC<{ query: string; onSelect: (result: NominatimResult
         const fetchLocation = async () => {
             if (!query || query.length < 4) return;
             setLoading(true);
-            try {
-                // 1. Check for "Plus Code + Context" pattern (e.g. "XJ7R+GH Bengaluru, Karnataka")
-                // Simple approach: find first space, check if part before contains '+'
-                const firstSpaceIndex = query.indexOf(' ');
 
-                if (firstSpaceIndex > 3 && query.includes('+')) {
-                    const potentialCode = query.substring(0, firstSpaceIndex).trim();
-                    const context = query.substring(firstSpaceIndex + 1).trim();
+            // Run both searches in parallel for faster results
+            const plusCodeSearch = async (): Promise<NominatimResult | null> => {
+                try {
+                    const firstSpaceIndex = query.indexOf(' ');
+                    if (firstSpaceIndex > 3 && query.includes('+')) {
+                        const potentialCode = query.substring(0, firstSpaceIndex).trim();
+                        const context = query.substring(firstSpaceIndex + 1).trim();
 
-                    if (potentialCode.includes('+') && context.length > 0) {
-                        console.log('[Parlens] Detected Plus Code context search:', potentialCode, 'in', context);
+                        if (potentialCode.includes('+') && context.length > 0) {
+                            console.log('[Parlens] Plus Code search:', potentialCode, 'in', context);
+                            const contextRes = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(context)}&format=json&limit=1`);
+                            const contextData = await contextRes.json();
 
-                        // Fetch context location first
-                        const contextRes = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(context)}&format=json&limit=1`);
-                        const contextData = await contextRes.json();
-
-                        if (contextData && contextData.length > 0) {
-                            const refLat = parseFloat(contextData[0].lat);
-                            const refLon = parseFloat(contextData[0].lon);
-
-                            // Attempt recovery
-                            const recovered = recoverPlusCode(potentialCode, refLat, refLon);
-                            if (recovered) {
-                                setResult({
-                                    place_id: -1, // Pseudo ID
-                                    lat: recovered.lat.toString(),
-                                    lon: recovered.lon.toString(),
-                                    display_name: `Plus Code: ${potentialCode.toUpperCase()}, ${contextData[0].display_name}`,
-                                    type: 'plus_code'
-                                });
-                                setLoading(false);
-                                return; // Found and set, exit
-                            } else {
-                                console.warn('[Parlens] Plus Code recovery failed for:', potentialCode);
+                            if (contextData && contextData.length > 0) {
+                                const refLat = parseFloat(contextData[0].lat);
+                                const refLon = parseFloat(contextData[0].lon);
+                                const recovered = recoverPlusCode(potentialCode, refLat, refLon);
+                                if (recovered) {
+                                    return {
+                                        place_id: -1,
+                                        lat: recovered.lat.toString(),
+                                        lon: recovered.lon.toString(),
+                                        display_name: `Plus Code: ${potentialCode.toUpperCase()}, ${contextData[0].display_name}`,
+                                        type: 'plus_code'
+                                    };
+                                }
                             }
                         }
                     }
+                } catch (e) {
+                    console.error('[Parlens] Plus Code search error:', e);
                 }
-            } catch (e) {
-                console.error('[Parlens] Plus Code context search error:', e);
-            }
+                return null;
+            };
 
-            // 2. Standard Nominatim Search
-            try {
-                let url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`;
+            const nominatimSearch = async (): Promise<NominatimResult | null> => {
+                try {
+                    let url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`;
+                    if (countryCode) {
+                        url += `&countrycodes=${countryCode}`;
+                    }
+                    if (currentLocation) {
+                        const [lat, lon] = currentLocation;
+                        const viewbox = `${lon - 1},${lat + 1},${lon + 1},${lat - 1}`;
+                        url += `&viewbox=${viewbox}`;
+                    }
 
-                if (countryCode) {
-                    url += `&countrycodes=${countryCode}`;
+                    console.log('[Parlens] Nominatim search:', url);
+                    const response = await fetch(url);
+                    const data = await response.json();
+                    console.log('[Parlens] Nominatim result:', data);
+                    return data && data.length > 0 ? data[0] : null;
+                } catch (e) {
+                    console.error('[Parlens] Nominatim search error:', e);
+                    return null;
                 }
+            };
 
-                // Bias results to user location (viewbox preference)
-                if (currentLocation) {
-                    const [lat, lon] = currentLocation;
-                    const viewbox = `${lon - 1},${lat + 1},${lon + 1},${lat - 1}`;
-                    url += `&viewbox=${viewbox}`;
-                }
+            // Run both in parallel
+            const [plusCodeResult, nominatimResult] = await Promise.all([
+                plusCodeSearch(),
+                nominatimSearch()
+            ]);
 
-                const response = await fetch(url);
-                const data = await response.json();
-                if (data && data.length > 0) {
-                    setResult(data[0]);
-                } else {
-                    setResult(null);
-                }
-            } catch (e) {
-                console.error(e);
+            // Prefer Plus Code result if available, otherwise use Nominatim
+            if (plusCodeResult) {
+                setResult(plusCodeResult);
+            } else if (nominatimResult) {
+                setResult(nominatimResult);
+            } else {
                 setResult(null);
-            } finally {
-                setLoading(false);
             }
+
+            setLoading(false);
         };
 
         const timeoutId = setTimeout(fetchLocation, 500);
         return () => clearTimeout(timeoutId);
-    }, [query, countryCode]); // Removed currentLocation to prevent flicker/loops
+    }, [query, countryCode]); // currentLocation intentionally excluded to prevent loops
 
     if (loading) {
         return (
@@ -1184,8 +1189,8 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                         {/* Tip Message */}
                         <div className="p-3 rounded-xl bg-amber-500/10 dark:bg-amber-500/5 border border-amber-500/20">
                             <p className="text-xs text-amber-700 dark:text-amber-400/80 leading-relaxed">
-                                <strong>Tip:</strong> If place name does not return results, use <strong>coordinate or Google Maps plus code</strong> in waypoint search.
-                                <strong> Edit waypoint names</strong> to label locations. When you <strong>save routes</strong>,
+                                <strong>Tip:</strong> If place name does not return results, use coordinate or Google Maps plus code in waypoint search.
+                                Edit waypoint names to label locations. When you save routes,
                                 waypoint names become searchable — building your personal offline map over time! ⭐
                             </p>
                         </div>
