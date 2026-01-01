@@ -378,14 +378,13 @@ export const LandingPage: React.FC = () => {
         }
     }, [status]);
 
-    // Wake Lock Automation
+    // Wake Lock Automation (Always On)
     useEffect(() => {
-        if (status === 'search' || status === 'parked') {
-            requestLock();
-        } else {
+        requestLock();
+        return () => {
             releaseLock();
-        }
-    }, [status, requestLock, releaseLock]);
+        };
+    }, [requestLock, releaseLock]);
 
     // Initialize location tracking with smoothing
     useEffect(() => {
