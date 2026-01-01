@@ -1014,19 +1014,122 @@ export const LandingPage: React.FC = () => {
                 <Map
                     ref={mapRef}
                     {...viewState}
+                    onStyleData={(e) => {
+                        const map = e.target;
+                        if (map) {
+                            // Hide oneway arrows persistently on style change
+                            const layers = map.getStyle().layers;
+                            layers?.forEach(layer => {
+                                if (layer.id.includes('oneway') || layer.id.includes('arrow') || layer.id.includes('direction')) {
+                                    if (map.getLayoutProperty(layer.id, 'visibility') !== 'none') {
+                                        map.setLayoutProperty(layer.id, 'visibility', 'none');
+                                    }
+                                }
+                            });
+
+                            // Load custom transit icons (SDF for dynamic coloring)
+                            // We do this in onStyleData to ensure they persist across style changes
+                            const icons = {
+                                'icon-bus': `<svg viewBox="0 0 24 24" fill="white" xmlns="http://www.w3.org/2000/svg"><path d="M4 6C4 4.89543 4.89543 4 6 4H18C19.1046 4 20 4.89543 20 6V17C20 18.1046 19.1046 19 18 19H16.5L17.5 21H15.5L14.5 19H9.5L8.5 21H6.5L7.5 19H6C4.89543 19 4 18.1046 4 17V6ZM6 6V10H18V6H6ZM6 12V16H18V12H6ZM8 14C8.55228 14 9 13.5523 9 13C9 12.4477 8.55228 12 8 12C7.44772 12 7 12.4477 7 13C7 13.5523 7.44772 14 8 14ZM16 14C16.5523 14 17 13.5523 17 13C17 12.4477 16.5523 12 16 12C15.4477 12 15 12.4477 15 13C15 13.5523 15.4477 14 16 14Z"/></svg>`,
+                                'icon-train': `<svg viewBox="0 0 24 24" fill="white" xmlns="http://www.w3.org/2000/svg"><path d="M12 2C8 2 4 2.5 4 6V15.5C4 17.433 5.567 19 7.5 19L6 20.5V21H18V20.5L16.5 19C18.433 19 20 17.433 20 15.5V6C20 2.5 16 2 12 2ZM12 4C14.5 4 18 4.5 18 6V10H6V6C6 4.5 9.5 4 12 4ZM12 17C10.8954 17 10 16.1046 10 15C10 13.8954 10.8954 13 12 13C13.1046 13 14 13.8954 14 15C14 16.1046 13.1046 17 12 17ZM7.5 17C6.67157 17 6 16.3284 6 15.5V12H9.05C9.02 12.3 9 12.64 9 13C9 14.6569 10.3431 16 12 16C13.6569 16 15 14.6569 15 13C15 12.64 14.98 12.3 14.95 12H18V15.5C18 16.3284 17.3284 17 16.5 17H7.5Z"/></svg>`,
+                                'icon-subway': `<svg viewBox="0 0 24 24" fill="white" xmlns="http://www.w3.org/2000/svg"><path d="M17.8 2.8C16 2.09 13.86 2 12 2C10.14 2 8 2.09 6.2 2.8C4.30002 3.55 3.00002 4.97 3.00002 6.5V15.5C3.00002 17.4 4.40002 19.34 6.6 19.89L5.00002 21.5V22H19V21.5L17.4 19.89C19.6 19.34 21 17.4 21 15.5V6.5C21 4.97 19.7 3.55 17.8 2.8ZM16.5 16C15.12 16 14 14.88 14 13.5C14 12.12 15.12 11 16.5 11C17.88 11 19 12.12 19 13.5C19 14.88 17.88 16 16.5 16ZM12 9C7.58 9 6 6.5 6 6.5C6 6.5 8 5.5 12 5.5C16 5.5 18 6.5 18 6.5C18 6.5 16.42 9 12 9ZM7.5 16C6.12 16 5.00002 14.88 5.00002 13.5C5.00002 12.12 6.12 11 7.5 11C8.88 11 10 12.12 10 13.5C10 14.88 8.88 16 7.5 16Z"/></svg>`,
+                                'icon-tram': `<svg viewBox="0 0 24 24" fill="white" xmlns="http://www.w3.org/2000/svg"><path d="M13 5.5V2H11V5.5L7 8H17L13 5.5ZM5 9V17.5C5 18.7 5.7 19.7 6.8 20.2L6 21H8L9 20H15L16 21H18L17.2 20.2C18.3 19.7 19 18.7 19 17.5V9H5ZM16 16.5C16 17.05 15.55 17.5 15 17.5H9C8.45 17.5 8 17.05 8 16.5V14H16V16.5ZM16 12.5H8V10.5H16V12.5Z"/></svg>`,
+                                'icon-stop': `<svg viewBox="0 0 24 24" fill="white" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="6" stroke="white" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="white"/></svg>`
+                            };
+
+                            Object.entries(icons).forEach(([name, svg]) => {
+                                if (!map.hasImage(name)) {
+                                    const img = new Image(24, 24);
+                                    img.onload = () => map.addImage(name, img, { sdf: true });
+                                    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+                                }
+                            });
+
+                            // Add transit stops with icons
+                            if (!map.getLayer('transit-stops')) {
+                                map.addLayer({
+                                    id: 'transit-stops',
+                                    type: 'symbol',
+                                    source: 'openmaptiles',
+                                    'source-layer': 'poi',
+                                    minzoom: 14,
+                                    filter: ['match', ['get', 'class'],
+                                        ['bus_station', 'railway', 'bus_stop', 'tram_stop', 'subway', 'rail', 'train_station'],
+                                        true, false
+                                    ],
+                                    layout: {
+                                        'icon-image': ['match', ['get', 'class'],
+                                            'bus_station', 'icon-bus',
+                                            'bus_stop', 'icon-stop',
+                                            'railway', 'icon-train',
+                                            'rail', 'icon-train',
+                                            'train_station', 'icon-train',
+                                            'tram_stop', 'icon-tram',
+                                            'subway', 'icon-subway',
+                                            'icon-stop' // default
+                                        ],
+                                        'icon-size': ['interpolate', ['linear'], ['zoom'], 14, 0.6, 18, 1],
+                                        'icon-allow-overlap': false,
+                                        'icon-padding': 2
+                                    },
+                                    paint: {
+                                        'icon-color': isDarkMode ? '#999999' : '#555555',
+                                        'icon-halo-color': isDarkMode ? 'rgba(0,0,0,0.5)' : '#ffffff',
+                                        'icon-halo-width': 1
+                                    }
+                                });
+                            }
+
+
+
+                        }
+                    }}
                     onLoad={(e) => {
                         setIsMapLoaded(true);
                         const map = e.target;
                         if (map) {
-
-
-                            // Dark Mode Filter
+                            // Hide oneway arrows
                             const layers = map.getStyle().layers;
                             layers?.forEach(layer => {
                                 if (layer.id.includes('oneway') || layer.id.includes('arrow') || layer.id.includes('direction')) {
                                     map.setLayoutProperty(layer.id, 'visibility', 'none');
                                 }
                             });
+
+
+
+
+
+                            // Add transit labels (styled like map labels - uppercase, neutral color)
+                            if (!map.getLayer('transit-labels')) {
+                                map.addLayer({
+                                    id: 'transit-labels',
+                                    type: 'symbol',
+                                    source: 'openmaptiles',
+                                    'source-layer': 'poi',
+                                    minzoom: 15,
+                                    filter: ['match', ['get', 'class'],
+                                        ['bus_station', 'railway', 'bus_stop', 'tram_stop', 'subway', 'rail', 'train_station'],
+                                        true, false
+                                    ],
+                                    layout: {
+                                        'text-field': ['upcase', ['coalesce', ['get', 'name_en'], ['get', 'name']]],
+                                        'text-size': 11,
+                                        'text-offset': [0, 1.2],
+                                        'text-anchor': 'top',
+                                        'text-font': ['Noto Sans Regular'],
+                                        'text-max-width': 9,
+                                        'text-letter-spacing': 0.1
+                                    },
+                                    paint: {
+                                        // Neutral grays matching the Positron styling
+                                        'text-color': isDarkMode ? '#999999' : '#666666',
+                                        'text-halo-color': isDarkMode ? 'rgba(0,0,0,0.8)' : 'rgba(255,255,255,0.8)',
+                                        'text-halo-width': 1.5,
+                                        'text-halo-blur': 0.5
+                                    }
+                                });
+                            }
                         }
                     }}
                     onMove={handleMove}
