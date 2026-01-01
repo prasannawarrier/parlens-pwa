@@ -1239,13 +1239,13 @@ export const LandingPage: React.FC = () => {
                                         setEditingName((wp as any).name || `Stop ${i + 1}`);
                                     }}
                                     className="cursor-pointer"
-                                    style={{ zIndex: activeEditingId === (wp as any).id ? 2000 : 1000 }}
+                                    style={{ zIndex: activeEditingId === (wp as any).id ? 200 : 100 }}
                                 >
                                     <div className="relative flex flex-col items-center">
                                         {/* Waypoint Label with Edit/Delete - Always visible in Drop Pin Mode */}
                                         {dropPinMode && (
                                             <div
-                                                className="absolute bottom-full mb-1 bg-[#1c1c1e] text-white rounded-xl shadow-2xl flex items-center gap-1 p-1.5 min-w-[max-content] border border-white/10 z-[2000]"
+                                                className="absolute bottom-full mb-1 bg-[#1c1c1e] text-white rounded-xl shadow-2xl flex items-center gap-1 p-1.5 min-w-[max-content] border border-white/10 z-[200]"
                                                 onClick={(e) => e.stopPropagation()}
                                             >
                                                 {renamingId === (wp as any).id ? (
