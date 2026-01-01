@@ -1721,9 +1721,13 @@ export const LandingPage: React.FC = () => {
                             if (m === 'auto') {
                                 // NEW: Auto -> Fixed (Exit Cycle)
                                 // Reset zoom to default (16.5) and rotation to 0
+                                // Calculate shortest rotation to North to preventing spinning/flashing
+                                const currentBearing = mapRef.current?.getBearing() || 0;
+                                const nearestNorth = Math.round(currentBearing / 360) * 360;
+
                                 isTransitioning.current = true;
                                 mapRef.current?.flyTo({
-                                    bearing: 0,
+                                    bearing: nearestNorth,
                                     pitch: 0,
                                     zoom: 16.5,
                                     duration: 800,
