@@ -372,9 +372,10 @@ export const LandingPage: React.FC = () => {
     useEffect(() => {
         if (status === 'parked') {
             setOrientationMode('fixed');
-            // Reset bearing to 0 for clean view
-            setViewState(prev => ({ ...prev, bearing: 0, pitch: 0 }));
-            mapRef.current?.rotateTo(0, { duration: 800 });
+            // Smoothly rotate to nearest North
+            const currentBearing = mapRef.current?.getBearing() || 0;
+            const nearestNorth = Math.round(currentBearing / 360) * 360;
+            mapRef.current?.rotateTo(nearestNorth, { duration: 800 });
         }
     }, [status]);
 
@@ -1579,8 +1580,10 @@ export const LandingPage: React.FC = () => {
                 {Math.abs(viewState.bearing) > 5 && orientationMode !== 'auto' && (
                     <button
                         onClick={() => {
-                            mapRef.current?.rotateTo(0, { duration: 400 });
-                            setViewState(prev => ({ ...prev, bearing: 0, pitch: 0 }));
+                            const currentBearing = mapRef.current?.getBearing() || 0;
+                            const nearestNorth = Math.round(currentBearing / 360) * 360;
+                            mapRef.current?.rotateTo(nearestNorth, { duration: 400 });
+                            setViewState(prev => ({ ...prev, pitch: 0 }));
                         }}
                         className="h-12 w-12 flex items-center justify-center rounded-[1.5rem] backdrop-blur-md transition-all active:scale-95 border shadow-lg bg-white/80 dark:bg-zinc-800/80 border-black/5 dark:border-white/10"
                         title="Reset to true north"
@@ -1667,7 +1670,7 @@ export const LandingPage: React.FC = () => {
                                 mapRef.current?.flyTo({
                                     center: [location[1], location[0]], // Ensure we fly to user
                                     zoom: currentZoom < DEFAULT_ZOOM ? DEFAULT_ZOOM : currentZoom,
-                                    bearing: 0, // Reset bearing for recentre mode
+                                    bearing: Math.round((mapRef.current?.getBearing() || 0) / 360) * 360, // Shortest path to North
                                     duration: 800,
                                     essential: true
                                 });
@@ -1689,7 +1692,7 @@ export const LandingPage: React.FC = () => {
                             if (status === 'parked') {
                                 isTransitioning.current = true;
                                 mapRef.current?.flyTo({
-                                    bearing: 0,
+                                    bearing: Math.round((mapRef.current?.getBearing() || 0) / 360) * 360, // Shortest path to North
                                     pitch: 0,
                                     zoom: 16.5,
                                     duration: 800,
