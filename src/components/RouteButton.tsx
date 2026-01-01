@@ -80,7 +80,7 @@ const OnlineSearch: React.FC<{ query: string; onSelect: (result: NominatimResult
             }
         };
 
-        const timeoutId = setTimeout(fetchLocation, 1000); // 1000ms debounce (Nominatim limit is 1s)
+        const timeoutId = setTimeout(fetchLocation, 500); // 500ms debounce (Nominatim limit is 1s, but burst is okay)
         return () => clearTimeout(timeoutId);
     }, [query, countryCode, currentLocation]);
 
@@ -433,10 +433,10 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
             // Merge with existing routes to prevent data loss (e.g. offline creations)
             setSavedRoutes(prev => {
                 const mergedMap = new Map<string, SavedRoute>();
-                
+
                 // Keep existing (cached) routes
                 prev.forEach(r => mergedMap.set(r.id, r));
-                
+
                 // Merge/Overwrite with fresh network data
                 routes.forEach(r => mergedMap.set(r.id, r));
 

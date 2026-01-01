@@ -209,18 +209,30 @@ export function parseCoordinate(input: string): { lat: number, lon: number, type
 
     // 2. Try Plus Code
     try {
-        // Attempt 1: Raw trimmed input
-        if (OLC && OLC.isValid && OLC.isValid(trimmed)) {
-            if (OLC.isFull(trimmed)) {
-                const decoded = OLC.decode(trimmed);
+        // Attempt 1: Raw trimmed input or first part (handle "8FVC+GH City")
+        // Split by comma or space to isolate potential code
+        const parts = trimmed.split(/[\s,]+/);
+        const potentialCode = parts[0];
+
+        // Check full string first (standard)
+        if (OLC && OLC.isValid && OLC.isValid(trimmed) && OLC.isFull(trimmed)) {
+            const decoded = OLC.decode(trimmed);
+            return { lat: decoded.latitudeCenter, lon: decoded.longitudeCenter, type: 'plus_code' };
+        }
+
+        // Check first part if it looks like a code (e.g. "XJ7R+GH")
+        if (potentialCode.length >= 8 && potentialCode.includes('+')) {
+            if (OLC && OLC.isValid && OLC.isValid(potentialCode) && OLC.isFull(potentialCode)) {
+                const decoded = OLC.decode(potentialCode);
                 return { lat: decoded.latitudeCenter, lon: decoded.longitudeCenter, type: 'plus_code' };
             }
         }
 
-        // Attempt 2: Handle "8FVC GH" -> "8FVC+GH" format
-        const query = trimmed.toUpperCase().replace(/\s+/g, '+');
-        if (query !== trimmed && OLC && OLC.isValid && OLC.isValid(query)) {
-            if (OLC.isFull(query)) {
+        // Attempt 2: Handle "8FVC GH" -> "8FVC+GH" format (Short code or formatted)
+        // Only if it doesn't have a plus already
+        if (!trimmed.includes('+')) {
+            const query = trimmed.toUpperCase().replace(/\s+/g, '+');
+            if (OLC && OLC.isValid && OLC.isValid(query) && OLC.isFull(query)) {
                 const decoded = OLC.decode(query);
                 return { lat: decoded.latitudeCenter, lon: decoded.longitudeCenter, type: 'plus_code' };
             }

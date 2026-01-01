@@ -1052,7 +1052,7 @@ export const LandingPage: React.FC = () => {
                                     type: 'symbol',
                                     source: 'openmaptiles',
                                     'source-layer': 'poi',
-                                    minzoom: 14,
+                                    minzoom: 12,
                                     filter: ['match', ['get', 'class'],
                                         ['bus_station', 'railway', 'bus_stop', 'tram_stop', 'subway', 'rail', 'train_station'],
                                         true, false
@@ -1068,14 +1068,26 @@ export const LandingPage: React.FC = () => {
                                             'subway', 'icon-subway',
                                             'icon-stop' // default
                                         ],
-                                        'icon-size': ['interpolate', ['linear'], ['zoom'], 14, 0.6, 18, 1],
+                                        'icon-size': ['interpolate', ['linear'], ['zoom'], 12, 0.5, 14, 0.6, 18, 1],
                                         'icon-allow-overlap': false,
-                                        'icon-padding': 2
+                                        'icon-padding': 2,
+                                        // Merge text properties here from the old transit-labels layer
+                                        'text-field': ['upcase', ['coalesce', ['get', 'name_en'], ['get', 'name']]],
+                                        'text-size': 11,
+                                        'text-offset': [0, 1.2],
+                                        'text-anchor': 'top',
+                                        'text-font': ['Noto Sans Regular'],
+                                        'text-optional': true // Hide text if it doesn't fit, but keep icon
                                     },
                                     paint: {
                                         'icon-color': isDarkMode ? '#999999' : '#555555',
                                         'icon-halo-color': isDarkMode ? 'rgba(0,0,0,0.5)' : '#ffffff',
-                                        'icon-halo-width': 1
+                                        'icon-halo-width': 1,
+                                        'text-color': isDarkMode ? '#aaaaaa' : '#666666',
+                                        'text-halo-color': isDarkMode ? 'rgba(0,0,0,0.8)' : '#ffffff',
+                                        'text-halo-width': 1,
+                                        // Fade text in starting at zoom 14 (so zoom 12-14 is icon only)
+                                        'text-opacity': ['interpolate', ['linear'], ['zoom'], 13.5, 0, 14, 1]
                                     }
                                 });
                             }
@@ -1100,36 +1112,8 @@ export const LandingPage: React.FC = () => {
 
 
 
-                            // Add transit labels (styled like map labels - uppercase, neutral color)
-                            if (!map.getLayer('transit-labels')) {
-                                map.addLayer({
-                                    id: 'transit-labels',
-                                    type: 'symbol',
-                                    source: 'openmaptiles',
-                                    'source-layer': 'poi',
-                                    minzoom: 15,
-                                    filter: ['match', ['get', 'class'],
-                                        ['bus_station', 'railway', 'bus_stop', 'tram_stop', 'subway', 'rail', 'train_station'],
-                                        true, false
-                                    ],
-                                    layout: {
-                                        'text-field': ['upcase', ['coalesce', ['get', 'name_en'], ['get', 'name']]],
-                                        'text-size': 11,
-                                        'text-offset': [0, 1.2],
-                                        'text-anchor': 'top',
-                                        'text-font': ['Noto Sans Regular'],
-                                        'text-max-width': 9,
-                                        'text-letter-spacing': 0.1
-                                    },
-                                    paint: {
-                                        // Neutral grays matching the Positron styling
-                                        'text-color': isDarkMode ? '#999999' : '#666666',
-                                        'text-halo-color': isDarkMode ? 'rgba(0,0,0,0.8)' : 'rgba(255,255,255,0.8)',
-                                        'text-halo-width': 1.5,
-                                        'text-halo-blur': 0.5
-                                    }
-                                });
-                            }
+
+
                         }
                     }}
                     onMove={handleMove}
