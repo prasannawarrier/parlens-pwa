@@ -344,13 +344,12 @@ export class StableLocationTracker {
 
     // Dynamic buffer zones based on speed (in meters)
     // Larger buffer = more stable but less responsive
-    // Round 5 Tuning: significantly reduced buffer zones for higher precision
-    // User needs accurate positioning for navigation
+    // Round 6 Tuning: increased stationary buffer for GPS noise when marking parking spots
     private bufferZones: Record<SpeedClass, number> = {
-        stationary: 5,       // Reduced from 20m to 5m - still eliminates GPS jitter when stopped
-        walking: 4,          // Reduced from 12m to 4m - accurate walking tracking
-        vehicle: 3,          // Reduced from 6m to 3m - precise vehicle tracking
-        fast_vehicle: 2      // Reduced from 4m to 2m - minimal buffer at highway speeds
+        stationary: 15,      // Increased from 5m to 15m - covers GPS noise (3-10m typical)
+        walking: 8,          // Increased from 4m to 8m - smoother walking tracking
+        vehicle: 5,          // Increased from 3m to 5m - stable vehicle tracking
+        fast_vehicle: 3      // Increased from 2m to 3m - highway speeds
     };
 
     // Polling intervals based on speed (in ms)
@@ -523,6 +522,56 @@ export class StableLocationTracker {
     // Get predicted bearing for movement direction
     getPredictedBearing(): number {
         return this.predictedBearing;
+    }
+
+    // Track last GPS accuracy for dynamic buffer sizing
+    private lastAccuracy: number = 10; // Default 10m
+
+    // Update location with accuracy-aware buffer zone
+    // This method dynamically adjusts buffer based on GPS accuracy
+    updateLocationWithAccuracy(rawLat: number, rawLon: number, accuracy: number): {
+        displayLat: number;
+        displayLon: number;
+        speed: number;
+        speedClass: SpeedClass;
+        shouldUpdate: boolean;
+        animationDuration: number;
+        bearing: number | null;
+        accuracy: number;
+    } {
+        // Store accuracy for reference
+        this.lastAccuracy = accuracy;
+
+        // Get base result from standard update
+        const result = this.updateLocation(rawLat, rawLon);
+
+        // For stationary check: use accuracy-weighted buffer
+        // If we're stationary and GPS accuracy is poor, increase buffer dynamically
+        if (result.speedClass === 'stationary') {
+            const dynamicBuffer = Math.max(this.bufferZones.stationary, accuracy * 1.5);
+            const distanceFromAnchor = this.haversineDistance(this.anchorLat, this.anchorLon, rawLat, rawLon);
+
+            // If within dynamic buffer when stationary, don't update display
+            if (distanceFromAnchor <= dynamicBuffer) {
+                return {
+                    ...result,
+                    displayLat: this.displayLat, // Keep current display position
+                    displayLon: this.displayLon,
+                    shouldUpdate: false,
+                    accuracy
+                };
+            }
+        }
+
+        return {
+            ...result,
+            accuracy
+        };
+    }
+
+    // Get last reported GPS accuracy
+    getLastAccuracy(): number {
+        return this.lastAccuracy;
     }
 
     // Get average speed from history (for hysteresis checks)

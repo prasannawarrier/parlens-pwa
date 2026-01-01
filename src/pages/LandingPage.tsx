@@ -395,28 +395,38 @@ export const LandingPage: React.FC = () => {
 
         const watchId = navigator.geolocation.watchPosition(
             (position) => {
-                const { latitude, longitude } = position.coords;
+                const { latitude, longitude, accuracy } = position.coords;
 
-                // PRECISION MODE: Bypass all smoothing, use raw GPS coordinates
-                // Only use animator for smooth visual transitions (no position drift)
-                // This ensures the marker stays precisely at the GPS position
-
-                // Animate to raw GPS position with quick animation for responsiveness
-                positionAnimator.current.animateTo(
-                    latitude,
-                    longitude,
-                    300 // Quick 300ms animation for smooth visual transition
+                // Use accuracy-aware location tracking
+                // This applies buffer zone when stationary to prevent GPS jitter
+                const result = locationTracker.current.updateLocationWithAccuracy(
+                    latitude, longitude, accuracy
                 );
 
-                // Track speed for analytics (still use locationTracker for speed calc only)
-                const result = locationTracker.current.updateLocation(latitude, longitude);
-
-                // Track speed for potential UI feedback
+                // Track speed for UI feedback
                 setUserSpeed(result.speed);
                 userSpeedRef.current = result.speed;
 
-                // GPS used for Location Interpolation (locationTracker/positionAnimator)
-                // Orientation is Compass-Only (handled in handleOrientation)
+                // STATIONARY MODE: Use buffered position to prevent jitter
+                // This is critical for accurate parking spot marking
+                if (result.speedClass === 'stationary') {
+                    // Only update position if outside buffer zone
+                    if (result.shouldUpdate) {
+                        positionAnimator.current.animateTo(
+                            result.displayLat,
+                            result.displayLon,
+                            result.animationDuration
+                        );
+                    }
+                    // Else: keep current position (inside buffer zone)
+                } else {
+                    // MOVING MODE: Use raw GPS for precision tracking
+                    positionAnimator.current.animateTo(
+                        latitude,
+                        longitude,
+                        300 // Quick animation for responsive feel
+                    );
+                }
 
                 // Initialize view state ONLY on first location (using ref to avoid stale closure)
                 if (!initialLocationSet.current) {
