@@ -150,24 +150,24 @@ const Login: React.FC = () => {
             <div className="space-y-6 pt-4 animate-in slide-in-from-right-4 text-left">
               <div className="text-center pb-2">
                 <h3 className="text-xl font-bold text-zinc-900 dark:text-white">🎉 Account Created!</h3>
-                <p className="text-zinc-500 dark:text-white/40 text-sm mt-1">Back up your keys before continuing</p>
+                <p className="text-zinc-500 dark:text-white/40 text-sm mt-1">Backup your keys before continuing</p>
               </div>
 
               <div className="space-y-4">
-                <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-white/30 ml-2">Your Keys</h4>
+                <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-white/30 ml-2">Keys</h4>
                 <div className="space-y-0.5 rounded-[2rem] overflow-hidden bg-white dark:bg-white/[0.03] border border-black/5 dark:border-white/10 shadow-sm dark:shadow-none">
                   <div
                     className="p-5 flex items-center justify-between transition-colors cursor-pointer active:bg-black/5 dark:active:bg-white/10"
                     onClick={() => {
                       if (generatedKeys) {
                         navigator.clipboard.writeText(generatedKeys.npub);
-                        alert('Public Key copied to clipboard');
+                        alert('Copied to clipboard');
                       }
                     }}
                   >
                     <div className="flex items-center gap-3">
                       <div className="p-2.5 rounded-xl bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400"><Key size={20} /></div>
-                      <span className="font-semibold text-sm text-zinc-900 dark:text-white">Copy Public Key (Npub)</span>
+                      <span className="font-semibold text-sm text-zinc-900 dark:text-white">Copy Nostr Public Key (Npub)</span>
                     </div>
                     <ChevronRight size={18} className="text-zinc-400 dark:text-white/20" />
                   </div>
@@ -177,19 +177,19 @@ const Login: React.FC = () => {
                     onClick={() => {
                       if (generatedKeys) {
                         navigator.clipboard.writeText(generatedKeys.nsec);
-                        alert('Secret Key copied to clipboard - keep this safe!');
+                        alert('Copied to clipboard');
                       }
                     }}
                   >
                     <div className="flex items-center gap-3">
                       <div className="p-2.5 rounded-xl bg-red-500/10 dark:bg-red-500/20 text-red-600 dark:text-red-500"><Shield size={20} /></div>
-                      <span className="font-semibold text-sm text-zinc-900 dark:text-white">Copy Secret Key (Nsec)</span>
+                      <span className="font-semibold text-sm text-zinc-900 dark:text-white">Copy Nostr Secret Key (Nsec)</span>
                     </div>
                     <ChevronRight size={18} className="text-zinc-400 dark:text-white/20" />
                   </div>
                 </div>
                 <p className="text-xs text-zinc-400 dark:text-white/30 mt-2 ml-2 leading-relaxed text-center">
-                  ⚠️ Store these keys securely. They cannot be recovered if lost.
+                  ⚠️ Store your npub and nsec securely. These are your account access keys and cannot be recovered if lost.
                 </p>
               </div>
 
