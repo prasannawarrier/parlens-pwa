@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { KINDS, DEFAULT_RELAYS } from '../lib/nostr';
 import type { RouteLogContent } from '../lib/nostr';
 import { encryptParkingLog, decryptParkingLog } from '../lib/encryption';
-import { parseCoordinate, formatCoords } from '../lib/geo';
+import { parseCoordinate, formatCoords, recoverPlusCode } from '../lib/geo';
 
 interface Waypoint {
     id: string;
@@ -50,18 +50,52 @@ const OnlineSearch: React.FC<{ query: string; onSelect: (result: NominatimResult
             if (!query || query.length < 4) return;
             setLoading(true);
             try {
+                // 1. Check for "Plus Code + Context" pattern (e.g. "XJ7R+GH Bengaluru")
+                // Code must be at least 4 chars, separated by space/comma from context
+                const plusCodeMatch = query.match(/^([2-9CFGHJMPQRVWX+]{4,})\s+[,]?\s*(.+)$/i);
+
+                if (plusCodeMatch) {
+                    const code = plusCodeMatch[1];
+                    const context = plusCodeMatch[2];
+
+                    if (code.includes('+')) {
+                        console.log('[Parlens] Detected Plus Code context search:', code, 'in', context);
+                        // Fetch context location first
+                        const contextRes = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(context)}&format=json&limit=1`);
+                        const contextData = await contextRes.json();
+
+                        if (contextData && contextData.length > 0) {
+                            const refLat = parseFloat(contextData[0].lat);
+                            const refLon = parseFloat(contextData[0].lon);
+
+                            // Attempt recovery
+                            const recovered = recoverPlusCode(code, refLat, refLon);
+                            if (recovered) {
+                                setResult({
+                                    place_id: -1, // Pseudo ID
+                                    lat: recovered.lat.toString(),
+                                    lon: recovered.lon.toString(),
+                                    display_name: `Plus Code: ${code.toUpperCase()}, ${contextData[0].display_name}`,
+                                    type: 'plus_code'
+                                });
+                                setLoading(false);
+                                return; // Found and set, exit
+                            }
+                        }
+                    }
+                }
+
+                // 2. Standard Nominatim Search
                 let url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`;
 
-                // Restrict to country if known
                 if (countryCode) {
                     url += `&countrycodes=${countryCode}`;
                 }
 
-                // Bias results to user location (viewbox preference without bounded=1)
-                // Use a modest box (+/- 1 degree, approx 100km) to prioritize local results
+                // Bias results to user location (viewbox preference)
                 if (currentLocation) {
                     const [lat, lon] = currentLocation;
-                    const viewbox = `${lon - 1},${lat + 1},${lon + 1},${lat - 1}`; // minLon,maxLat,maxLon,minLat
+                    const viewbox = `${lon - 1},${lat + 1},${lon + 1},${lat - 1}`;
                     url += `&viewbox=${viewbox}`;
                 }
 
@@ -80,9 +114,9 @@ const OnlineSearch: React.FC<{ query: string; onSelect: (result: NominatimResult
             }
         };
 
-        const timeoutId = setTimeout(fetchLocation, 500); // 500ms debounce (Nominatim limit is 1s, but burst is okay)
+        const timeoutId = setTimeout(fetchLocation, 500);
         return () => clearTimeout(timeoutId);
-    }, [query, countryCode, currentLocation]);
+    }, [query, countryCode]); // Removed currentLocation to prevent flicker/loops
 
     if (loading) {
         return (
@@ -98,7 +132,7 @@ const OnlineSearch: React.FC<{ query: string; onSelect: (result: NominatimResult
     return (
         <div className="mb-2 rounded-2xl overflow-hidden bg-purple-50 dark:bg-purple-500/10 border border-purple-500/20">
             <div className="px-3 py-1.5 text-xs font-medium text-purple-700 dark:text-purple-400 bg-purple-100/50 dark:bg-purple-500/5">
-                🌍 Global Search Result
+                🌍 {result.type === 'plus_code' ? 'Plus Code Location' : 'Global Search Result'}
             </div>
             <button
                 onClick={() => onSelect(result)}
@@ -758,8 +792,16 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                                     placeholder="Search waypoint or coordinate"
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
-                                    className="w-full h-14 rounded-2xl bg-zinc-100 dark:bg-white/5 border border-black/5 dark:border-white/10 px-4 text-zinc-900 dark:text-white placeholder:text-zinc-400 dark:placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    className="w-full h-14 rounded-2xl bg-zinc-100 dark:bg-white/5 border border-black/5 dark:border-white/10 px-4 pr-12 text-zinc-900 dark:text-white placeholder:text-zinc-400 dark:placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-blue-500"
                                 />
+                                {searchQuery && (
+                                    <button
+                                        onClick={() => setSearchQuery('')}
+                                        className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/5 dark:bg-white/10 text-zinc-500 hover:bg-black/10 transition-colors"
+                                    >
+                                        <X size={16} />
+                                    </button>
+                                )}
                             </div>
 
                             {/* Coordinate / Plus Code Match (Sync) */}

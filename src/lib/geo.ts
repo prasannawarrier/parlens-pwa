@@ -137,6 +137,20 @@ const OLC_LIB = OpenLocationCode as any;
 // Handle likely CJS/ESM interop issues where the library might be on .default
 const OLC = OLC_LIB.default || OLC_LIB;
 
+export function recoverPlusCode(code: string, lat: number, lon: number): { lat: number, lon: number, type: 'plus_code' } | null {
+    try {
+        // Recover nearest (short code -> full code)
+        if (OLC && OLC.isValid(code)) {
+            const recovered = OLC.recoverNearest(code, lat, lon);
+            const decoded = OLC.decode(recovered);
+            return { lat: decoded.latitudeCenter, lon: decoded.longitudeCenter, type: 'plus_code' };
+        }
+    } catch (e) {
+        // Ignore errors
+    }
+    return null;
+}
+
 export function parseCoordinate(input: string): { lat: number, lon: number, type: 'coordinate' | 'plus_code' } | null {
     const trimmed = input.trim();
 
