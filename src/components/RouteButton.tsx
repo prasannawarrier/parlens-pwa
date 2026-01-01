@@ -50,16 +50,17 @@ const OnlineSearch: React.FC<{ query: string; onSelect: (result: NominatimResult
             if (!query || query.length < 4) return;
             setLoading(true);
             try {
-                // 1. Check for "Plus Code + Context" pattern (e.g. "XJ7R+GH Bengaluru")
-                // Code must be at least 4 chars, separated by space/comma from context
-                const plusCodeMatch = query.match(/^([2-9CFGHJMPQRVWX+]{4,})\s+[,]?\s*(.+)$/i);
+                // 1. Check for "Plus Code + Context" pattern (e.g. "XJ7R+GH Bengaluru, Karnataka")
+                // Simple approach: find first space, check if part before contains '+'
+                const firstSpaceIndex = query.indexOf(' ');
 
-                if (plusCodeMatch) {
-                    const code = plusCodeMatch[1];
-                    const context = plusCodeMatch[2];
+                if (firstSpaceIndex > 3 && query.includes('+')) {
+                    const potentialCode = query.substring(0, firstSpaceIndex).trim();
+                    const context = query.substring(firstSpaceIndex + 1).trim();
 
-                    if (code.includes('+')) {
-                        console.log('[Parlens] Detected Plus Code context search:', code, 'in', context);
+                    if (potentialCode.includes('+') && context.length > 0) {
+                        console.log('[Parlens] Detected Plus Code context search:', potentialCode, 'in', context);
+
                         // Fetch context location first
                         const contextRes = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(context)}&format=json&limit=1`);
                         const contextData = await contextRes.json();
@@ -69,23 +70,29 @@ const OnlineSearch: React.FC<{ query: string; onSelect: (result: NominatimResult
                             const refLon = parseFloat(contextData[0].lon);
 
                             // Attempt recovery
-                            const recovered = recoverPlusCode(code, refLat, refLon);
+                            const recovered = recoverPlusCode(potentialCode, refLat, refLon);
                             if (recovered) {
                                 setResult({
                                     place_id: -1, // Pseudo ID
                                     lat: recovered.lat.toString(),
                                     lon: recovered.lon.toString(),
-                                    display_name: `Plus Code: ${code.toUpperCase()}, ${contextData[0].display_name}`,
+                                    display_name: `Plus Code: ${potentialCode.toUpperCase()}, ${contextData[0].display_name}`,
                                     type: 'plus_code'
                                 });
                                 setLoading(false);
                                 return; // Found and set, exit
+                            } else {
+                                console.warn('[Parlens] Plus Code recovery failed for:', potentialCode);
                             }
                         }
                     }
                 }
+            } catch (e) {
+                console.error('[Parlens] Plus Code context search error:', e);
+            }
 
-                // 2. Standard Nominatim Search
+            // 2. Standard Nominatim Search
+            try {
                 let url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`;
 
                 if (countryCode) {
@@ -797,7 +804,7 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                                 {searchQuery && (
                                     <button
                                         onClick={() => setSearchQuery('')}
-                                        className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/5 dark:bg-white/10 text-zinc-500 hover:bg-black/10 transition-colors"
+                                        className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-zinc-400 dark:text-white/40 active:opacity-50 transition-opacity"
                                     >
                                         <X size={16} />
                                     </button>
