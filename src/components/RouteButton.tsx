@@ -796,7 +796,7 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                                 <input
                                     ref={inputRef}
                                     type="text"
-                                    placeholder="Search waypoint or coordinate"
+                                    placeholder="Search waypoint"
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
                                     className="w-full h-14 rounded-2xl bg-zinc-100 dark:bg-white/5 border border-black/5 dark:border-white/10 px-4 pr-12 text-zinc-900 dark:text-white placeholder:text-zinc-400 dark:placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -1184,8 +1184,8 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                         {/* Tip Message */}
                         <div className="p-3 rounded-xl bg-amber-500/10 dark:bg-amber-500/5 border border-amber-500/20">
                             <p className="text-xs text-amber-700 dark:text-amber-400/80 leading-relaxed">
-                                <strong>Tip:</strong> Use <strong>Drop Pin on Map</strong> and
-                                <strong> edit waypoint names</strong> to label locations. When you <strong>save routes</strong>,
+                                <strong>Tip:</strong> If place name does not return results, use <strong>coordinate or Google Maps plus code</strong> in waypoint search.
+                                <strong> Edit waypoint names</strong> to label locations. When you <strong>save routes</strong>,
                                 waypoint names become searchable — building your personal offline map over time! ⭐
                             </p>
                         </div>
