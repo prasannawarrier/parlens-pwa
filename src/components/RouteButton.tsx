@@ -801,7 +801,7 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
 
                         {/* Search Input */}
                         <div className="space-y-2">
-                            <label className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-white/30 ml-2">
+                            <label className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-white/20 ml-2">
                                 Add Waypoint
                             </label>
                             <div className="relative">
@@ -962,7 +962,7 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                         {/* Waypoints List */}
                         <div className="space-y-2 flex-1">
                             <div className="flex items-center justify-between ml-2 mr-2">
-                                <label className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-white/30">
+                                <label className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-white/20">
                                     Waypoints ({waypoints.length})
                                 </label>
                                 {waypoints.length > 1 && (
@@ -1027,13 +1027,13 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                                                     />
                                                     <button
                                                         onClick={() => updateWaypointName(waypoint.id, editingName)}
-                                                        className="p-2 rounded-xl text-green-500 hover:bg-green-500/10 transition-colors"
+                                                        className="p-2 rounded-xl text-green-500 bg-green-500/10 transition-colors"
                                                     >
                                                         <Check size={16} />
                                                     </button>
                                                     <button
                                                         onClick={() => setEditingWaypointId(null)}
-                                                        className="p-2 rounded-xl text-zinc-400 hover:bg-zinc-500/10 transition-colors"
+                                                        className="p-2 rounded-xl text-zinc-400 bg-zinc-500/10 transition-colors"
                                                     >
                                                         <X size={16} />
                                                     </button>
@@ -1140,7 +1140,7 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                                 >
                                     <div className="flex items-center gap-2">
                                         <FolderOpen size={18} className="text-zinc-500 dark:text-white/50" />
-                                        <span className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-white/30">
+                                        <span className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-white/20">
                                             Saved Routes ({savedRoutes.length})
                                         </span>
                                     </div>

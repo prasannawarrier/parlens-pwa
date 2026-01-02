@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { Key, X, Shield, ChevronRight, MapPin, Clock, User, Trash2 } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { Key, X, Shield, ChevronRight, MapPin, Clock, User, Trash2, Plus, Radio, Pencil, Check } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useParkingLogs } from '../hooks/useParkingLogs';
 import { nip19 } from 'nostr-tools';
-import { decryptParkingLog } from '../lib/encryption';
+import { decryptParkingLog, encryptParkingLog } from '../lib/encryption';
 import { getCurrencySymbol, getCountryFlag } from '../lib/currency';
 import { DEFAULT_RELAYS, KINDS } from '../lib/nostr';
 
@@ -18,6 +18,14 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
     const [isOpen, setIsOpen] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
 
+    // Preferred Relays state
+    const [preferredRelays, setPreferredRelays] = useState<string[]>([]);
+    const [showPreferredRelays, setShowPreferredRelays] = useState(false);
+    const [isAddingRelay, setIsAddingRelay] = useState(false);
+    const [newRelayUrl, setNewRelayUrl] = useState('');
+    const [isRelayLoading, setIsRelayLoading] = useState(false);
+    const [relayError, setRelayError] = useState<string | null>(null);
+
     // Notify parent when open state changes
     useEffect(() => {
         onOpenChange?.(isOpen);
@@ -25,6 +33,16 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
     const [profile, setProfile] = useState<any>(null);
     const [decryptedLogs, setDecryptedLogs] = useState<any[]>([]);
     const [showHistoryOnMap, setShowHistoryOnMap] = useState(false);
+
+    // Parking History filters
+    const [filterType, setFilterType] = useState<'all' | 'bicycle' | 'motorcycle' | 'car'>('all');
+    const [filterFromDate, setFilterFromDate] = useState<string>('');
+    const [filterToDate, setFilterToDate] = useState<string>('');
+
+    // Note editing state
+    const [editingNoteLogId, setEditingNoteLogId] = useState<string | null>(null);
+    const [editingNoteValue, setEditingNoteValue] = useState('');
+    const [isSavingNote, setIsSavingNote] = useState(false);
 
     // Handle delete parking log using NIP-09
     const handleDeleteLog = async (log: any) => {
@@ -139,6 +157,198 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
         }
     };
 
+    // Format duration from start to end
+    const formatDuration = (startTime: Date | null, endTime: Date): string => {
+        if (!startTime) return 'Unknown';
+        const diffMs = endTime.getTime() - startTime.getTime();
+        const diffMins = Math.floor(diffMs / (1000 * 60));
+        if (diffMins < 60) return `${diffMins}m`;
+        const hours = Math.floor(diffMins / 60);
+        const mins = diffMins % 60;
+        return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+    };
+
+    // Update note on a parking log
+    const handleUpdateNote = async (log: any, newNote: string) => {
+        if (!pubkey || !signEvent) return;
+
+        setIsSavingNote(true);
+        try {
+            const dTag = log.tags?.find((t: string[]) => t[0] === 'd')?.[1];
+            if (!dTag) throw new Error('Missing d tag');
+
+            // Get seckey for encryption
+            const privkeyHex = localStorage.getItem('parlens_privkey');
+            const seckey = privkeyHex ? new Uint8Array(privkeyHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16))) : undefined;
+
+            // Update content with new note
+            const updatedContent = { ...log.decryptedContent, note: newNote };
+            const encrypted = await encryptParkingLog(updatedContent, pubkey, seckey);
+
+            const event = {
+                kind: KINDS.PARKING_LOG,
+                created_at: Math.floor(Date.now() / 1000),
+                tags: [
+                    ['d', dTag],
+                    ['client', 'parlens'],
+                ],
+                content: encrypted,
+            };
+
+            const signedEvent = await signEvent(event);
+            await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedEvent));
+
+            // Update local state
+            setDecryptedLogs(prev => prev.map(l =>
+                l.id === log.id ? { ...l, decryptedContent: updatedContent } : l
+            ));
+            setEditingNoteLogId(null);
+            setEditingNoteValue('');
+        } catch (e) {
+            console.error('Failed to update note:', e);
+            alert('Failed to save note');
+        } finally {
+            setIsSavingNote(false);
+        }
+    };
+
+    // Filter logs by type and date
+    const filteredLogs = useMemo(() => {
+        return decryptedLogs.filter(log => {
+            const content = log.decryptedContent;
+            const type = content.type || 'car';
+
+            // Type filter
+            if (filterType !== 'all' && type !== filterType) return false;
+
+            // Date range filter
+            const logDate = content.started_at ? new Date(content.started_at * 1000) : new Date(log.created_at * 1000);
+
+            if (filterFromDate) {
+                const fromDate = new Date(filterFromDate);
+                fromDate.setHours(0, 0, 0, 0);
+                if (logDate < fromDate) return false;
+            }
+
+            if (filterToDate) {
+                const toDate = new Date(filterToDate);
+                toDate.setHours(23, 59, 59, 999);
+                if (logDate > toDate) return false;
+            }
+
+            return true;
+        });
+    }, [decryptedLogs, filterType, filterFromDate, filterToDate]);
+
+    // Get earliest parking date for min constraint on date filters
+    const earliestLogDate = useMemo(() => {
+        if (decryptedLogs.length === 0) return '';
+        const dates = decryptedLogs.map(log => {
+            const content = log.decryptedContent;
+            return content.started_at ? content.started_at * 1000 : log.created_at * 1000;
+        });
+        const earliest = new Date(Math.min(...dates));
+        return earliest.toISOString().split('T')[0];
+    }, [decryptedLogs]);
+
+    // Fetch preferred relays (NIP-65)
+    const fetchPreferredRelays = useCallback(async () => {
+        if (!pool || !pubkey) return;
+
+        setIsRelayLoading(true);
+        try {
+            const event = await pool.get(DEFAULT_RELAYS, {
+                kinds: [KINDS.RELAY_LIST],
+                authors: [pubkey],
+            });
+
+            if (event) {
+                // Extract relay URLs from 'r' tags
+                const relays = event.tags
+                    .filter((t: string[]) => t[0] === 'r')
+                    .map((t: string[]) => t[1]);
+                setPreferredRelays(relays);
+            } else {
+                // No NIP-65 event found, use default relays
+                setPreferredRelays([...DEFAULT_RELAYS]);
+            }
+        } catch (error) {
+            console.error('Error fetching preferred relays:', error);
+            // Fallback to default relays on error
+            setPreferredRelays([...DEFAULT_RELAYS]);
+        } finally {
+            setIsRelayLoading(false);
+        }
+    }, [pool, pubkey]);
+
+    // Publish updated relay list
+    const publishRelayList = async (relays: string[]) => {
+        if (!pool || !pubkey || !signEvent) return;
+
+        const event = {
+            kind: KINDS.RELAY_LIST,
+            created_at: Math.floor(Date.now() / 1000),
+            tags: relays.map(url => ['r', url]),
+            content: '',
+        };
+
+        const signedEvent = await signEvent(event);
+        await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedEvent));
+        setPreferredRelays(relays);
+    };
+
+    // Add a new relay
+    const handleAddRelay = async () => {
+        const url = newRelayUrl.trim();
+        setRelayError(null);
+
+        // Validate URL format
+        if (!url.startsWith('wss://')) {
+            setRelayError('Relay URL must start with wss://');
+            return;
+        }
+
+        // Check for duplicates
+        if (preferredRelays.includes(url)) {
+            setRelayError('This relay is already in your list');
+            return;
+        }
+
+        setIsRelayLoading(true);
+        try {
+            await publishRelayList([...preferredRelays, url]);
+            setNewRelayUrl('');
+            setIsAddingRelay(false);
+        } catch (error) {
+            console.error('Error adding relay:', error);
+            setRelayError('Failed to add relay');
+        } finally {
+            setIsRelayLoading(false);
+        }
+    };
+
+    // Remove a relay (with confirmation like route delete)
+    const handleRemoveRelay = async (url: string) => {
+        if (!confirm(`Are you sure you want to remove this relay?\n\n${url}\n\nThis action cannot be undone.`)) return;
+
+        setIsRelayLoading(true);
+        try {
+            await publishRelayList(preferredRelays.filter(r => r !== url));
+        } catch (error) {
+            console.error('Error removing relay:', error);
+            alert('Failed to remove relay');
+        } finally {
+            setIsRelayLoading(false);
+        }
+    };
+
+    // Fetch preferred relays when modal opens
+    useEffect(() => {
+        if (isOpen && pubkey) {
+            fetchPreferredRelays();
+        }
+    }, [isOpen, pubkey, fetchPreferredRelays]);
+
     return (
         <>
             <button
@@ -215,9 +425,177 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                             </p>
                         </div>
 
+                        {/* Preferred Relays Section */}
+                        <div className="space-y-4">
+                            <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-white/20 ml-2">Preferred Relays</h4>
+                            <div className="space-y-0.5 rounded-[2rem] overflow-hidden bg-zinc-50 dark:bg-white/[0.03] border border-black/5 dark:border-white/5">
+                                <button
+                                    onClick={() => setShowPreferredRelays(!showPreferredRelays)}
+                                    className="w-full p-5 flex items-center justify-between transition-colors"
+                                >
+                                    <div className="flex items-center gap-3">
+                                        <div className="p-2.5 rounded-xl bg-green-500/10 dark:bg-green-500/20 text-green-500 dark:text-green-400"><Radio size={20} /></div>
+                                        <span className="font-semibold text-sm text-zinc-700 dark:text-white">Manage Relays ({preferredRelays.length})</span>
+                                    </div>
+                                    <span className="text-xs text-zinc-400 dark:text-white/40">
+                                        {showPreferredRelays ? 'Hide' : 'Show'}
+                                    </span>
+                                </button>
+
+                                {showPreferredRelays && (
+                                    <>
+                                        <div className="h-[1px] bg-black/5 dark:bg-white/5 mx-4" />
+                                        <div className="p-4 space-y-2">
+                                            {isRelayLoading && preferredRelays.length === 0 ? (
+                                                <div className="text-center text-zinc-400 dark:text-white/40 text-sm py-4">
+                                                    Loading...
+                                                </div>
+                                            ) : (
+                                                <>
+                                                    {preferredRelays.map((relay) => (
+                                                        <div
+                                                            key={relay}
+                                                            className="flex items-center justify-between p-3 rounded-xl bg-white dark:bg-white/5 border border-black/5 dark:border-white/10"
+                                                        >
+                                                            <div className="flex items-center gap-3 flex-1 min-w-0">
+                                                                <Radio size={16} className="text-green-500 shrink-0" />
+                                                                <span className="text-sm text-zinc-700 dark:text-white truncate">
+                                                                    {relay.replace('wss://', '')}
+                                                                </span>
+                                                            </div>
+                                                            <button
+                                                                onClick={() => handleRemoveRelay(relay)}
+                                                                disabled={preferredRelays.length <= 1}
+                                                                className="p-2 rounded-lg text-zinc-400 dark:text-white/40 active:scale-95 transition-transform disabled:opacity-30 disabled:cursor-not-allowed"
+                                                                title={preferredRelays.length <= 1 ? 'At least one relay is required' : 'Remove relay'}
+                                                            >
+                                                                <Trash2 size={16} />
+                                                            </button>
+                                                        </div>
+                                                    ))}
+                                                    <button
+                                                        onClick={() => {
+                                                            setIsAddingRelay(true);
+                                                            setRelayError(null);
+                                                            setNewRelayUrl('');
+                                                        }}
+                                                        className="w-full p-3 flex items-center justify-center gap-2 rounded-xl bg-blue-500/10 dark:bg-blue-500/20 border border-blue-500/20 transition-colors active:scale-[0.98]"
+                                                    >
+                                                        <Plus size={16} className="text-blue-500" />
+                                                        <span className="text-sm font-medium text-blue-600 dark:text-blue-400">Add Relay</span>
+                                                    </button>
+                                                </>
+                                            )}
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+                            <p className="text-xs text-zinc-400 dark:text-white/30 mt-2 ml-2 leading-relaxed">
+                                📡 Relay addresses listed here tell Parlens where to store and look for data. The app requires a connection to at least one relay to work.
+                            </p>
+                        </div>
+
+                        {/* Add Relay Modal */}
+                        {isAddingRelay && (
+                            <div
+                                className="fixed inset-0 z-[3000] flex items-center justify-center bg-black/70 backdrop-blur-sm"
+                                onClick={() => setIsAddingRelay(false)}
+                            >
+                                <div
+                                    className="w-[90%] max-w-sm bg-white dark:bg-[#2c2c2e] rounded-2xl p-5 space-y-4 animate-in zoom-in-95 duration-200"
+                                    onClick={(e) => e.stopPropagation()}
+                                >
+                                    <h3 className="text-lg font-bold text-zinc-900 dark:text-white">
+                                        Add Relay
+                                    </h3>
+                                    <div className="space-y-2">
+                                        <input
+                                            type="text"
+                                            value={newRelayUrl}
+                                            onChange={(e) => {
+                                                setNewRelayUrl(e.target.value);
+                                                setRelayError(null);
+                                            }}
+                                            placeholder="wss://relay.example.com"
+                                            className="w-full h-12 rounded-xl bg-zinc-100 dark:bg-white/5 border border-black/5 dark:border-white/10 px-4 text-zinc-900 dark:text-white placeholder:text-zinc-400 dark:placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            autoFocus
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter') handleAddRelay();
+                                                if (e.key === 'Escape') setIsAddingRelay(false);
+                                            }}
+                                        />
+                                        {relayError && (
+                                            <p className="text-xs text-red-500 ml-1">{relayError}</p>
+                                        )}
+                                    </div>
+                                    <div className="flex gap-3">
+                                        <button
+                                            onClick={() => setIsAddingRelay(false)}
+                                            className="flex-1 h-11 rounded-xl bg-zinc-200 dark:bg-white/10 text-zinc-600 dark:text-white/70 font-medium transition-all active:scale-95"
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            onClick={handleAddRelay}
+                                            disabled={isRelayLoading || !newRelayUrl.trim()}
+                                            className="flex-1 h-11 rounded-xl bg-[#007AFF] text-white font-medium disabled:opacity-50 transition-all active:scale-95"
+                                        >
+                                            {isRelayLoading ? '...' : 'Add'}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
 
                         <div className="space-y-4">
                             <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-white/20 ml-2">Parking History</h4>
+
+                            {/* Filters */}
+                            <div className="flex items-center gap-2 mb-2">
+                                {/* Vehicle Type Filter */}
+                                <div className="flex gap-0.5 p-1 bg-zinc-100 dark:bg-white/5 rounded-xl shrink-0">
+                                    {(['all', 'bicycle', 'motorcycle', 'car'] as const).map((type) => (
+                                        <button
+                                            key={type}
+                                            onClick={() => setFilterType(type)}
+                                            className={`px-2 py-1 rounded-lg text-xs font-medium transition-all ${filterType === type
+                                                ? 'bg-white dark:bg-white/20 text-zinc-900 dark:text-white shadow-sm'
+                                                : 'text-zinc-500 dark:text-white/40'
+                                                }`}
+                                        >
+                                            {type === 'all' ? 'All' : type === 'bicycle' ? '🚲' : type === 'motorcycle' ? '🏍️' : '🚗'}
+                                        </button>
+                                    ))}
+                                </div>
+                                {/* Date Range Filter */}
+                                <div className="flex items-center gap-1 shrink-0">
+                                    <input
+                                        type="date"
+                                        value={filterFromDate}
+                                        onChange={(e) => setFilterFromDate(e.target.value)}
+                                        min={earliestLogDate}
+                                        max={filterToDate || undefined}
+                                        className="h-[28px] px-1 bg-zinc-100 dark:bg-white/5 rounded-lg text-[10px] text-zinc-700 dark:text-white/80 border-none outline-none"
+                                    />
+                                    <span className="text-zinc-400 dark:text-white/30 text-[10px]">–</span>
+                                    <input
+                                        type="date"
+                                        value={filterToDate}
+                                        onChange={(e) => setFilterToDate(e.target.value)}
+                                        min={filterFromDate || earliestLogDate}
+                                        className="h-[28px] px-1 bg-zinc-100 dark:bg-white/5 rounded-lg text-[10px] text-zinc-700 dark:text-white/80 border-none outline-none"
+                                    />
+                                    {(filterFromDate || filterToDate) && (
+                                        <button
+                                            onClick={() => { setFilterFromDate(''); setFilterToDate(''); }}
+                                            className="h-[28px] w-[28px] flex items-center justify-center bg-zinc-100 dark:bg-white/5 rounded-lg text-zinc-500 dark:text-white/50"
+                                        >
+                                            <X size={12} />
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
 
                             {setHistorySpots && (
                                 <div className="flex items-center justify-between p-4 bg-zinc-50 dark:bg-white/5 rounded-[2rem] border border-black/5 dark:border-white/5 mb-4">
@@ -235,17 +613,20 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                             )}
 
                             <div className="space-y-2">
-                                {decryptedLogs.length > 0 ? (
-                                    decryptedLogs.map((log) => {
+                                {filteredLogs.length > 0 ? (
+                                    filteredLogs.map((log) => {
                                         const content = log.decryptedContent;
                                         const currencySymbol = getCurrencySymbol(content.currency || 'USD');
                                         const startTime = content.started_at ? new Date(content.started_at * 1000) : null;
                                         const endTime = content.finished_at ? new Date(content.finished_at * 1000) : new Date(log.created_at * 1000);
                                         const coords = content.lat && content.lon ? `${content.lat.toFixed(5)}, ${content.lon.toFixed(5)}` : null;
+                                        const duration = formatDuration(startTime, endTime);
+                                        const dateStr = startTime ? startTime.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : endTime.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
                                         // Read type from encrypted content (not public tags for privacy)
                                         const type = content.type || 'car';
                                         const typeEmoji = type === 'bicycle' ? '🚲' : type === 'motorcycle' ? '🏍️' : '🚗';
+                                        const isEditingNote = editingNoteLogId === log.id;
 
                                         return (
                                             <div key={log.id} className="p-5 rounded-[2rem] bg-zinc-50 dark:bg-white/[0.03] space-y-3 border border-black/5 dark:border-white/5 text-zinc-900 dark:text-white">
@@ -266,29 +647,84 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                                                     </div>
                                                 </div>
 
+                                                {/* Duration and Date */}
+                                                <div className="flex items-center gap-4 text-xs">
+                                                    <div className="flex items-center gap-2 text-zinc-500 dark:text-white/50">
+                                                        <Clock size={12} className="text-green-500 dark:text-green-400" />
+                                                        <span className="font-semibold">{duration}</span>
+                                                    </div>
+                                                    <span className="text-zinc-400 dark:text-white/30">{dateStr}</span>
+                                                </div>
+
                                                 {coords && (
                                                     <div className="flex items-center gap-2 text-xs text-zinc-400 dark:text-white/40">
-                                                        <MapPin size={12} className="text-blue-500 dark:text-blue-400" />
+                                                        <MapPin size={12} className="text-[#007AFF]" />
                                                         <span className="font-mono">{coords}</span>
                                                     </div>
                                                 )}
 
-                                                <div className="flex items-center gap-2 text-xs text-zinc-400 dark:text-white/30">
-                                                    <Clock size={12} className="text-green-500 dark:text-green-400" />
-                                                    <div className="space-x-1">
-                                                        {startTime && (
-                                                            <span>Start: {startTime.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} {startTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                                                        )}
-                                                        <span className="text-black/10 dark:text-white/10">→</span>
-                                                        <span>End: {endTime.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} {endTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                                                    </div>
+                                                {/* Note Section */}
+                                                <div className="flex items-center gap-2 text-xs text-zinc-500 dark:text-white/50 bg-zinc-100 dark:bg-white/5 rounded-lg px-3 py-2">
+                                                    {isEditingNote ? (
+                                                        <>
+                                                            <input
+                                                                type="text"
+                                                                value={editingNoteValue}
+                                                                onChange={(e) => setEditingNoteValue(e.target.value)}
+                                                                placeholder="Add note"
+                                                                className="flex-1 min-w-0 text-sm bg-white dark:bg-white/10 rounded-lg px-2 py-1 text-zinc-700 dark:text-white border border-[#007AFF]"
+                                                                autoFocus
+                                                                onFocus={(e) => e.currentTarget.select()}
+                                                                onKeyDown={(e) => {
+                                                                    if (e.key === 'Enter') handleUpdateNote(log, editingNoteValue);
+                                                                    if (e.key === 'Escape') setEditingNoteLogId(null);
+                                                                }}
+                                                            />
+                                                            <button
+                                                                onClick={() => handleUpdateNote(log, editingNoteValue)}
+                                                                disabled={isSavingNote}
+                                                                className="p-2 rounded-xl text-green-500 bg-green-500/10 transition-colors disabled:opacity-50"
+                                                            >
+                                                                <Check size={16} />
+                                                            </button>
+                                                            <button
+                                                                onClick={() => setEditingNoteLogId(null)}
+                                                                className="p-2 rounded-xl text-zinc-400 bg-zinc-500/10 transition-colors"
+                                                            >
+                                                                <X size={16} />
+                                                            </button>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <span
+                                                                className={`flex-1 cursor-pointer ${content.note ? '' : 'text-zinc-400 dark:text-white/30'}`}
+                                                                onClick={() => {
+                                                                    setEditingNoteLogId(log.id);
+                                                                    setEditingNoteValue(content.note || '');
+                                                                }}
+                                                            >
+                                                                {content.note || 'Add note'}
+                                                            </span>
+                                                            <button
+                                                                onClick={() => {
+                                                                    setEditingNoteLogId(log.id);
+                                                                    setEditingNoteValue(content.note || '');
+                                                                }}
+                                                                className="p-1 text-zinc-400 dark:text-white/30 shrink-0"
+                                                            >
+                                                                <Pencil size={12} />
+                                                            </button>
+                                                        </>
+                                                    )}
                                                 </div>
                                             </div>
                                         );
                                     })
                                 ) : (
                                     <div className="p-10 rounded-[2.5rem] border-2 border-dashed border-black/5 dark:border-white/5 text-center">
-                                        <p className="text-sm font-medium text-zinc-400 dark:text-white/10">No recent activity</p>
+                                        <p className="text-sm font-medium text-zinc-400 dark:text-white/10">
+                                            {decryptedLogs.length > 0 ? 'No entries match filters' : 'No recent activity'}
+                                        </p>
                                     </div>
                                 )}
                             </div>

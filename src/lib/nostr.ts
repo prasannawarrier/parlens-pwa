@@ -2,6 +2,7 @@ export const KINDS = {
     PARKING_LOG: 31417, // My Parking Log (Parameterized Replaceable for history)
     OPEN_SPOT_BROADCAST: 31714, // Open Spot Broadcast (Addressable/Replaceable with expiration)
     ROUTE_LOG: 34171, // My Route Log (Addressable for saved routes)
+    RELAY_LIST: 10002, // NIP-65 Relay List Metadata (Replaceable)
 };
 
 export const DEFAULT_RELAYS = [
@@ -35,6 +36,7 @@ export interface ParkingLogContent {
     finished_at?: number; // End timestamp
     fee?: string; // e.g., "10"
     currency?: string; // e.g., "USD"
+    note?: string; // User-added note for this parking entry
 }
 
 // Waypoint for route storage
