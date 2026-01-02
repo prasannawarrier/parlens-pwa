@@ -544,14 +544,14 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                             <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-white/20 ml-2">Parking History</h4>
 
                             {/* Filters */}
-                            <div className="flex items-center gap-2 mb-2">
+                            <div className="flex items-center gap-2 mb-3">
                                 {/* Vehicle Type Filter */}
-                                <div className="flex gap-0.5 p-1 bg-zinc-100 dark:bg-white/5 rounded-xl shrink-0">
+                                <div className="flex gap-1 p-1 bg-zinc-100 dark:bg-white/5 rounded-xl shrink-0">
                                     {(['all', 'bicycle', 'motorcycle', 'car'] as const).map((type) => (
                                         <button
                                             key={type}
                                             onClick={() => setFilterType(type)}
-                                            className={`px-2 py-1 rounded-lg text-xs font-medium transition-all ${filterType === type
+                                            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${filterType === type
                                                 ? 'bg-white dark:bg-white/20 text-zinc-900 dark:text-white shadow-sm'
                                                 : 'text-zinc-500 dark:text-white/40'
                                                 }`}
@@ -561,16 +561,18 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                                     ))}
                                 </div>
                                 {/* Date Range Filter */}
-                                <select
-                                    value={filterDateRange}
-                                    onChange={(e) => setFilterDateRange(e.target.value as typeof filterDateRange)}
-                                    className="h-[28px] px-2 bg-zinc-100 dark:bg-white/5 rounded-xl text-xs font-medium text-zinc-700 dark:text-white/80 border-none outline-none appearance-none"
-                                >
-                                    <option value="all">All Time</option>
-                                    <option value="today">Today</option>
-                                    <option value="week">This Week</option>
-                                    <option value="month">This Month</option>
-                                </select>
+                                <div className="p-1 bg-zinc-100 dark:bg-white/5 rounded-xl shrink-0">
+                                    <select
+                                        value={filterDateRange}
+                                        onChange={(e) => setFilterDateRange(e.target.value as typeof filterDateRange)}
+                                        className="px-2 py-1.5 rounded-lg text-sm font-medium text-zinc-700 dark:text-white/80 bg-transparent border-none outline-none appearance-none cursor-pointer"
+                                    >
+                                        <option value="all">All Time</option>
+                                        <option value="today">Today</option>
+                                        <option value="week">This Week</option>
+                                        <option value="month">This Month</option>
+                                    </select>
+                                </div>
                             </div>
 
                             {setHistorySpots && (
