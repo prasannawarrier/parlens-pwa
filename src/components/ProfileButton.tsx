@@ -36,8 +36,7 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
 
     // Parking History filters
     const [filterType, setFilterType] = useState<'all' | 'bicycle' | 'motorcycle' | 'car'>('all');
-    const [filterFromDate, setFilterFromDate] = useState<string>('');
-    const [filterToDate, setFilterToDate] = useState<string>('');
+    const [filterDateRange, setFilterDateRange] = useState<'all' | 'today' | 'week' | 'month'>('all');
 
     // Note editing state
     const [editingNoteLogId, setEditingNoteLogId] = useState<string | null>(null);
@@ -221,35 +220,28 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
             // Type filter
             if (filterType !== 'all' && type !== filterType) return false;
 
-            // Date range filter
-            const logDate = content.started_at ? new Date(content.started_at * 1000) : new Date(log.created_at * 1000);
+            // Relative date filter
+            if (filterDateRange !== 'all') {
+                const logDate = content.started_at ? new Date(content.started_at * 1000) : new Date(log.created_at * 1000);
+                const now = new Date();
+                const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-            if (filterFromDate) {
-                const fromDate = new Date(filterFromDate);
-                fromDate.setHours(0, 0, 0, 0);
-                if (logDate < fromDate) return false;
-            }
-
-            if (filterToDate) {
-                const toDate = new Date(filterToDate);
-                toDate.setHours(23, 59, 59, 999);
-                if (logDate > toDate) return false;
+                if (filterDateRange === 'today' && logDate < startOfToday) return false;
+                if (filterDateRange === 'week') {
+                    const weekAgo = new Date(startOfToday);
+                    weekAgo.setDate(weekAgo.getDate() - 7);
+                    if (logDate < weekAgo) return false;
+                }
+                if (filterDateRange === 'month') {
+                    const monthAgo = new Date(startOfToday);
+                    monthAgo.setMonth(monthAgo.getMonth() - 1);
+                    if (logDate < monthAgo) return false;
+                }
             }
 
             return true;
         });
-    }, [decryptedLogs, filterType, filterFromDate, filterToDate]);
-
-    // Get earliest parking date for min constraint on date filters
-    const earliestLogDate = useMemo(() => {
-        if (decryptedLogs.length === 0) return '';
-        const dates = decryptedLogs.map(log => {
-            const content = log.decryptedContent;
-            return content.started_at ? content.started_at * 1000 : log.created_at * 1000;
-        });
-        const earliest = new Date(Math.min(...dates));
-        return earliest.toISOString().split('T')[0];
-    }, [decryptedLogs]);
+    }, [decryptedLogs, filterType, filterDateRange]);
 
     // Fetch preferred relays (NIP-65)
     const fetchPreferredRelays = useCallback(async () => {
@@ -569,32 +561,16 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                                     ))}
                                 </div>
                                 {/* Date Range Filter */}
-                                <div className="flex items-center gap-1 shrink-0">
-                                    <input
-                                        type="date"
-                                        value={filterFromDate}
-                                        onChange={(e) => setFilterFromDate(e.target.value)}
-                                        min={earliestLogDate}
-                                        max={filterToDate || undefined}
-                                        className="h-[28px] px-1 bg-zinc-100 dark:bg-white/5 rounded-lg text-[10px] text-zinc-700 dark:text-white/80 border-none outline-none"
-                                    />
-                                    <span className="text-zinc-400 dark:text-white/30 text-[10px]">–</span>
-                                    <input
-                                        type="date"
-                                        value={filterToDate}
-                                        onChange={(e) => setFilterToDate(e.target.value)}
-                                        min={filterFromDate || earliestLogDate}
-                                        className="h-[28px] px-1 bg-zinc-100 dark:bg-white/5 rounded-lg text-[10px] text-zinc-700 dark:text-white/80 border-none outline-none"
-                                    />
-                                    {(filterFromDate || filterToDate) && (
-                                        <button
-                                            onClick={() => { setFilterFromDate(''); setFilterToDate(''); }}
-                                            className="h-[28px] w-[28px] flex items-center justify-center bg-zinc-100 dark:bg-white/5 rounded-lg text-zinc-500 dark:text-white/50"
-                                        >
-                                            <X size={12} />
-                                        </button>
-                                    )}
-                                </div>
+                                <select
+                                    value={filterDateRange}
+                                    onChange={(e) => setFilterDateRange(e.target.value as typeof filterDateRange)}
+                                    className="h-[28px] px-2 bg-zinc-100 dark:bg-white/5 rounded-xl text-xs font-medium text-zinc-700 dark:text-white/80 border-none outline-none appearance-none"
+                                >
+                                    <option value="all">All Time</option>
+                                    <option value="today">Today</option>
+                                    <option value="week">This Week</option>
+                                    <option value="month">This Month</option>
+                                </select>
                             </div>
 
                             {setHistorySpots && (
