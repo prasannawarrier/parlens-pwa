@@ -689,42 +689,42 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                 {selectedListing ? (
                     // Spot View
                     <div className="flex-1 flex flex-col p-4 bg-zinc-50 dark:bg-black/50 overflow-hidden">
-                        {/* Dropdown Filters - Single Line */}
-                        <div className="flex gap-2 mb-4 items-center">
-                            {/* Vehicle Type Filter - Emoji only */}
+                        {/* Dropdown Filters - Same size, full row */}
+                        <div className="flex gap-2 mb-4">
+                            {/* Vehicle Type Filter */}
                             <select
                                 value={vehicleFilter}
                                 onChange={e => setVehicleFilter(e.target.value as any)}
-                                className="px-3 py-2 bg-white dark:bg-zinc-800 border border-black/10 dark:border-white/20 rounded-xl text-sm font-medium text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2212%22%20height%3D%2212%22%20viewBox%3D%220%200%2012%2012%22%3E%3Cpath%20fill%3D%22%23888%22%20d%3D%22M2%204l4%204%204-4z%22%2F%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[right_0.5rem_center] pr-7"
+                                className="flex-1 px-3 py-2 bg-white dark:bg-zinc-800 border border-black/10 dark:border-white/20 rounded-xl text-sm font-medium text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2212%22%20height%3D%2212%22%20viewBox%3D%220%200%2012%2012%22%3E%3Cpath%20fill%3D%22%23888%22%20d%3D%22M2%204l4%204%204-4z%22%2F%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[right_0.5rem_center] pr-7"
                             >
-                                <option value="all">All</option>
-                                <option value="car">🚗</option>
-                                <option value="motorcycle">🏍️</option>
-                                <option value="bicycle">🚲</option>
+                                <option value="all">All Types</option>
+                                <option value="car">🚗 Car</option>
+                                <option value="motorcycle">🏍️ Motorcycle</option>
+                                <option value="bicycle">🚲 Bicycle</option>
                             </select>
 
                             {/* Floor Filter */}
                             <select
                                 value={floorFilter}
                                 onChange={e => setFloorFilter(e.target.value)}
-                                className="px-3 py-2 bg-white dark:bg-zinc-800 border border-black/10 dark:border-white/20 rounded-xl text-sm font-medium text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2212%22%20height%3D%2212%22%20viewBox%3D%220%200%2012%2012%22%3E%3Cpath%20fill%3D%22%23888%22%20d%3D%22M2%204l4%204%204-4z%22%2F%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[right_0.5rem_center] pr-7"
+                                className="flex-1 px-3 py-2 bg-white dark:bg-zinc-800 border border-black/10 dark:border-white/20 rounded-xl text-sm font-medium text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2212%22%20height%3D%2212%22%20viewBox%3D%220%200%2012%2012%22%3E%3Cpath%20fill%3D%22%23888%22%20d%3D%22M2%204l4%204%204-4z%22%2F%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[right_0.5rem_center] pr-7"
                             >
-                                <option value="all">Floor</option>
+                                <option value="all">All Floors</option>
                                 {uniqueFloors.map(floor => (
                                     <option key={floor} value={floor}>{floor}</option>
                                 ))}
                             </select>
 
-                            {/* Status Filter - Colored circles */}
+                            {/* Status Filter */}
                             <select
                                 value={statusFilter}
                                 onChange={e => setStatusFilter(e.target.value as any)}
-                                className="px-3 py-2 bg-white dark:bg-zinc-800 border border-black/10 dark:border-white/20 rounded-xl text-sm font-medium text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2212%22%20height%3D%2212%22%20viewBox%3D%220%200%2012%2012%22%3E%3Cpath%20fill%3D%22%23888%22%20d%3D%22M2%204l4%204%204-4z%22%2F%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[right_0.5rem_center] pr-7"
+                                className="flex-1 px-3 py-2 bg-white dark:bg-zinc-800 border border-black/10 dark:border-white/20 rounded-xl text-sm font-medium text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2212%22%20height%3D%2212%22%20viewBox%3D%220%200%2012%2012%22%3E%3Cpath%20fill%3D%22%23888%22%20d%3D%22M2%204l4%204%204-4z%22%2F%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[right_0.5rem_center] pr-7"
                             >
-                                <option value="all">Status</option>
-                                <option value="open">🟢</option>
-                                <option value="occupied">🔴</option>
-                                <option value="closed">⚪</option>
+                                <option value="all">All Status</option>
+                                <option value="open">🟢 Open</option>
+                                <option value="occupied">🔴 Occupied</option>
+                                <option value="closed">⚪ Closed</option>
                             </select>
                         </div>
 
@@ -1687,18 +1687,6 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
                             <div className="w-10"></div> {/* Spacer for alignment */}
                         </div>
 
-                        {/* Quick Note Input (Always available at top of log view) */}
-                        <div className="flex gap-2">
-                            <input
-                                value={quickNote}
-                                onChange={e => setQuickNote(e.target.value)}
-                                placeholder="Add note to latest log..."
-                                className="flex-1 p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white text-sm placeholder:text-zinc-500"
-                            />
-                            <button onClick={() => addQuickNote()} disabled={!quickNote.trim()} className="px-4 py-3 bg-blue-500 text-white font-bold rounded-xl disabled:opacity-50">
-                                <Plus size={20} />
-                            </button>
-                        </div>
 
                         <div className="flex-1 overflow-y-auto space-y-3 min-h-[300px]">
                             {logsLoading ? (
@@ -1733,32 +1721,31 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
                                                 {authorizer && <div>Auth: {authorizer.slice(0, 8)}...</div>}
                                             </div>
 
-                                            {/* Log Item Note Input Toggle */}
-                                            <div className="flex justify-end mt-1">
-                                                <button
-                                                    onClick={() => {
-                                                        const el = document.getElementById(`note-input-${log.id}`);
-                                                        if (el) el.focus();
-                                                    }}
-                                                    className="text-[10px] text-[#007AFF] font-bold uppercase tracking-wider hover:underline"
-                                                >
-                                                    + Add Note
-                                                </button>
-                                            </div>
-
                                             {/* Note Input for specific log */}
                                             <div className="mt-2 flex gap-2">
                                                 <input
                                                     id={`note-input-${log.id}`}
-                                                    placeholder="Add private note..."
-                                                    className="flex-1 p-2 bg-zinc-100 dark:bg-white/10 rounded-lg text-xs text-zinc-900 dark:text-white border-none focus:ring-1 focus:ring-blue-500 placeholder:text-zinc-500"
+                                                    placeholder="Add a note"
+                                                    className="flex-1 p-2.5 bg-white dark:bg-white/10 rounded-xl text-sm text-zinc-900 dark:text-white border border-black/5 dark:border-white/10 focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder:text-zinc-400"
                                                     onKeyDown={(e) => {
-                                                        if (e.key === 'Enter') {
+                                                        if (e.key === 'Enter' && (e.target as HTMLInputElement).value.trim()) {
                                                             addQuickNote(log.id, (e.target as HTMLInputElement).value);
                                                             (e.target as HTMLInputElement).value = '';
                                                         }
                                                     }}
                                                 />
+                                                <button
+                                                    onClick={() => {
+                                                        const input = document.getElementById(`note-input-${log.id}`) as HTMLInputElement;
+                                                        if (input && input.value.trim()) {
+                                                            addQuickNote(log.id, input.value);
+                                                            input.value = '';
+                                                        }
+                                                    }}
+                                                    className="p-2.5 bg-[#007AFF] text-white rounded-xl"
+                                                >
+                                                    <Plus size={20} />
+                                                </button>
                                             </div>
 
                                             {/* Notes attached to this log */}
@@ -1815,10 +1802,17 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
                                 {/* Use LATEST log status if available, fallback to props */}
                                 {(() => {
                                     const latestLogStatus = logs.length > 0 ? logs[0].tags.find((t: string[]) => t[0] === 'status')?.[1] : null;
-                                    const displayStatus = latestLogStatus || status?.status || 'open';
+                                    const displayStatus = latestLogStatus || status?.status;
+
+                                    if (!displayStatus && logsLoading) {
+                                        return <div className="text-lg font-bold text-zinc-400 animate-pulse">...</div>;
+                                    }
+
+                                    const finalStatus = displayStatus || 'open';
+
                                     return (
-                                        <div className={`text-lg font-bold capitalize ${displayStatus === 'occupied' ? 'text-red-500' : displayStatus === 'closed' ? 'text-zinc-500' : 'text-green-500'}`}>
-                                            {displayStatus}
+                                        <div className={`text-lg font-bold capitalize ${finalStatus === 'occupied' ? 'text-red-500' : finalStatus === 'closed' ? 'text-zinc-500' : 'text-green-500'}`}>
+                                            {finalStatus}
                                         </div>
                                     );
                                 })()}
@@ -1870,7 +1864,7 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
 
                         {isManager && (
                             <div className="space-y-4 pt-2">
-                                <div className="flex gap-2 p-1 bg-zinc-100 dark:bg-white/5 rounded-2xl">
+                                <div className="flex gap-2">
                                     <button onClick={() => update('open')} className="flex-1 py-3 bg-green-500/10 border border-green-500/20 text-green-600 dark:text-green-400 font-bold text-sm rounded-xl active:scale-95 transition-all">Open</button>
                                     <button onClick={() => update('occupied')} className="flex-1 py-3 bg-red-500/10 border border-red-500/20 text-red-500 font-bold text-sm rounded-xl active:scale-95 transition-all">Occupied</button>
                                     <button onClick={() => update('closed')} className="flex-1 py-3 bg-zinc-500/10 border border-zinc-500/20 text-zinc-500 dark:text-zinc-400 font-bold text-sm rounded-xl active:scale-95 transition-all">Closed</button>
@@ -1918,7 +1912,7 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
                                         }
 
                                         onStatusChange(); onClose();
-                                    }} className="flex-1 py-3 bg-red-500/10 border border-red-500/20 text-red-500 font-bold text-sm flex items-center justify-center gap-2 rounded-xl active:scale-95 transition-transform">
+                                    }} className="flex-1 py-3 text-red-500 font-bold text-sm flex items-center justify-center gap-2 rounded-xl active:scale-95 transition-transform">
                                         <Trash2 size={16} /> Delete
                                     </button>
                                 </div>
