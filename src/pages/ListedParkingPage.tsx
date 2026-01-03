@@ -327,7 +327,100 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
 
     useEffect(() => {
         fetchListings();
-    }, [fetchListings, activeTab]); // Reload when tab changes
+    }, [fetchListings]); // Fetch once on mount - tab filtering is done client-side
+
+    // Real-time subscription for listing metadata updates (NEW listings)
+    useEffect(() => {
+        if (!pool) return;
+
+        console.log('[Parlens] Setting up real-time listing subscription');
+
+        const sub = pool.subscribeMany(
+            DEFAULT_RELAYS,
+            [{
+                kinds: [KINDS.LISTED_PARKING_METADATA],
+                since: Math.floor(Date.now() / 1000) // Only new events from now
+            }] as any,
+            {
+                onevent(event: any) {
+                    // Filter out test events
+                    const d = event.tags.find((t: string[]) => t[0] === 'd')?.[1];
+                    if (!d || event.content === 'Parlens Relay Check' || d.startsWith('test-relay-check-')) return;
+
+                    console.log('[Parlens] New listing event received:', d);
+
+                    // Add or update in listings state
+                    setListings(prev => {
+                        const key = `${event.pubkey}:${d}`;
+                        const existingIndex = prev.findIndex(l => `${l.pubkey}:${l.d}` === key);
+
+                        const getTagValue = (name: string) => event.tags.find((t: string[]) => t[0] === name)?.[1] || '';
+                        const getTagValues = (name: string) => event.tags.filter((t: string[]) => t[0] === name).map((t: string[]) => t[1]);
+
+                        const owners = event.tags.filter((t: string[]) => t[0] === 'p' && t[2] === 'admin').map((t: string[]) => t[1]);
+                        const managers = event.tags.filter((t: string[]) => t[0] === 'p' && t[2] === 'write').map((t: string[]) => t[1]);
+                        const members = event.tags.filter((t: string[]) => t[0] === 'p' && t[2] === 'read').map((t: string[]) => t[1]);
+                        const relays = getTagValues('relay');
+                        const fp = getTagValue('floor_plan');
+                        const floorPlan = fp ? JSON.parse(fp) : undefined;
+
+                        let rates;
+                        try {
+                            const ratesStr = getTagValue('rates');
+                            if (ratesStr) rates = JSON.parse(ratesStr);
+                        } catch { }
+
+                        const newListing: ListedParkingMetadata = {
+                            id: event.id,
+                            pubkey: event.pubkey,
+                            d: getTagValue('d'),
+                            listing_name: getTagValue('listing_name') || 'Unnamed',
+                            location: getTagValue('location'),
+                            g: getTagValue('g'),
+                            floors: getTagValue('floors'),
+                            floor_plan: floorPlan,
+                            rates,
+                            listing_type: (getTagValue('listing_type') as 'public' | 'private') || 'public',
+                            qr_type: (getTagValue('qr_type') as 'static' | 'dynamic') || 'static',
+                            status: (getTagValue('status') as 'open' | 'closed') || 'open',
+                            owners,
+                            managers,
+                            members,
+                            relays,
+                            local_area: getTagValue('local_area'),
+                            city: getTagValue('city'),
+                            zipcode: getTagValue('zipcode'),
+                            description: event.content,
+                            created_at: event.created_at,
+                            originalEvent: event
+                        };
+
+                        if (existingIndex >= 0 && prev[existingIndex]) {
+                            // Update existing if newer
+                            const existingCreatedAt = prev[existingIndex]?.created_at ?? 0;
+                            if (existingCreatedAt < event.created_at) {
+                                const updated = [...prev];
+                                updated[existingIndex] = newListing;
+                                return updated;
+                            }
+                            return prev;
+                        } else {
+                            // Add new listing
+                            return [newListing, ...prev];
+                        }
+                    });
+                },
+                oneose() {
+                    console.log('[Parlens] Listing subscription active');
+                }
+            }
+        );
+
+        return () => {
+            console.log('[Parlens] Closing listing subscription');
+            sub.close();
+        };
+    }, [pool]);
 
     // Real-time subscription for Kind 1714 status updates
     useEffect(() => {
@@ -1181,9 +1274,9 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
                         <div className="space-y-1">
                             <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Location</label>
                             <div className="flex gap-2">
-                                <input className="flex-1 p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400" placeholder="lat, lon" value={formData.location} onChange={e => setFormData({ ...formData, location: e.target.value })} />
-                                <button onClick={currentLocation ? () => setFormData({ ...formData, location: `${currentLocation[0].toFixed(6)}, ${currentLocation[1].toFixed(6)}` }) : undefined} className="p-3 bg-blue-500/10 text-blue-500 rounded-xl"><LocateFixed size={20} /></button>
-                                {onPickLocation && <button onClick={onPickLocation} className="p-3 bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20 rounded-xl"><MapPin size={20} /></button>}
+                                <input className="flex-1 min-w-0 p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400" placeholder="lat, lon" value={formData.location} onChange={e => setFormData({ ...formData, location: e.target.value })} />
+                                <button onClick={currentLocation ? () => setFormData({ ...formData, location: `${currentLocation[0].toFixed(6)}, ${currentLocation[1].toFixed(6)}` }) : undefined} className="shrink-0 p-3 bg-blue-500/10 text-blue-500 rounded-xl"><LocateFixed size={20} /></button>
+                                {onPickLocation && <button onClick={onPickLocation} className="shrink-0 p-3 bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20 rounded-xl"><MapPin size={20} /></button>}
                             </div>
                         </div>
 
@@ -1210,11 +1303,9 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
 
                         <div className="space-y-1">
                             <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Access Type</label>
-                            <div className="flex gap-2">
-                                <div className="flex gap-2">
-                                    <button onClick={() => setFormData({ ...formData, listing_type: 'public' })} className={`flex-1 p-3 rounded-xl font-bold transition-colors ${formData.listing_type === 'public' ? 'bg-green-500 text-white' : 'bg-zinc-100 text-zinc-600 dark:bg-white/5 dark:text-white hover:bg-zinc-200 dark:hover:bg-white/10'}`}>Public</button>
-                                    <button onClick={() => setFormData({ ...formData, listing_type: 'private' })} className={`flex-1 p-3 rounded-xl font-bold transition-colors ${formData.listing_type === 'private' ? 'bg-purple-500 text-white' : 'bg-zinc-100 text-zinc-600 dark:bg-white/5 dark:text-white hover:bg-zinc-200 dark:hover:bg-white/10'}`}>Private</button>
-                                </div>
+                            <div className="grid grid-cols-2 gap-2">
+                                <button onClick={() => setFormData({ ...formData, listing_type: 'public' })} className={`p-3 rounded-xl font-bold transition-colors ${formData.listing_type === 'public' ? 'bg-green-500 text-white' : 'bg-zinc-100 text-zinc-600 dark:bg-white/5 dark:text-white'}`}>Public</button>
+                                <button onClick={() => setFormData({ ...formData, listing_type: 'private' })} className={`p-3 rounded-xl font-bold transition-colors ${formData.listing_type === 'private' ? 'bg-purple-500 text-white' : 'bg-zinc-100 text-zinc-600 dark:bg-white/5 dark:text-white'}`}>Private</button>
                             </div>
                         </div>
 
@@ -1723,7 +1814,7 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
                                 <input
                                     value={quickNote}
                                     onChange={e => setQuickNote(e.target.value)}
-                                    placeholder="Add visible note..."
+                                    placeholder="Add a note"
                                     className="flex-1 p-2.5 bg-white dark:bg-white/10 rounded-xl text-sm text-zinc-900 dark:text-white border border-black/5 dark:border-white/10 focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder:text-zinc-400"
                                     onKeyDown={(e) => {
                                         if (e.key === 'Enter') addQuickNote();
@@ -1752,7 +1843,7 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
                                     onClick={() => setShowLogs(true)}
                                     className="w-full py-4 bg-blue-500/10 border border-blue-500/20 text-[#007AFF] font-bold rounded-2xl flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
                                 >
-                                    View Status Log & Notes ({logs.length}) <ChevronRight size={18} />
+                                    View Status Log <ChevronRight size={18} />
                                 </button>
 
                                 {/* Edit/Delete Buttons */}
