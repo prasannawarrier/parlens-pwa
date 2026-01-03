@@ -96,6 +96,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
     const [showAccessListModal, setShowAccessListModal] = useState<ListedParkingMetadata | null>(null);
     const [floorFilter, setFloorFilter] = useState<string>('all');
     const [statusFilter, setStatusFilter] = useState<'all' | 'open' | 'occupied' | 'closed'>('all');
+    const [displayedCount, setDisplayedCount] = useState(10); // Pagination - show 10 at a time
 
 
     // Fetch listings and their stats
@@ -153,6 +154,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                     floors: getTagValue('floors'),
                     floor_plan: floorPlan,
                     rates,
+                    total_spots: parseInt(getTagValue('total_spots')) || undefined,
                     listing_type: (getTagValue('listing_type') as 'public' | 'private') || 'public',
                     qr_type: (getTagValue('qr_type') as 'static' | 'dynamic') || 'static',
                     status: (getTagValue('status') as 'open' | 'closed') || 'open',
@@ -287,6 +289,13 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
 
             parsedSpots.sort((a, b) => parseInt(a.spot_number) - parseInt(b.spot_number));
             setSpots(parsedSpots);
+
+            // Verify spot count matches expected total
+            if (listing.total_spots && parsedSpots.length !== listing.total_spots) {
+                console.warn(`[Parlens] Spot count mismatch for "${listing.listing_name}": expected ${listing.total_spots}, fetched ${parsedSpots.length}`);
+            } else if (listing.total_spots) {
+                console.log(`[Parlens] All spots verified for "${listing.listing_name}": ${parsedSpots.length}/${listing.total_spots}`);
+            }
 
             // Fetch statuses for these specific spots
             const spotATags = parsedSpots.map(s => `${KINDS.PARKING_SPOT_LISTING}:${s.pubkey}:${s.d}`);
@@ -455,8 +464,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             DEFAULT_RELAYS,
             [{
                 kinds: [KINDS.LISTED_SPOT_LOG],
-                '#a': filterATags, // Efficient filter
-                since: Math.floor(Date.now() / 1000) - 3600
+                '#a': filterATags // Efficient filter - no since limit to get all status updates
             }] as any,
             {
                 onevent(event: any) {
@@ -504,7 +512,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             console.log('[Parlens] Closing real-time status subscription');
             sub.close();
         };
-    }, [pool, listings]);
+    }, [pool, spots]); // FIXED: Depend on spots, not listings
 
     useEffect(() => {
         if (selectedListing) {
@@ -557,7 +565,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
 
             if (!match) return false;
 
-            // Search filtering
+            // Search filtering with match scoring for sorting
             if (searchTerm) {
                 const term = searchTerm.toLowerCase();
                 const textMatch = l.listing_name.toLowerCase().includes(term) ||
@@ -570,10 +578,20 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
         });
 
         // Sorting Logic
-        // Default: Distance (asc) -> Open Spots (desc)
-        // Fallback: Open Spots (desc) -> Name (asc)
+        // 1. Search match priority (exact name match first)
+        // 2. Distance (if location + user location available)
+        // 3. Open Spots (desc)
         res.sort((a, b) => {
-            // 1. Distance (if location + user location available)
+            // Search match priority: exact name match > partial match
+            if (searchTerm) {
+                const term = searchTerm.toLowerCase();
+                const exactMatchA = a.listing_name.toLowerCase() === term;
+                const exactMatchB = b.listing_name.toLowerCase() === term;
+                if (exactMatchA && !exactMatchB) return -1;
+                if (!exactMatchA && exactMatchB) return 1;
+            }
+
+            // Distance (if location + user location available)
             if (currentLocation && a.location && b.location) {
                 const [latA, lonA] = a.location.split(',').map(n => parseFloat(n.trim()));
                 const [latB, lonB] = b.location.split(',').map(n => parseFloat(n.trim()));
@@ -585,7 +603,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                 }
             }
 
-            // 2. Open Spots (for selected filter or total)
+            // Open Spots (for selected filter or total)
             const statsA = listingStats.get(a.id);
             const statsB = listingStats.get(b.id);
 
@@ -600,12 +618,17 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
 
             if (openA !== openB) return openB - openA; // More open spots first
 
-            // 3. Name fallback
+            // Name fallback
             return a.listing_name.localeCompare(b.listing_name);
         });
 
         return res;
     }, [listings, activeTab, pubkey, searchTerm, listingStats, vehicleFilter, currentLocation]);
+
+    // Paginated listings for display (limited to displayedCount)
+    const paginatedListings = useMemo(() => {
+        return filteredListings.slice(0, displayedCount);
+    }, [filteredListings, displayedCount]);
 
     // Get unique floors for filter dropdown
     const uniqueFloors = useMemo(() => {
@@ -653,35 +676,12 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                     {!selectedListing && (
                         <button
                             onClick={() => setShowCreateForm(true)}
-                            className="flex items-center gap-2 p-3 md:px-4 md:py-2 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-full text-sm font-bold shadow-lg shadow-blue-500/20 active:scale-95 transition-transform"
+                            className="p-2 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-full shadow-lg shadow-blue-500/20 active:scale-95 transition-transform"
                         >
                             <Plus size={20} />
-                            <span className="hidden md:inline">Create Listing</span>
                         </button>
                     )}
                 </div>
-
-                {/* Search Row - Only for List View */}
-                {!selectedListing && (
-                    <div className="flex items-center gap-2 px-4 pb-3">
-                        <div className="relative flex-1">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={16} />
-                            <input
-                                value={searchTerm}
-                                onChange={e => setSearchTerm(e.target.value)}
-                                placeholder="Search listing name or location"
-                                className="w-full pl-10 pr-4 py-2.5 bg-zinc-100 dark:bg-white/10 rounded-xl text-sm font-medium text-zinc-900 dark:text-white border border-black/5 dark:border-white/10 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-all placeholder:text-zinc-400 dark:placeholder:text-white/40"
-                            />
-                        </div>
-                        <button
-                            onClick={() => fetchListings()}
-                            className="p-2.5 bg-zinc-100 dark:bg-white/10 border border-black/5 dark:border-white/10 rounded-xl active:scale-95 transition-all text-zinc-600 dark:text-white"
-                            title="Refresh Listings"
-                        >
-                            <RotateCcw size={20} />
-                        </button>
-                    </div>
-                )}
             </div>
 
             {/* Content Container */}
@@ -689,42 +689,42 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                 {selectedListing ? (
                     // Spot View
                     <div className="flex-1 flex flex-col p-4 bg-zinc-50 dark:bg-black/50 overflow-hidden">
-                        {/* Dropdown Filters */}
-                        <div className="flex gap-2 mb-4 flex-wrap">
-                            {/* Vehicle Type Filter */}
+                        {/* Dropdown Filters - Single Line */}
+                        <div className="flex gap-2 mb-4 items-center">
+                            {/* Vehicle Type Filter - Emoji only */}
                             <select
                                 value={vehicleFilter}
                                 onChange={e => setVehicleFilter(e.target.value as any)}
-                                className="px-3 py-2 bg-white dark:bg-white/10 border border-black/10 dark:border-white/10 rounded-xl text-sm font-medium text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                className="px-3 py-2 bg-white dark:bg-zinc-800 border border-black/10 dark:border-white/20 rounded-xl text-sm font-medium text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2212%22%20height%3D%2212%22%20viewBox%3D%220%200%2012%2012%22%3E%3Cpath%20fill%3D%22%23888%22%20d%3D%22M2%204l4%204%204-4z%22%2F%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[right_0.5rem_center] pr-7"
                             >
-                                <option value="all">All Types</option>
-                                <option value="car">🚗 Cars</option>
-                                <option value="motorcycle">🏍️ Motorcycles</option>
-                                <option value="bicycle">🚲 Bicycles</option>
+                                <option value="all">All</option>
+                                <option value="car">🚗</option>
+                                <option value="motorcycle">🏍️</option>
+                                <option value="bicycle">🚲</option>
                             </select>
 
                             {/* Floor Filter */}
                             <select
                                 value={floorFilter}
                                 onChange={e => setFloorFilter(e.target.value)}
-                                className="px-3 py-2 bg-white dark:bg-white/10 border border-black/10 dark:border-white/10 rounded-xl text-sm font-medium text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                className="px-3 py-2 bg-white dark:bg-zinc-800 border border-black/10 dark:border-white/20 rounded-xl text-sm font-medium text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2212%22%20height%3D%2212%22%20viewBox%3D%220%200%2012%2012%22%3E%3Cpath%20fill%3D%22%23888%22%20d%3D%22M2%204l4%204%204-4z%22%2F%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[right_0.5rem_center] pr-7"
                             >
-                                <option value="all">All Floors</option>
+                                <option value="all">Floor</option>
                                 {uniqueFloors.map(floor => (
                                     <option key={floor} value={floor}>{floor}</option>
                                 ))}
                             </select>
 
-                            {/* Status Filter */}
+                            {/* Status Filter - Colored circles */}
                             <select
                                 value={statusFilter}
                                 onChange={e => setStatusFilter(e.target.value as any)}
-                                className="px-3 py-2 bg-white dark:bg-white/10 border border-black/10 dark:border-white/10 rounded-xl text-sm font-medium text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                className="px-3 py-2 bg-white dark:bg-zinc-800 border border-black/10 dark:border-white/20 rounded-xl text-sm font-medium text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2212%22%20height%3D%2212%22%20viewBox%3D%220%200%2012%2012%22%3E%3Cpath%20fill%3D%22%23888%22%20d%3D%22M2%204l4%204%204-4z%22%2F%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[right_0.5rem_center] pr-7"
                             >
-                                <option value="all">All Statuses</option>
-                                <option value="open">✅ Open</option>
-                                <option value="occupied">🔴 Occupied</option>
-                                <option value="closed">⚪ Closed</option>
+                                <option value="all">Status</option>
+                                <option value="open">🟢</option>
+                                <option value="occupied">🔴</option>
+                                <option value="closed">⚪</option>
                             </select>
                         </div>
 
@@ -770,6 +770,26 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                             ))}
                         </div>
 
+                        {/* Search Bar Below Tabs */}
+                        <div className="flex items-center gap-2 px-4 py-3 bg-white dark:bg-[#1c1c1e] border-b border-black/5 dark:border-white/10">
+                            <div className="relative flex-1">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={16} />
+                                <input
+                                    value={searchTerm}
+                                    onChange={e => setSearchTerm(e.target.value)}
+                                    placeholder="Search listing name or location"
+                                    className="w-full pl-10 pr-4 py-2.5 bg-zinc-100 dark:bg-white/10 rounded-xl text-sm font-medium text-zinc-900 dark:text-white border border-black/5 dark:border-white/10 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-all placeholder:text-zinc-400 dark:placeholder:text-white/40"
+                                />
+                            </div>
+                            <button
+                                onClick={() => fetchListings()}
+                                className="p-2.5 bg-zinc-100 dark:bg-white/10 border border-black/5 dark:border-white/10 rounded-xl active:scale-95 transition-all text-zinc-600 dark:text-white"
+                                title="Refresh Listings"
+                            >
+                                <RotateCcw size={20} />
+                            </button>
+                        </div>
+
                         {/* Status Legend */}
                         <div className="flex items-center gap-4 text-[10px] font-bold uppercase tracking-wider text-zinc-500 justify-start px-4 py-2">
                             <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-green-500"></div>Open</div>
@@ -783,201 +803,212 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                             ) : filteredListings.length === 0 ? (
                                 <div className="text-center py-10 text-zinc-400">No listings found</div>
                             ) : (
-                                filteredListings.map(listing => {
-                                    const stats = listingStats.get(listing.id);
-                                    const isClosed = listing.status === 'closed';
+                                <>
+                                    {paginatedListings.map(listing => {
+                                        const stats = listingStats.get(listing.id);
+                                        const isClosed = listing.status === 'closed';
 
-                                    // Override stats if closed
-                                    const displayStats = isClosed ? {
-                                        car: { ...stats?.car, open: 0 },
-                                        motorcycle: { ...stats?.motorcycle, open: 0 },
-                                        bicycle: { ...stats?.bicycle, open: 0 }
-                                    } : stats;
+                                        // Override stats if closed
+                                        const displayStats = isClosed ? {
+                                            car: { ...stats?.car, open: 0 },
+                                            motorcycle: { ...stats?.motorcycle, open: 0 },
+                                            bicycle: { ...stats?.bicycle, open: 0 }
+                                        } : stats;
 
-                                    return (
-                                        <div key={listing.id} className="group relative bg-white dark:bg-[#1c1c1e] rounded-2xl p-4 border border-black/5 dark:border-white/10 shadow-sm transition-all hover:shadow-md active:scale-[0.99] cursor-pointer" onClick={() => setSelectedListing(listing)}>
-                                            <div className="flex flex-col items-start mb-3">
-                                                <div className="flex items-center justify-between w-full gap-2 mb-1">
-                                                    <div className="flex items-center gap-2 min-w-0">
-                                                        <h3 className="font-bold text-zinc-900 dark:text-white text-lg leading-tight truncate">{listing.listing_name}</h3>
-                                                        <span className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${listing.listing_type === 'public' ? 'bg-green-500/10 text-green-600' : 'bg-purple-500/10 text-purple-600'}`}>
-                                                            {listing.listing_type}
-                                                        </span>
-                                                        {isClosed && (
-                                                            <span className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-zinc-500/10 text-zinc-500 dark:text-zinc-400">
-                                                                CLOSED
+                                        return (
+                                            <div key={listing.id} className="group relative bg-white dark:bg-[#1c1c1e] rounded-2xl p-4 border border-black/5 dark:border-white/10 shadow-sm transition-all hover:shadow-md active:scale-[0.99] cursor-pointer" onClick={() => setSelectedListing(listing)}>
+                                                <div className="flex flex-col items-start mb-3">
+                                                    <div className="flex items-center justify-between w-full gap-2 mb-1">
+                                                        <div className="flex items-center gap-2 min-w-0">
+                                                            <h3 className="font-bold text-zinc-900 dark:text-white text-lg leading-tight truncate">{listing.listing_name}</h3>
+                                                            <span className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${listing.listing_type === 'public' ? 'bg-green-500/10 text-green-600' : 'bg-purple-500/10 text-purple-600'}`}>
+                                                                {listing.listing_type}
                                                             </span>
+                                                            {isClosed && (
+                                                                <span className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-zinc-500/10 text-zinc-500 dark:text-zinc-400">
+                                                                    CLOSED
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Access List Button */}
+                                                    <div className="absolute top-4 right-4 flex gap-1">
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                setShowAccessListModal(listing);
+                                                            }}
+                                                            className="p-1.5 text-zinc-400 hover:text-blue-500 active:opacity-50 transition-colors"
+                                                        >
+                                                            <Users size={18} />
+                                                        </button>
+                                                        {activeTab === 'my' && (listing.owners.includes(pubkey!) || listing.managers.includes(pubkey!)) && (
+                                                            <>
+                                                                <button onClick={(e) => { e.stopPropagation(); setEditingListing(listing); setShowCreateForm(true); }} className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-white active:opacity-50 transition-colors">
+                                                                    <Pencil size={18} />
+                                                                </button>
+                                                                <button onClick={(e) => { e.stopPropagation(); deleteListing(listing); }} className="p-1.5 text-zinc-400 hover:text-red-500 active:opacity-50 transition-colors">
+                                                                    <Trash2 size={18} />
+                                                                </button>
+                                                            </>
                                                         )}
                                                     </div>
-                                                </div>
 
-                                                {/* Access List Button */}
-                                                <div className="absolute top-4 right-4 flex gap-1">
-                                                    <button
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            setShowAccessListModal(listing);
-                                                        }}
-                                                        className="p-1.5 text-zinc-400 hover:text-blue-500 active:opacity-50 transition-colors"
-                                                    >
-                                                        <Users size={18} />
-                                                    </button>
-                                                    {activeTab === 'my' && (listing.owners.includes(pubkey!) || listing.managers.includes(pubkey!)) && (
-                                                        <>
-                                                            <button onClick={(e) => { e.stopPropagation(); setEditingListing(listing); setShowCreateForm(true); }} className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-white active:opacity-50 transition-colors">
-                                                                <Pencil size={18} />
-                                                            </button>
-                                                            <button onClick={(e) => { e.stopPropagation(); deleteListing(listing); }} className="p-1.5 text-zinc-400 hover:text-red-500 active:opacity-50 transition-colors">
-                                                                <Trash2 size={18} />
-                                                            </button>
-                                                        </>
+                                                    <p className="text-xs text-zinc-500 dark:text-white/40 flex items-center gap-1">
+                                                        <MapPin size={12} /> {listing.location || 'No location'}
+                                                    </p>
+                                                    {listing.description && (
+                                                        <p className="text-xs text-zinc-500 dark:text-white/60 mt-1 line-clamp-2">
+                                                            {listing.description}
+                                                        </p>
                                                     )}
                                                 </div>
 
-                                                <p className="text-xs text-zinc-500 dark:text-white/40 flex items-center gap-1">
-                                                    <MapPin size={12} /> {listing.location || 'No location'}
-                                                </p>
-                                                {listing.description && (
-                                                    <p className="text-xs text-zinc-500 dark:text-white/60 mt-1 line-clamp-2">
-                                                        {listing.description}
-                                                    </p>
-                                                )}
-                                            </div>
+                                                <div className="grid grid-cols-3 gap-2">
+                                                    {[
+                                                        { type: 'car' as const, icon: '🚗', data: displayStats?.car, rate: listing.rates?.car },
+                                                        { type: 'motorcycle' as const, icon: '🏍️', data: displayStats?.motorcycle, rate: listing.rates?.motorcycle },
+                                                        { type: 'bicycle' as const, icon: '🚲', data: displayStats?.bicycle, rate: listing.rates?.bicycle }
+                                                    ].map(v => {
+                                                        // Availability based strictly on capacity (spots > 0)
+                                                        // This ensures consistent "Not Available" state across Public and Private
+                                                        const isAvailable = (v.data?.total || 0) > 0;
 
-                                            <div className="grid grid-cols-3 gap-2">
-                                                {[
-                                                    { type: 'car' as const, icon: '🚗', data: displayStats?.car, rate: listing.rates?.car },
-                                                    { type: 'motorcycle' as const, icon: '🏍️', data: displayStats?.motorcycle, rate: listing.rates?.motorcycle },
-                                                    { type: 'bicycle' as const, icon: '🚲', data: displayStats?.bicycle, rate: listing.rates?.bicycle }
-                                                ].map(v => {
-                                                    // Availability based strictly on capacity (spots > 0)
-                                                    // This ensures consistent "Not Available" state across Public and Private
-                                                    const isAvailable = (v.data?.total || 0) > 0;
+                                                        // Rate display logic:
+                                                        // - Always show if rate exists
+                                                        // - If Public and Available (has spots) but no rate, default to 0/hr
+                                                        const displayRate = v.rate || { hourly: 0, currency: 'INR' };
+                                                        const showRate = !!v.rate || (isAvailable && listing.listing_type === 'public');
 
-                                                    // Rate display logic:
-                                                    // - Always show if rate exists
-                                                    // - If Public and Available (has spots) but no rate, default to 0/hr
-                                                    const displayRate = v.rate || { hourly: 0, currency: 'INR' };
-                                                    const showRate = !!v.rate || (isAvailable && listing.listing_type === 'public');
-
-                                                    return (
-                                                        <div key={v.type} className={`bg-zinc-50 dark:bg-white/10 rounded-xl p-2 text-center flex flex-col items-center justify-center min-h-[80px] ${isClosed ? 'opacity-50' : ''}`}>
-                                                            <div className="text-3xl mb-1">{v.icon}</div>
-                                                            {isAvailable ? (
-                                                                <div className="flex flex-col items-center w-full">
-                                                                    <div className="font-bold text-sm flex items-center gap-1.5 mb-1.5">
-                                                                        <span className="text-green-500">{v.data?.open || 0}</span>
-                                                                        <span className="text-zinc-300 dark:text-white/20">|</span>
-                                                                        <span className="text-red-500">{v.data?.occupied || 0}</span>
-                                                                        <span className="text-zinc-300 dark:text-white/20">|</span>
-                                                                        <span className="text-zinc-400">{v.data?.closed || 0}</span>
-                                                                    </div>
-                                                                    {showRate && (
-                                                                        <div className="w-full bg-black/5 dark:bg-white/5 rounded-lg py-0.5 px-2">
-                                                                            <div className="text-zinc-900 dark:text-white font-bold text-sm">
-                                                                                {displayRate.currency === 'USD' ? '$' : displayRate.currency === 'EUR' ? '€' : displayRate.currency === 'GBP' ? '£' : '₹'}{displayRate.hourly}<span className="text-[10px] font-normal opacity-60">/hr</span>
-                                                                            </div>
+                                                        return (
+                                                            <div key={v.type} className={`bg-zinc-50 dark:bg-white/10 rounded-xl p-2 text-center flex flex-col items-center justify-center min-h-[80px] ${isClosed ? 'opacity-50' : ''}`}>
+                                                                <div className="text-3xl mb-1">{v.icon}</div>
+                                                                {isAvailable ? (
+                                                                    <div className="flex flex-col items-center w-full">
+                                                                        <div className="font-bold text-sm flex items-center gap-1.5 mb-1.5">
+                                                                            <span className="text-green-500">{v.data?.open || 0}</span>
+                                                                            <span className="text-zinc-300 dark:text-white/20">|</span>
+                                                                            <span className="text-red-500">{v.data?.occupied || 0}</span>
+                                                                            <span className="text-zinc-300 dark:text-white/20">|</span>
+                                                                            <span className="text-zinc-400">{v.data?.closed || 0}</span>
                                                                         </div>
-                                                                    )}
-                                                                </div>
-                                                            ) : (
-                                                                <div className="text-xs text-zinc-400 dark:text-white/30 font-medium">Not Available</div>
-                                                            )}
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
+                                                                        {showRate && (
+                                                                            <div className="w-full bg-black/5 dark:bg-white/5 rounded-lg py-0.5 px-2">
+                                                                                <div className="text-zinc-900 dark:text-white font-bold text-sm">
+                                                                                    {displayRate.currency === 'USD' ? '$' : displayRate.currency === 'EUR' ? '€' : displayRate.currency === 'GBP' ? '£' : '₹'}{displayRate.hourly}<span className="text-[10px] font-normal opacity-60">/hr</span>
+                                                                                </div>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                ) : (
+                                                                    <div className="text-xs text-zinc-400 dark:text-white/30 font-medium">Not Available</div>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
 
-                                            {/* Close All Toggle */}
-                                            {activeTab === 'my' && (listing.owners.includes(pubkey!) || listing.managers.includes(pubkey!)) && (
-                                                <div className="mt-3 pt-3 border-t border-black/5 dark:border-white/5 flex items-center justify-between" onClick={(e) => e.stopPropagation()}>
-                                                    <span className={`text-sm font-semibold ${!isClosed ? 'text-green-600 dark:text-green-400' : 'text-zinc-500 dark:text-white/50'}`}>
-                                                        {!isClosed ? 'Listing Open' : 'Listing Closed'}
-                                                    </span>
-                                                    <button
-                                                        onClick={async () => {
-                                                            const newStatus = isClosed ? 'open' : 'closed';
-                                                            const confirmMsg = newStatus === 'closed'
-                                                                ? 'This will mark ALL spots as CLOSED. Continue?'
-                                                                : 'This will mark ALL spots as OPEN. Continue?';
-                                                            if (!confirm(confirmMsg)) return;
+                                                {/* Close All Toggle */}
+                                                {activeTab === 'my' && (listing.owners.includes(pubkey!) || listing.managers.includes(pubkey!)) && (
+                                                    <div className="mt-3 pt-3 border-t border-black/5 dark:border-white/5 flex items-center justify-between" onClick={(e) => e.stopPropagation()}>
+                                                        <span className={`text-sm font-semibold ${!isClosed ? 'text-green-600 dark:text-green-400' : 'text-zinc-500 dark:text-white/50'}`}>
+                                                            {!isClosed ? 'Listing Open' : 'Listing Closed'}
+                                                        </span>
+                                                        <button
+                                                            onClick={async () => {
+                                                                const newStatus = isClosed ? 'open' : 'closed';
+                                                                const confirmMsg = newStatus === 'closed'
+                                                                    ? 'This will mark ALL spots as CLOSED. Continue?'
+                                                                    : 'This will mark ALL spots as OPEN. Continue?';
+                                                                if (!confirm(confirmMsg)) return;
 
-                                                            // Optimistic UI update
-                                                            setListings(prev => prev.map(l =>
-                                                                l.id === listing.id ? { ...l, status: newStatus as 'open' | 'closed' } : l
-                                                            ));
+                                                                // Optimistic UI update
+                                                                setListings(prev => prev.map(l =>
+                                                                    l.id === listing.id ? { ...l, status: newStatus as 'open' | 'closed' } : l
+                                                                ));
 
-                                                            // Optimistic Stats update
-                                                            const currentStats = listingStats.get(listing.id);
-                                                            if (currentStats) {
-                                                                const updatedStats = { ...currentStats };
-                                                                (['car', 'motorcycle', 'bicycle'] as const).forEach(vType => {
-                                                                    const total = updatedStats[vType].total;
-                                                                    if (newStatus === 'closed') {
-                                                                        updatedStats[vType] = { ...updatedStats[vType], open: 0, occupied: 0, closed: total };
-                                                                    } else {
-                                                                        updatedStats[vType] = { ...updatedStats[vType], open: total, occupied: 0, closed: 0 };
-                                                                    }
-                                                                });
-                                                                setListingStats(prev => new Map(prev).set(listing.id, updatedStats));
-                                                            }
-
-                                                            try {
-                                                                // Fetch all spots for this listing
-                                                                const aTag = `${KINDS.LISTED_PARKING_METADATA}:${listing.pubkey}:${listing.d}`;
-                                                                const spotEvents = await pool.querySync(DEFAULT_RELAYS, {
-                                                                    kinds: [KINDS.PARKING_SPOT_LISTING],
-                                                                    '#a': [aTag]
-                                                                });
-
-                                                                // Publish status log (Kind 1714) for each spot
-                                                                for (const spot of spotEvents) {
-                                                                    const spotD = spot.tags.find((t: string[]) => t[0] === 'd')?.[1];
-                                                                    const spotATag = `${KINDS.PARKING_SPOT_LISTING}:${spot.pubkey}:${spotD}`;
-                                                                    const statusEvent = {
-                                                                        kind: KINDS.LISTED_SPOT_LOG,
-                                                                        created_at: Math.floor(Date.now() / 1000),
-                                                                        tags: [
-                                                                            ['a', spotATag],
-                                                                            ['status', newStatus],
-                                                                            ['updated_by', pubkey],
-                                                                            ['client', 'parlens']
-                                                                        ],
-                                                                        content: ''
-                                                                    };
-                                                                    const signed = await signEvent(statusEvent);
-                                                                    await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signed));
+                                                                // Optimistic Stats update
+                                                                const currentStats = listingStats.get(listing.id);
+                                                                if (currentStats) {
+                                                                    const updatedStats = { ...currentStats };
+                                                                    (['car', 'motorcycle', 'bicycle'] as const).forEach(vType => {
+                                                                        const total = updatedStats[vType].total;
+                                                                        if (newStatus === 'closed') {
+                                                                            updatedStats[vType] = { ...updatedStats[vType], open: 0, occupied: 0, closed: total };
+                                                                        } else {
+                                                                            updatedStats[vType] = { ...updatedStats[vType], open: total, occupied: 0, closed: 0 };
+                                                                        }
+                                                                    });
+                                                                    setListingStats(prev => new Map(prev).set(listing.id, updatedStats));
                                                                 }
 
-                                                                // Also update listing metadata status for display
-                                                                const metaEvent = {
-                                                                    ...listing.originalEvent,
-                                                                    created_at: Math.floor(Date.now() / 1000),
-                                                                    tags: [
-                                                                        ...listing.originalEvent.tags.filter((t: string[]) => t[0] !== 'status'),
-                                                                        ['status', newStatus]
-                                                                    ]
-                                                                };
-                                                                const signedMeta = await signEvent(metaEvent);
-                                                                await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedMeta));
-                                                            } catch (e) {
-                                                                // Revert optimistic update on error
-                                                                setListings(prev => prev.map(l =>
-                                                                    l.id === listing.id ? { ...l, status: isClosed ? 'closed' : 'open' } : l
-                                                                ));
-                                                                alert('Failed to update status');
-                                                            }
-                                                        }}
-                                                        className={`relative h-7 w-12 rounded-full transition-colors ${!isClosed ? 'bg-green-500' : 'bg-zinc-200 dark:bg-white/10'}`}
-                                                    >
-                                                        <span className={`block h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${!isClosed ? 'translate-x-[26px]' : 'translate-x-[4px]'}`} />
-                                                    </button>
-                                                </div>
-                                            )
-                                            }
-                                        </div>
-                                    );
-                                })
+                                                                try {
+                                                                    // Fetch all spots for this listing
+                                                                    const aTag = `${KINDS.LISTED_PARKING_METADATA}:${listing.pubkey}:${listing.d}`;
+                                                                    const spotEvents = await pool.querySync(DEFAULT_RELAYS, {
+                                                                        kinds: [KINDS.PARKING_SPOT_LISTING],
+                                                                        '#a': [aTag]
+                                                                    });
+
+                                                                    // Publish status log (Kind 1714) for each spot
+                                                                    for (const spot of spotEvents) {
+                                                                        const spotD = spot.tags.find((t: string[]) => t[0] === 'd')?.[1];
+                                                                        const spotATag = `${KINDS.PARKING_SPOT_LISTING}:${spot.pubkey}:${spotD}`;
+                                                                        const statusEvent = {
+                                                                            kind: KINDS.LISTED_SPOT_LOG,
+                                                                            created_at: Math.floor(Date.now() / 1000),
+                                                                            tags: [
+                                                                                ['a', spotATag],
+                                                                                ['status', newStatus],
+                                                                                ['updated_by', pubkey],
+                                                                                ['client', 'parlens']
+                                                                            ],
+                                                                            content: ''
+                                                                        };
+                                                                        const signed = await signEvent(statusEvent);
+                                                                        await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signed));
+                                                                    }
+
+                                                                    // Also update listing metadata status for display
+                                                                    const metaEvent = {
+                                                                        ...listing.originalEvent,
+                                                                        created_at: Math.floor(Date.now() / 1000),
+                                                                        tags: [
+                                                                            ...listing.originalEvent.tags.filter((t: string[]) => t[0] !== 'status'),
+                                                                            ['status', newStatus]
+                                                                        ]
+                                                                    };
+                                                                    const signedMeta = await signEvent(metaEvent);
+                                                                    await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedMeta));
+                                                                } catch (e) {
+                                                                    // Revert optimistic update on error
+                                                                    setListings(prev => prev.map(l =>
+                                                                        l.id === listing.id ? { ...l, status: isClosed ? 'closed' : 'open' } : l
+                                                                    ));
+                                                                    alert('Failed to update status');
+                                                                }
+                                                            }}
+                                                            className={`relative h-7 w-12 rounded-full transition-colors ${!isClosed ? 'bg-green-500' : 'bg-zinc-200 dark:bg-white/10'}`}
+                                                        >
+                                                            <span className={`block h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${!isClosed ? 'translate-x-[26px]' : 'translate-x-[4px]'}`} />
+                                                        </button>
+                                                    </div>
+                                                )
+                                                }
+                                            </div>
+                                        );
+                                    })}
+                                    {/* Load More Button */}
+                                    {displayedCount < filteredListings.length && (
+                                        <button
+                                            onClick={() => setDisplayedCount(prev => prev + 10)}
+                                            className="w-full py-4 bg-blue-500/10 text-[#007AFF] font-bold rounded-2xl border border-blue-500/20 active:scale-[0.98] transition-transform"
+                                        >
+                                            Load More ({filteredListings.length - displayedCount} remaining)
+                                        </button>
+                                    )}
+                                </>
                             )}
                         </div>
                     </>
@@ -1758,8 +1789,15 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
                         {/* Auth QR Code - Only visible to managers/owners */}
                         {isManager && (
                             <>
-                                <div className="p-4 bg-white rounded-3xl flex justify-center shadow-sm border border-black/5">
-                                    <QRCodeSVG value={qrAuthData} size={160} level="M" />
+                                <div className="p-4 rounded-3xl flex justify-center">
+                                    <QRCodeSVG
+                                        value={qrAuthData}
+                                        size={180}
+                                        level="M"
+                                        bgColor="transparent"
+                                        fgColor="currentColor"
+                                        className="text-black dark:text-white"
+                                    />
                                 </div>
                                 <div onClick={() => { navigator.clipboard.writeText(qrAuthData); setCopied(true); setTimeout(() => setCopied(false), 2000); }} className="flex justify-center items-center gap-2 text-[#007AFF] font-bold cursor-pointer py-2 hover:opacity-80 transition-opacity">
                                     {copied ? <Check size={18} /> : <Copy size={18} />} {copied ? 'Copied' : 'Copy Auth Code'}
@@ -1853,12 +1891,32 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
                                     </button>
                                     <button onClick={async () => {
                                         if (!confirm('Delete this spot?')) return;
+
+                                        // Delete the spot (Kind 5 deletion event)
                                         const deleteSpot = {
                                             kind: 5, created_at: Math.floor(Date.now() / 1000),
                                             tags: [['e', spot.id], ['a', `${KINDS.PARKING_SPOT_LISTING}:${pubkey}:${spot.d}`]],
                                             content: 'Deleted'
                                         };
                                         await Promise.allSettled(pool.publish(DEFAULT_RELAYS, await signEvent(deleteSpot)));
+
+                                        // Update listing's total_spots count (Kind 31147)
+                                        if (listing.originalEvent && listing.total_spots) {
+                                            const newTotalSpots = Math.max(0, (listing.total_spots || 1) - 1);
+                                            const updatedTags = listing.originalEvent.tags
+                                                .filter((t: string[]) => t[0] !== 'total_spots')
+                                                .concat([['total_spots', String(newTotalSpots)]]);
+
+                                            const updatedMetadata = {
+                                                kind: KINDS.LISTED_PARKING_METADATA,
+                                                created_at: Math.floor(Date.now() / 1000),
+                                                tags: updatedTags,
+                                                content: listing.originalEvent.content
+                                            };
+                                            await Promise.allSettled(pool.publish(DEFAULT_RELAYS, await signEvent(updatedMetadata)));
+                                            console.log(`[Parlens] Updated total_spots to ${newTotalSpots} after spot deletion`);
+                                        }
+
                                         onStatusChange(); onClose();
                                     }} className="flex-1 py-3 bg-red-500/10 border border-red-500/20 text-red-500 font-bold text-sm flex items-center justify-center gap-2 rounded-xl active:scale-95 transition-transform">
                                         <Trash2 size={16} /> Delete
