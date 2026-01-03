@@ -38,6 +38,7 @@
     "leaflet-routing-machine": "^3.2.12",
     "lucide-react": "^0.562.0",
     "maplibre-gl": "^5.15.0",
+    "ngeohash": "^0.6.3",
     "nostr-tools": "^2.19.4",
     "open-location-code": "^1.0.3",
     "package.json": "^2.0.1",

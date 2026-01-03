@@ -10,9 +10,10 @@ import { DEFAULT_RELAYS, KINDS } from '../lib/nostr';
 interface ProfileButtonProps {
     setHistorySpots?: (spots: any[]) => void;
     onOpenChange?: (isOpen: boolean) => void;
+    onHelpClick?: () => void;
 }
 
-export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, onOpenChange }) => {
+export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, onOpenChange, onHelpClick }) => {
     const { pubkey, logout, pool, signEvent } = useAuth();
     const { logs, refetch, markDeleted } = useParkingLogs();
     const [isOpen, setIsOpen] = useState(false);
@@ -36,7 +37,6 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
 
     // Parking History filters
     const [filterType, setFilterType] = useState<'all' | 'bicycle' | 'motorcycle' | 'car'>('all');
-    const [filterDateRange, setFilterDateRange] = useState<'all' | 'today' | 'week' | 'month'>('all');
 
     // Note editing state
     const [editingNoteLogId, setEditingNoteLogId] = useState<string | null>(null);
@@ -220,28 +220,9 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
             // Type filter
             if (filterType !== 'all' && type !== filterType) return false;
 
-            // Relative date filter
-            if (filterDateRange !== 'all') {
-                const logDate = content.started_at ? new Date(content.started_at * 1000) : new Date(log.created_at * 1000);
-                const now = new Date();
-                const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-                if (filterDateRange === 'today' && logDate < startOfToday) return false;
-                if (filterDateRange === 'week') {
-                    const weekAgo = new Date(startOfToday);
-                    weekAgo.setDate(weekAgo.getDate() - 7);
-                    if (logDate < weekAgo) return false;
-                }
-                if (filterDateRange === 'month') {
-                    const monthAgo = new Date(startOfToday);
-                    monthAgo.setMonth(monthAgo.getMonth() - 1);
-                    if (logDate < monthAgo) return false;
-                }
-            }
-
             return true;
         });
-    }, [decryptedLogs, filterType, filterDateRange]);
+    }, [decryptedLogs, filterType]);
 
     // Fetch preferred relays (NIP-65)
     const fetchPreferredRelays = useCallback(async () => {
@@ -375,12 +356,20 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                             <h2 className="text-xl font-bold bg-gradient-to-r from-blue-500 to-purple-500 dark:from-blue-400 dark:to-purple-400 bg-clip-text text-transparent">
                                 {profile?.name || 'Nostr User'}
                             </h2>
-                            <button
-                                onClick={() => setIsOpen(false)}
-                                className="p-2 rounded-full bg-black/5 dark:bg-white/10 transition-colors"
-                            >
-                                <X size={20} className="text-black/60 dark:text-white/60" />
-                            </button>
+                            <div className="flex gap-4 items-center">
+                                <button
+                                    onClick={() => onHelpClick?.()} // Don't close profile
+                                    className="w-10 h-10 flex items-center justify-center rounded-full bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 active:scale-95 transition-all"
+                                >
+                                    <span className="text-xl font-bold">?</span>
+                                </button>
+                                <button
+                                    onClick={() => setIsOpen(false)}
+                                    className="p-2 rounded-full bg-black/5 dark:bg-white/10 text-zinc-600 dark:text-white/60 active:scale-95 transition-transform"
+                                >
+                                    <X size={20} />
+                                </button>
+                            </div>
                         </div>
 
                         <div className="space-y-4">
@@ -413,7 +402,7 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                                 )}
                             </div>
                             <p className="text-xs text-zinc-400 dark:text-white/30 mt-2 ml-2 leading-relaxed">
-                                ⚠️ Store your npub and nsec securely. These are your account access keys and cannot be recovered if lost.
+                                ⚠️ Store your npub and nsec securely. These are your account access keys and cannot be recovered if lost. Use these keys to login to any Nostr client.
                             </p>
                         </div>
 
@@ -457,7 +446,7 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                                                             </div>
                                                             <button
                                                                 onClick={() => handleRemoveRelay(relay)}
-                                                                disabled={preferredRelays.length <= 1}
+                                                                disabled={preferredRelays.length <= 1} // Enforce at least one relay
                                                                 className="p-2 rounded-lg text-zinc-400 dark:text-white/40 active:scale-95 transition-transform disabled:opacity-30 disabled:cursor-not-allowed"
                                                                 title={preferredRelays.length <= 1 ? 'At least one relay is required' : 'Remove relay'}
                                                             >
@@ -483,114 +472,98 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                                 )}
                             </div>
                             <p className="text-xs text-zinc-400 dark:text-white/30 mt-2 ml-2 leading-relaxed">
-                                📡 Relay addresses listed here tell Parlens where to store and look for data. The app requires a connection to at least one relay to work.
+                                📡 Relay address(es) listed in this section tell Parlens where to look for and store data. Parlens requires a connection to at least one relay to work.
                             </p>
-                        </div>
-
-                        {/* Add Relay Modal */}
-                        {isAddingRelay && (
-                            <div
-                                className="fixed inset-0 z-[3000] flex items-center justify-center bg-black/70 backdrop-blur-sm"
-                                onClick={() => setIsAddingRelay(false)}
-                            >
+                            {/* Add Relay Modal */}
+                            {isAddingRelay && (
                                 <div
-                                    className="w-[90%] max-w-sm bg-white dark:bg-[#2c2c2e] rounded-2xl p-5 space-y-4 animate-in zoom-in-95 duration-200"
-                                    onClick={(e) => e.stopPropagation()}
+                                    className="fixed inset-0 z-[3000] flex items-center justify-center bg-black/70 backdrop-blur-sm"
+                                    onClick={() => setIsAddingRelay(false)}
                                 >
-                                    <h3 className="text-lg font-bold text-zinc-900 dark:text-white">
-                                        Add Relay
-                                    </h3>
-                                    <div className="space-y-2">
-                                        <input
-                                            type="text"
-                                            value={newRelayUrl}
-                                            onChange={(e) => {
-                                                setNewRelayUrl(e.target.value);
-                                                setRelayError(null);
-                                            }}
-                                            placeholder="wss://relay.example.com"
-                                            className="w-full h-12 rounded-xl bg-zinc-100 dark:bg-white/5 border border-black/5 dark:border-white/10 px-4 text-zinc-900 dark:text-white placeholder:text-zinc-400 dark:placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                            autoFocus
-                                            onKeyDown={(e) => {
-                                                if (e.key === 'Enter') handleAddRelay();
-                                                if (e.key === 'Escape') setIsAddingRelay(false);
-                                            }}
-                                        />
-                                        {relayError && (
-                                            <p className="text-xs text-red-500 ml-1">{relayError}</p>
-                                        )}
-                                    </div>
-                                    <div className="flex gap-3">
-                                        <button
-                                            onClick={() => setIsAddingRelay(false)}
-                                            className="flex-1 h-11 rounded-xl bg-zinc-200 dark:bg-white/10 text-zinc-600 dark:text-white/70 font-medium transition-all active:scale-95"
-                                        >
-                                            Cancel
-                                        </button>
-                                        <button
-                                            onClick={handleAddRelay}
-                                            disabled={isRelayLoading || !newRelayUrl.trim()}
-                                            className="flex-1 h-11 rounded-xl bg-[#007AFF] text-white font-medium disabled:opacity-50 transition-all active:scale-95"
-                                        >
-                                            {isRelayLoading ? '...' : 'Add'}
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-
-                        <div className="space-y-4">
-                            <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-white/20 ml-2">Parking History</h4>
-
-                            {/* Filters */}
-                            <div className="flex items-center gap-2 mb-3">
-                                {/* Vehicle Type Filter */}
-                                <div className="flex gap-1 p-1 bg-zinc-100 dark:bg-white/5 rounded-xl shrink-0">
-                                    {(['all', 'bicycle', 'motorcycle', 'car'] as const).map((type) => (
-                                        <button
-                                            key={type}
-                                            onClick={() => setFilterType(type)}
-                                            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${filterType === type
-                                                ? 'bg-white dark:bg-white/20 text-zinc-900 dark:text-white shadow-sm'
-                                                : 'text-zinc-500 dark:text-white/40'
-                                                }`}
-                                        >
-                                            {type === 'all' ? 'All' : type === 'bicycle' ? '🚲' : type === 'motorcycle' ? '🏍️' : '🚗'}
-                                        </button>
-                                    ))}
-                                </div>
-                                {/* Date Range Filter */}
-                                <div className="p-1 bg-zinc-100 dark:bg-white/5 rounded-xl shrink-0">
-                                    <select
-                                        value={filterDateRange}
-                                        onChange={(e) => setFilterDateRange(e.target.value as typeof filterDateRange)}
-                                        className="px-2 py-1.5 rounded-lg text-sm font-medium text-zinc-700 dark:text-white/80 bg-transparent border-none outline-none appearance-none cursor-pointer"
+                                    <div
+                                        className="w-[90%] max-w-sm bg-white dark:bg-[#2c2c2e] rounded-2xl p-5 space-y-4 animate-in zoom-in-95 duration-200"
+                                        onClick={(e) => e.stopPropagation()}
                                     >
-                                        <option value="all">All Time</option>
-                                        <option value="today">Today</option>
-                                        <option value="week">This Week</option>
-                                        <option value="month">This Month</option>
-                                    </select>
-                                </div>
-                            </div>
-
-                            {setHistorySpots && (
-                                <div className="flex items-center justify-between p-4 bg-zinc-50 dark:bg-white/5 rounded-[2rem] border border-black/5 dark:border-white/5 mb-4">
-                                    <div className="flex items-center gap-3">
-                                        <div className="p-2.5 rounded-xl bg-purple-500/10 dark:bg-purple-500/20 text-purple-500 dark:text-purple-400"><MapPin size={20} /></div>
-                                        <span className="font-semibold text-sm text-zinc-700 dark:text-white">Show logs on map</span>
+                                        <h3 className="text-lg font-bold text-zinc-900 dark:text-white">
+                                            Add Relay
+                                        </h3>
+                                        <div className="space-y-2">
+                                            <input
+                                                type="text"
+                                                value={newRelayUrl}
+                                                onChange={(e) => {
+                                                    setNewRelayUrl(e.target.value);
+                                                    setRelayError(null);
+                                                }}
+                                                placeholder="wss://relay.example.com"
+                                                className="w-full h-12 rounded-xl bg-zinc-100 dark:bg-white/5 border border-black/5 dark:border-white/10 px-4 text-zinc-900 dark:text-white placeholder:text-zinc-400 dark:placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                autoFocus
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter') handleAddRelay();
+                                                    if (e.key === 'Escape') setIsAddingRelay(false);
+                                                }}
+                                            />
+                                            {relayError && (
+                                                <p className="text-xs text-red-500 ml-1">{relayError}</p>
+                                            )}
+                                        </div>
+                                        <div className="flex gap-3">
+                                            <button
+                                                onClick={() => setIsAddingRelay(false)}
+                                                className="flex-1 h-11 rounded-xl bg-zinc-200 dark:bg-white/10 text-zinc-600 dark:text-white/70 font-medium transition-all active:scale-95"
+                                            >
+                                                Cancel
+                                            </button>
+                                            <button
+                                                onClick={handleAddRelay}
+                                                disabled={isRelayLoading || !newRelayUrl.trim()}
+                                                className="flex-1 h-11 rounded-xl bg-[#007AFF] text-white font-medium disabled:opacity-50 transition-all active:scale-95"
+                                            >
+                                                {isRelayLoading ? '...' : 'Add'}
+                                            </button>
+                                        </div>
                                     </div>
-                                    <button
-                                        onClick={() => setShowHistoryOnMap(!showHistoryOnMap)}
-                                        className={`w-12 h-7 rounded-full transition-colors relative ${showHistoryOnMap ? 'bg-[#007AFF]' : 'bg-zinc-200 dark:bg-white/20'}`}
-                                    >
-                                        <div className={`absolute top-1 bottom-1 w-5 h-5 rounded-full bg-white transition-transform ${showHistoryOnMap ? 'left-[calc(100%-1.25rem-0.25rem)]' : 'left-1'}`} />
-                                    </button>
                                 </div>
                             )}
 
-                            <div className="space-y-2">
+
+
+                            <div className="space-y-4">
+                                <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-white/20 ml-2">Parking History</h4>
+
+                                {setHistorySpots && (
+                                    <div className="flex items-center justify-between p-4 bg-zinc-50 dark:bg-white/5 rounded-[2rem] border border-black/5 dark:border-white/5">
+                                        <div className="flex items-center gap-3">
+                                            <div className="p-2.5 rounded-xl bg-purple-500/10 dark:bg-purple-500/20 text-purple-500 dark:text-purple-400"><MapPin size={20} /></div>
+                                            <span className="font-semibold text-sm text-zinc-700 dark:text-white">Show logs on map</span>
+                                        </div>
+                                        <button
+                                            onClick={() => setShowHistoryOnMap(!showHistoryOnMap)}
+                                            className={`w-12 h-7 rounded-full transition-colors relative ${showHistoryOnMap ? 'bg-[#007AFF]' : 'bg-zinc-200 dark:bg-white/20'}`}
+                                        >
+                                            <div className={`absolute top-1 bottom-1 w-5 h-5 rounded-full bg-white transition-transform ${showHistoryOnMap ? 'left-[calc(100%-1.25rem-0.25rem)]' : 'left-1'}`} />
+                                        </button>
+                                    </div>
+                                )}
+
+                                {/* Filters Container */}
+                                <div className="space-y-3">
+                                    <div className="flex justify-between items-center gap-2 p-1 bg-zinc-100 dark:bg-white/5 rounded-[1.5rem] border border-black/5 dark:border-white/5">
+                                        {(['all', 'bicycle', 'motorcycle', 'car'] as const).map((type) => (
+                                            <button
+                                                key={type}
+                                                onClick={() => setFilterType(type)}
+                                                className={`flex-1 flex items-center justify-center py-2.5 rounded-[1.2rem] text-sm transition-all active:scale-95 ${filterType === type
+                                                    ? 'bg-white dark:bg-white/10 text-zinc-900 dark:text-white font-bold shadow-sm'
+                                                    : 'text-zinc-400 dark:text-white/40 hover:text-zinc-600 dark:hover:text-white/60'
+                                                    }`}
+                                            >
+                                                {type === 'all' ? 'All' : <span className="text-xl">{type === 'bicycle' ? '🚲' : type === 'motorcycle' ? '🏍️' : '🚗'}</span>}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
                                 {filteredLogs.length > 0 ? (
                                     filteredLogs.map((log) => {
                                         const content = log.decryptedContent;

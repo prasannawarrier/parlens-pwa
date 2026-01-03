@@ -3,12 +3,16 @@ export const KINDS = {
     OPEN_SPOT_BROADCAST: 31714, // Open Spot Broadcast (Addressable/Replaceable with expiration)
     ROUTE_LOG: 34171, // My Route Log (Addressable for saved routes)
     RELAY_LIST: 10002, // NIP-65 Relay List Metadata (Replaceable)
+    // Listed Parking Kinds
+    LISTED_PARKING_METADATA: 31147, // Listed Parking Metadata (Parent - Addressable)
+    PARKING_SPOT_LISTING: 37141, // Parking Spot Listing (Child - Addressable)
+    LISTED_SPOT_LOG: 1714, // Listed Spot Log Update (Status - Regular)
+    PRIVATE_LOG_NOTE: 1417, // Private Log Status Note (Encrypted - Regular)
 };
 
 export const DEFAULT_RELAYS = [
-    'wss://relay.damus.io',
-    'wss://nos.lol',
     'wss://relay.primal.net',
+    'wss://nos.lol',
     'wss://relay.snort.social',
 ];
 

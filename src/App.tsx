@@ -215,11 +215,16 @@ const Login: React.FC = () => {
 
                   <p>
                     <strong className="text-zinc-900 dark:text-white block mb-1">3. Find and log parking</strong>
-                    Click the main button once to see open spots reported by others live or within the last 5 minutes. Click again to mark your location. When leaving, click once more to end the session and report the fee. Use the profile button to see your parking history.
+                    Click the main button once to see open spots in listed parking spaces and open spots reported by others live or within the last 5 minutes. For standard parking: Click again to mark your location. When leaving, click once more to end the session, log the fee and report the spot. For listed parking: Click the QR code scanner button below the vehicle type selector. Scan the QR code at the parking location to start the session. When leaving, scan it again to end the session and log the fee. Use the profile button to see your parking history.
                   </p>
 
                   <p>
-                    <strong className="text-zinc-900 dark:text-white block mb-1">4. Create your own mirror (optional)</strong>
+                    <strong className="text-zinc-900 dark:text-white block mb-1">4. Create and manage a listed parking (optional)</strong>
+                    Users who oversee one or more parking spots can create a listed parking to simplify spot and lot management. Click the parking services button (‽) at the bottom left-hand corner of the screen, and click the '+' button to create a listing. Provide the relevant details requested in form to create an online listing that matches your real-world space. Listed parkings can be public (open to all users) or private (open to select users and only publish to select relays). Once created you can see your listings as viewed by other users in the public or private listing page. You should use the my listing page to manage your listing(s). Larger listings may take longer to create.
+                  </p>
+
+                  <p>
+                    <strong className="text-zinc-900 dark:text-white block mb-1">5. Create your own mirror (optional)</strong>
                     <a
                       href="https://github.com/prasannawarrier/parlens-pwa/blob/main/MIRROR_CREATION.md"
                       target="_blank"
@@ -231,8 +236,8 @@ const Login: React.FC = () => {
                   </p>
 
                   <p>
-                    <strong className="text-zinc-900 dark:text-white block mb-1">5. User privacy</strong>
-                    Parlens does not collect or share any user data. Your log and route data is encrypted by your keys and only accessible by you. Open spot broadcasts are ephemeral and not linked to any personal identifiers.
+                    <strong className="text-zinc-900 dark:text-white block mb-1">6. User privacy</strong>
+                    Parlens does not collect or share any user data. Your log and route data is encrypted by your keys, only accessible by you and stored on relays of your preference. Open spot broadcasts and listed parking log updates use temporary identifiers to prevent your permanent public key from being shared.
                   </p>
 
                   {/* Tip */}

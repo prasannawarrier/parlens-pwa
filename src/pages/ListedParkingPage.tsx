@@ -1,0 +1,1766 @@
+
+/**
+ * Listed Parking Page - Fullscreen page for managing and discovering listed parking spots
+ * Refined based on user feedback (Style, Form, Features)
+ */
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { MapPin, Plus, QrCode, Trash2, X, Check, Copy, Pencil, ChevronRight, LocateFixed, Users, ArrowLeft, Search, RotateCcw } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import { KINDS, DEFAULT_RELAYS } from '../lib/nostr';
+import { encodeGeohash, calculateDistance } from '../lib/geo';
+import { getCurrencyFromLocation } from '../lib/currency'; // Import currency utility
+import * as nip19 from 'nostr-tools/nip19';
+
+// Types for Listed Parking
+export interface ListedParkingMetadata {
+    id: string;
+    pubkey?: string;
+    d: string;
+    listing_name: string;
+    location: string;
+    g: string;
+    floors?: string;
+    floor_plan?: any[];
+    total_spots?: number;
+    rates?: Record<string, { hourly: number; currency: string }>;
+    listing_type: 'public' | 'private';
+    qr_type?: 'static' | 'dynamic';
+    status?: 'open' | 'closed';
+    owners: string[];
+    managers: string[];
+    members: string[];
+    relays?: string[];
+    local_area?: string;
+    city?: string;
+    zipcode?: string;
+    description?: string;
+    created_at?: number;
+    originalEvent?: any;
+}
+
+export interface ParkingSpotListing {
+    id: string;
+    pubkey: string;
+    d: string;
+    a: string;
+    spot_number: string;
+    floor?: string;
+    short_name?: string;
+    type: 'bicycle' | 'motorcycle' | 'car';
+    location: string;
+    g: string;
+    content: string;
+    rates?: { hourly: number; currency: string };
+}
+
+export interface SpotStatus {
+    id: string;
+    pubkey: string;
+    a: string;
+    status: 'occupied' | 'open' | 'closed';
+    updated_by: string;
+    authorizer?: string;
+    created_at: number;
+}
+
+interface ListedParkingPageProps {
+    onClose: () => void;
+    currentLocation?: [number, number] | null;
+    countryCode?: string | null;
+    onPickLocation?: () => void;
+    pickedLocation?: { lat: number, lon: number } | null;
+}
+
+type TabType = 'public' | 'private' | 'my';
+
+export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, currentLocation, countryCode, onPickLocation, pickedLocation }) => {
+    const { pubkey, pool, signEvent } = useAuth();
+    const [activeTab, setActiveTab] = useState<TabType>('public');
+    const [selectedListing, setSelectedListing] = useState<ListedParkingMetadata | null>(null);
+    const [showCreateForm, setShowCreateForm] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
+    const [listings, setListings] = useState<ListedParkingMetadata[]>([]);
+    const [spots, setSpots] = useState<ParkingSpotListing[]>([]);
+    const [spotStatuses, setSpotStatuses] = useState<Map<string, SpotStatus>>(new Map());
+    const [selectedSpot, setSelectedSpot] = useState<ParkingSpotListing | null>(null);
+    const [editingListing, setEditingListing] = useState<ListedParkingMetadata | null>(null);
+    const [isDeleting, setIsDeleting] = useState(false);
+    const [vehicleFilter, setVehicleFilter] = useState<'all' | 'car' | 'motorcycle' | 'bicycle'>('all');
+    const [searchTerm, setSearchTerm] = useState('');
+    const [listingStats, setListingStats] = useState<Map<string, {
+        car: { open: number; occupied: number; closed: number; total: number; rate: number };
+        motorcycle: { open: number; occupied: number; closed: number; total: number; rate: number };
+        bicycle: { open: number; occupied: number; closed: number; total: number; rate: number };
+    }>>(new Map());
+    const [showAccessListModal, setShowAccessListModal] = useState<ListedParkingMetadata | null>(null);
+
+
+    // Fetch listings and their stats
+    const fetchListings = useCallback(async () => {
+        if (!pool) return;
+        setIsLoading(true);
+
+        try {
+            // 1. Fetch Metadata
+            const rawEvents = await pool.querySync(DEFAULT_RELAYS, {
+                kinds: [KINDS.LISTED_PARKING_METADATA],
+                limit: 100
+            });
+
+            // Deduplicate events (Addressable Kind 31147) - Keep only latest per d-tag
+            const uniqueEventsMap = new Map<string, any>();
+            rawEvents.forEach((ev: any) => {
+                const d = ev.tags.find((t: string[]) => t[0] === 'd')?.[1];
+                if (!d) return;
+
+                // Filter out test events
+                if (ev.content === 'Parlens Relay Check' || d.startsWith('test-relay-check-')) return;
+
+                const key = `${ev.pubkey}:${d}`;
+                if (!uniqueEventsMap.has(key) || uniqueEventsMap.get(key).created_at < ev.created_at) {
+                    uniqueEventsMap.set(key, ev);
+                }
+            });
+            const events = Array.from(uniqueEventsMap.values());
+
+            const parsedListings: ListedParkingMetadata[] = events.map((event: any) => {
+                const getTagValue = (name: string) => event.tags.find((t: string[]) => t[0] === name)?.[1] || '';
+                const getTagValues = (name: string) => event.tags.filter((t: string[]) => t[0] === name).map((t: string[]) => t[1]);
+
+                const owners = event.tags.filter((t: string[]) => t[0] === 'p' && t[2] === 'admin').map((t: string[]) => t[1]);
+                const managers = event.tags.filter((t: string[]) => t[0] === 'p' && t[2] === 'write').map((t: string[]) => t[1]);
+                const members = event.tags.filter((t: string[]) => t[0] === 'p' && t[2] === 'read').map((t: string[]) => t[1]);
+                const relays = getTagValues('relay');
+                const fp = getTagValue('floor_plan');
+                const floorPlan = fp ? JSON.parse(fp) : undefined;
+
+                let rates;
+                try {
+                    const ratesStr = getTagValue('rates');
+                    if (ratesStr) rates = JSON.parse(ratesStr);
+                } catch { }
+
+                return {
+                    id: event.id,
+                    pubkey: event.pubkey,
+                    d: getTagValue('d'),
+                    listing_name: getTagValue('listing_name') || 'Unnamed',
+                    location: getTagValue('location'),
+                    g: getTagValue('g'),
+                    floors: getTagValue('floors'),
+                    floor_plan: floorPlan,
+                    rates,
+                    listing_type: (getTagValue('listing_type') as 'public' | 'private') || 'public',
+                    qr_type: (getTagValue('qr_type') as 'static' | 'dynamic') || 'static',
+                    status: (getTagValue('status') as 'open' | 'closed') || 'open',
+                    owners,
+                    managers,
+                    members,
+                    relays,
+                    local_area: getTagValue('local_area'),
+                    city: getTagValue('city'),
+                    zipcode: getTagValue('zipcode'),
+                    description: event.content,
+                    created_at: event.created_at,
+                    originalEvent: event
+                };
+            });
+
+            setListings(parsedListings);
+
+            // 2. Fetch Spots for ALL listings to compute stats
+            // Batched fetch for all listing coordinate tags
+            const aTags = parsedListings.map(l => {
+                const tag = `${KINDS.LISTED_PARKING_METADATA}:${l.pubkey}:${l.d}`;
+                // console.log('[Parlens] Expected a-tag for listing:', l.listing_name, tag);
+                return tag;
+            });
+
+            if (aTags.length === 0) {
+                setIsLoading(false);
+                return;
+            }
+
+            const allSpots = await pool.querySync(DEFAULT_RELAYS, {
+                kinds: [KINDS.PARKING_SPOT_LISTING],
+                '#a': aTags
+            });
+            console.log(`[Parlens] Fetched ${allSpots.length} spots for ${parsedListings.length} listings. aTags queried:`, aTags.length);
+
+            // 3. Fetch Statuses for ALL spots
+            const spotATags = allSpots.map((s: any) => {
+                const d = s.tags.find((t: string[]) => t[0] === 'd')?.[1];
+                return `${KINDS.PARKING_SPOT_LISTING}:${s.pubkey}:${d}`;
+            });
+
+            let allStatuses: any[] = [];
+            if (spotATags.length > 0) {
+                // Batch in chunks if necessary, but for now simplistic
+                allStatuses = await pool.querySync(DEFAULT_RELAYS, {
+                    kinds: [KINDS.LISTED_SPOT_LOG],
+                    '#a': spotATags
+                });
+            }
+
+            // Map most recent status per spot
+            const statusMap = new Map<string, string>(); // spot_a_tag -> status
+            // Sort by created_at desc to get latest
+            allStatuses.sort((a, b) => b.created_at - a.created_at);
+            allStatuses.forEach((ev: any) => {
+                const a = ev.tags.find((t: string[]) => t[0] === 'a')?.[1];
+                if (a && !statusMap.has(a)) {
+                    const s = ev.tags.find((t: string[]) => t[0] === 'status')?.[1];
+                    statusMap.set(a, s || 'open');
+                }
+            });
+
+            // Compute Stats per Listing
+            const newStats = new Map();
+            for (const listing of parsedListings) {
+                const listingATag = `${KINDS.LISTED_PARKING_METADATA}:${listing.pubkey}:${listing.d}`;
+                const lSpots = allSpots.filter((s: any) => s.tags.find((t: string[]) => t[0] === 'a')?.[1] === listingATag);
+
+                const stats = {
+                    car: { open: 0, occupied: 0, closed: 0, total: 0, rate: listing.rates?.car?.hourly || 0 },
+                    motorcycle: { open: 0, occupied: 0, closed: 0, total: 0, rate: listing.rates?.motorcycle?.hourly || 0 },
+                    bicycle: { open: 0, occupied: 0, closed: 0, total: 0, rate: listing.rates?.bicycle?.hourly || 0 }
+                };
+
+                for (const spot of lSpots) {
+                    const d = spot.tags.find((t: string[]) => t[0] === 'd')?.[1];
+                    const type = spot.tags.find((t: string[]) => t[0] === 'type')?.[1] as 'car' | 'motorcycle' | 'bicycle' || 'car';
+                    // Check individual spot override rate
+                    // (Skipping individual spot rate logic for aggregate stats for now, using listing base rate)
+
+                    const spotTag = `${KINDS.PARKING_SPOT_LISTING}:${spot.pubkey}:${d}`;
+                    const status = statusMap.get(spotTag) || 'open';
+
+                    if (stats[type]) {
+                        stats[type].total++;
+                        if (status === 'occupied') stats[type].occupied++;
+                        else if (status === 'closed') stats[type].closed++;
+                        else stats[type].open++;
+                    }
+                }
+                newStats.set(listing.id, stats);
+            }
+            setListingStats(newStats);
+
+        } catch (error) {
+            console.error('Error fetching listings:', error);
+        } finally {
+            setIsLoading(false);
+        }
+    }, [pool]);
+
+    // Fetch spots for detailed view (keep existing logic but update state)
+    const fetchSpots = useCallback(async (listing: ListedParkingMetadata) => {
+        if (!pool) return;
+
+        try {
+            const aTag = `${KINDS.LISTED_PARKING_METADATA}:${listing.pubkey}:${listing.d}`;
+            const events = await pool.querySync(DEFAULT_RELAYS, {
+                kinds: [KINDS.PARKING_SPOT_LISTING],
+                '#a': [aTag],
+            });
+
+            const parsedSpots: ParkingSpotListing[] = events.map((event: any) => {
+                const getTagValue = (name: string) => event.tags.find((t: string[]) => t[0] === name)?.[1] || '';
+                return {
+                    id: event.id,
+                    pubkey: event.pubkey,
+                    d: getTagValue('d'),
+                    a: getTagValue('a'),
+                    spot_number: getTagValue('spot_number'),
+                    floor: getTagValue('floor'),
+                    short_name: getTagValue('short_name'),
+                    type: (getTagValue('type') as 'bicycle' | 'motorcycle' | 'car') || 'car',
+                    location: getTagValue('location'),
+                    g: getTagValue('g'),
+                    content: event.content,
+                    rates: listing.rates?.[getTagValue('type') || 'car']
+                };
+            });
+
+            parsedSpots.sort((a, b) => parseInt(a.spot_number) - parseInt(b.spot_number));
+            setSpots(parsedSpots);
+
+            // Fetch statuses for these specific spots
+            const spotATags = parsedSpots.map(s => `${KINDS.PARKING_SPOT_LISTING}:${s.pubkey}:${s.d}`);
+            const statusEvents = await pool.querySync(DEFAULT_RELAYS, {
+                kinds: [KINDS.LISTED_SPOT_LOG],
+                '#a': spotATags,
+            }); // Note: should fetch latest per a-tag ideally, but client-side filter works for small sets
+
+            // Group by 'a' tag to find latest
+            const latestStatus = new Map<string, any>();
+            statusEvents.forEach((ev: any) => {
+                const a = ev.tags.find((t: string[]) => t[0] === 'a')?.[1];
+                if (!latestStatus.has(a) || latestStatus.get(a).created_at < ev.created_at) {
+                    latestStatus.set(a, ev);
+                }
+            });
+
+            const newStatuses = new Map();
+            latestStatus.forEach((event, a) => {
+                const spot = parsedSpots.find(s => `${KINDS.PARKING_SPOT_LISTING}:${s.pubkey}:${s.d}` === a);
+                if (spot) {
+                    const getTagValue = (name: string) => event.tags.find((t: string[]) => t[0] === name)?.[1] || '';
+                    newStatuses.set(spot.d, {
+                        id: event.id,
+                        pubkey: event.pubkey,
+                        a: getTagValue('a'),
+                        status: (getTagValue('status') as 'occupied' | 'open' | 'closed') || 'open',
+                        updated_by: getTagValue('updated_by'),
+                        authorizer: getTagValue('authorizer'),
+                        created_at: event.created_at
+                    });
+                }
+            });
+            setSpotStatuses(newStatuses);
+
+        } catch (error) { console.error('Error fetching spots:', error); }
+    }, [pool]);
+
+    useEffect(() => {
+        fetchListings();
+    }, [fetchListings, activeTab]); // Reload when tab changes
+
+    // Real-time subscription for Kind 1714 status updates
+    useEffect(() => {
+        if (!pool) return;
+
+        // Optimizing subscription:
+        // 1. If we are viewing a listing (spots are loaded), subscribe to those specific spots.
+        // 2. If in list view (spots not loaded), we can't easily subscribe to all spots without fetching them.
+        //    For now, we will prioritize the detail view performance as that's where "status" is critical.
+
+        let filterATags: string[] = [];
+
+        if (spots.length > 0) {
+            // Detailed view: Subscribe to loaded spots
+            filterATags = spots.map(s => `${KINDS.PARKING_SPOT_LISTING}:${s.pubkey}:${s.d}`);
+        } else {
+            // List view: Optional. Subscribing to ALL listings' spots is heavy. 
+            // We could fetch listing metadata's "total" but that doesn't give us a-tags.
+            // Leaving this blank means List View stats might not be real-time, 
+            // but avoids the global firehose performance issue. 
+            // User complaint is about "log status taking time" which implies detail view.
+            return;
+        }
+
+        if (filterATags.length === 0) return;
+
+        console.log('[Parlens] Subscribing to status updates for', filterATags.length, 'spots');
+
+        const statusesMapRef: Map<string, { status: string; created_at: number }> = new Map();
+
+        const sub = pool.subscribeMany(
+            DEFAULT_RELAYS,
+            [{
+                kinds: [KINDS.LISTED_SPOT_LOG],
+                '#a': filterATags, // Efficient filter
+                since: Math.floor(Date.now() / 1000) - 3600
+            }] as any,
+            {
+                onevent(event: any) {
+                    const aTag = event.tags.find((t: string[]) => t[0] === 'a')?.[1];
+                    const status = event.tags.find((t: string[]) => t[0] === 'status')?.[1];
+
+                    if (!aTag || !status) return;
+
+                    // Only update if this event is newer than what we have
+                    const existing = statusesMapRef.get(aTag);
+                    if (existing && existing.created_at >= event.created_at) return;
+
+                    statusesMapRef.set(aTag, { status, created_at: event.created_at });
+
+                    // Update spotStatuses state
+                    setSpotStatuses(prev => {
+                        const dTag = aTag.split(':').pop(); // Extract d-tag from a-tag
+                        if (!dTag) return prev;
+
+                        const newMap = new Map(prev);
+                        const existingStatus = newMap.get(dTag);
+
+                        // Only update if newer
+                        if (!existingStatus || existingStatus.created_at < event.created_at) {
+                            newMap.set(dTag, {
+                                id: event.id,
+                                pubkey: event.pubkey,
+                                a: aTag,
+                                status: status as 'occupied' | 'open' | 'closed',
+                                updated_by: event.tags.find((t: string[]) => t[0] === 'updated_by')?.[1] || '',
+                                authorizer: event.tags.find((t: string[]) => t[0] === 'authorizer')?.[1] || '',
+                                created_at: event.created_at
+                            });
+                        }
+                        return newMap;
+                    });
+                },
+                oneose() {
+                    console.log('[Parlens] Real-time subscription active');
+                }
+            }
+        );
+
+        return () => {
+            console.log('[Parlens] Closing real-time status subscription');
+            sub.close();
+        };
+    }, [pool, listings]);
+
+    useEffect(() => {
+        if (selectedListing) {
+            fetchSpots(selectedListing);
+        }
+    }, [selectedListing, fetchSpots]);
+
+    const deleteListing = async (listing: ListedParkingMetadata) => {
+        if (!pool || !pubkey || !signEvent) return;
+        if (!confirm(`Delete "${listing.listing_name}" ? This will delete all spots.`)) return;
+
+        setIsDeleting(true);
+        try {
+            // Delete spots
+            const aTag = `${KINDS.LISTED_PARKING_METADATA}:${listing.pubkey}:${listing.d}`;
+            const spotEvents = await pool.querySync(DEFAULT_RELAYS, { kinds: [KINDS.PARKING_SPOT_LISTING], '#a': [aTag] });
+
+            for (const spot of spotEvents) {
+                const dTag = spot.tags.find((t: string[]) => t[0] === 'd')?.[1];
+                if (dTag) {
+                    const deleteSpot = {
+                        kind: 5, created_at: Math.floor(Date.now() / 1000),
+                        tags: [['e', spot.id], ['a', `${KINDS.PARKING_SPOT_LISTING}:${pubkey}:${dTag}`]],
+                        content: 'Deleted'
+                    };
+                    await Promise.allSettled(pool.publish(DEFAULT_RELAYS, await signEvent(deleteSpot)));
+                }
+            }
+
+            // Delete listing
+            const deleteEvent = {
+                kind: 5, created_at: Math.floor(Date.now() / 1000),
+                tags: [['e', listing.id], ['a', `${KINDS.LISTED_PARKING_METADATA}:${pubkey}:${listing.d}`]],
+                content: 'Deleted'
+            };
+            await Promise.allSettled(pool.publish(DEFAULT_RELAYS, await signEvent(deleteEvent)));
+            setListings(prev => prev.filter(l => l.id !== listing.id));
+            setSelectedListing(null);
+        } catch (e) { console.error(e); } finally { setIsDeleting(false); }
+    };
+
+
+    const filteredListings = useMemo(() => {
+        let res = listings.filter(l => {
+            // Tab filtering
+            let match = false;
+            if (activeTab === 'public') match = l.listing_type === 'public';
+            else if (activeTab === 'private') match = l.listing_type === 'private' && (l.members.includes(pubkey!) || l.owners.includes(pubkey!) || l.managers.includes(pubkey!));
+            else if (activeTab === 'my') match = l.owners.includes(pubkey!) || l.managers.includes(pubkey!);
+
+            if (!match) return false;
+
+            // Search filtering
+            if (searchTerm) {
+                const term = searchTerm.toLowerCase();
+                const textMatch = l.listing_name.toLowerCase().includes(term) ||
+                    l.local_area?.toLowerCase().includes(term) ||
+                    l.city?.toLowerCase().includes(term) ||
+                    l.zipcode?.toLowerCase().includes(term);
+                if (!textMatch) return false;
+            }
+            return true;
+        });
+
+        // Sorting Logic
+        // Default: Distance (asc) -> Open Spots (desc)
+        // Fallback: Open Spots (desc) -> Name (asc)
+        res.sort((a, b) => {
+            // 1. Distance (if location + user location available)
+            if (currentLocation && a.location && b.location) {
+                const [latA, lonA] = a.location.split(',').map(n => parseFloat(n.trim()));
+                const [latB, lonB] = b.location.split(',').map(n => parseFloat(n.trim()));
+
+                if (!isNaN(latA) && !isNaN(lonA) && !isNaN(latB) && !isNaN(lonB)) {
+                    const distA = calculateDistance(currentLocation[0], currentLocation[1], latA, lonA);
+                    const distB = calculateDistance(currentLocation[0], currentLocation[1], latB, lonB);
+                    if (Math.abs(distA - distB) > 0.1) return distA - distB; // Sort by dist if diff > 100m
+                }
+            }
+
+            // 2. Open Spots (for selected filter or total)
+            const statsA = listingStats.get(a.id);
+            const statsB = listingStats.get(b.id);
+
+            const getOpen = (stats: any) => {
+                if (!stats) return 0;
+                if (vehicleFilter === 'all') return (stats.car.open + stats.motorcycle.open + stats.bicycle.open);
+                return stats[vehicleFilter]?.open || 0;
+            };
+
+            const openA = getOpen(statsA);
+            const openB = getOpen(statsB);
+
+            if (openA !== openB) return openB - openA; // More open spots first
+
+            // 3. Name fallback
+            return a.listing_name.localeCompare(b.listing_name);
+        });
+
+        return res;
+    }, [listings, activeTab, pubkey, searchTerm, listingStats, vehicleFilter, currentLocation]);
+
+    const filteredSpots = useMemo(() => spots.filter(s => vehicleFilter === 'all' || s.type === vehicleFilter), [spots, vehicleFilter]);
+
+    return (
+        <div className="fixed inset-0 z-[3000] bg-zinc-50 dark:bg-black flex flex-col transition-colors">
+            {/* Loading Overlay for Deleting */}
+            {isDeleting && (
+                <div className="fixed inset-0 z-[3100] flex items-center justify-center bg-black/50 backdrop-blur-sm flex-col">
+                    <div className="animate-spin w-8 h-8 border-4 border-white/20 border-t-white rounded-full"></div>
+                    <div className="text-white font-bold mt-4">Deleting...</div>
+                </div>
+            )}
+
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-4 border-b border-black/5 dark:border-white/10 bg-white dark:bg-[#1c1c1e]">
+                <div className="flex items-center gap-3">
+                    <button onClick={selectedListing ? () => setSelectedListing(null) : onClose} className="p-2 rounded-full bg-black/5 dark:bg-white/10">
+                        <ChevronRight size={20} className="text-black/60 dark:text-white/60 rotate-180" />
+                    </button>
+                    <h1 className="text-xl font-bold bg-gradient-to-r from-blue-500 to-cyan-500 bg-clip-text text-transparent">
+                        {selectedListing ? selectedListing.listing_name : 'Listed Parking'}
+                    </h1>
+                </div>
+                {!selectedListing && (
+                    <button
+                        onClick={() => setShowCreateForm(true)}
+                        className="flex items-center gap-2 p-3 md:px-4 md:py-2 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-full text-sm font-bold shadow-lg shadow-blue-500/20 active:scale-95 transition-transform"
+                    >
+                        <Plus size={20} />
+                        <span className="hidden md:inline">Create Listing</span>
+                    </button>
+                )}
+            </div>
+
+            {/* Content Container */}
+            <div className="flex-1 flex flex-col overflow-hidden">
+                {selectedListing ? (
+                    // Spot View
+                    <div className="flex-1 flex flex-col p-4 bg-zinc-50 dark:bg-black/50 overflow-hidden">
+                        <div className="flex gap-2 mb-4 overflow-x-auto pb-2 no-scrollbar">
+                            <button onClick={() => setVehicleFilter('all')} className={`px-4 py-2 rounded-full text-sm font-bold whitespace-nowrap ${vehicleFilter === 'all' ? 'bg-zinc-800 text-white' : 'bg-white dark:bg-zinc-800/50 text-zinc-600 dark:text-zinc-400'}`}>All Spots</button>
+                            <button onClick={() => setVehicleFilter('car')} className={`px-4 py-2 rounded-full text-sm font-bold whitespace-nowrap ${vehicleFilter === 'car' ? 'bg-blue-500 text-white' : 'bg-white dark:bg-zinc-800/50 text-zinc-600 dark:text-zinc-400'}`}>🚗 Cars</button>
+                            <button onClick={() => setVehicleFilter('motorcycle')} className={`px-4 py-2 rounded-full text-sm font-bold whitespace-nowrap ${vehicleFilter === 'motorcycle' ? 'bg-orange-500 text-white' : 'bg-white dark:bg-zinc-800/50 text-zinc-600 dark:text-zinc-400'}`}>🏍️ Moto</button>
+                            <button onClick={() => setVehicleFilter('bicycle')} className={`px-4 py-2 rounded-full text-sm font-bold whitespace-nowrap ${vehicleFilter === 'bicycle' ? 'bg-green-500 text-white' : 'bg-white dark:bg-zinc-800/50 text-zinc-600 dark:text-zinc-400'}`}>🚲 Bikes</button>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto">
+                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                                {filteredSpots.map(spot => {
+                                    const status = spotStatuses.get(spot.d);
+                                    const statusColor = status?.status === 'occupied' ? 'bg-red-500/10 border-red-500/20 text-red-600 dark:text-red-400' :
+                                        status?.status === 'closed' ? 'bg-zinc-500/10 border-zinc-500/20 text-zinc-600 dark:text-zinc-400' :
+                                            'bg-green-500/10 border-green-500/20 text-green-600 dark:text-green-400';
+                                    return (
+                                        <button
+                                            key={spot.id}
+                                            onClick={() => setSelectedSpot(spot)}
+                                            className={`p-3 rounded-2xl border ${statusColor} text-center active:scale-[0.98] transition-transform`}
+                                        >
+                                            <div className="text-3xl mb-1">
+                                                {spot.type === 'car' ? '🚗' : spot.type === 'motorcycle' ? '🏍️' : '🚲'}
+                                            </div>
+                                            <p className="font-bold text-sm text-zinc-900 dark:text-white">
+                                                {spot.short_name || `#${spot.spot_number}`}
+                                            </p>
+                                            {spot.floor && <p className="text-xs opacity-60">{spot.floor}</p>}
+                                            <p className="mt-1 text-[10px] font-bold uppercase tracking-wider opacity-80">{status?.status || 'Open'}</p>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    </div>
+                ) : (
+                    // List View
+                    <>
+                        <div className="flex border-b border-black/5 dark:border-white/10 bg-white dark:bg-[#1c1c1e]">
+                            {(['public', 'private', 'my'] as TabType[]).map(tab => (
+                                <button
+                                    key={tab}
+                                    onClick={() => setActiveTab(tab)}
+                                    className={`flex-1 py-3 text-sm font-bold transition-colors ${activeTab === tab ? 'text-[#007AFF] border-b-2 border-[#007AFF]' : 'text-zinc-400'}`}
+                                >
+                                    {tab === 'public' ? 'Public Listings' : tab === 'private' ? 'Private Listings' : 'My Listings'}
+                                </button>
+                            ))}
+                        </div>
+
+                        <div className="flex flex-col gap-3 px-4 py-2">
+                            {/* Search Box */}
+                            <div className="flex flex-col gap-2">
+                                <div className="relative w-full flex items-center gap-2">
+                                    <div className="relative flex-1">
+                                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={16} />
+                                        <input
+                                            value={searchTerm}
+                                            onChange={e => setSearchTerm(e.target.value)}
+                                            placeholder="Search listing name or location"
+                                            className="w-full pl-10 pr-4 py-2.5 bg-zinc-100 dark:bg-white/10 rounded-xl text-sm font-medium text-zinc-900 dark:text-white border border-black/5 dark:border-white/10 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-all placeholder:text-zinc-400 dark:placeholder:text-white/40"
+                                        />
+                                    </div>
+                                    <button
+                                        onClick={() => fetchListings()}
+                                        className="p-2.5 bg-zinc-100 dark:bg-white/10 border border-black/5 dark:border-white/10 rounded-xl hover:bg-zinc-200 dark:hover:bg-white/20 active:scale-95 transition-all text-zinc-600 dark:text-white shadow-sm"
+                                        title="Refresh Listings"
+                                    >
+                                        <RotateCcw size={20} />
+                                    </button>
+                                </div>
+                                <div className="flex items-center gap-4 text-[10px] font-bold uppercase tracking-wider text-zinc-500 justify-start pl-1">
+                                    <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-green-500"></div>Open</div>
+                                    <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-red-500"></div>Occupied</div>
+                                    <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-zinc-400"></div>Closed</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                            {isLoading ? (
+                                <div className="flex justify-center p-8"><div className="w-8 h-8 rounded-full border-4 border-blue-500/20 border-t-blue-500 animate-spin" /></div>
+                            ) : filteredListings.length === 0 ? (
+                                <div className="text-center py-10 text-zinc-400">No listings found</div>
+                            ) : (
+                                filteredListings.map(listing => {
+                                    const stats = listingStats.get(listing.id);
+                                    const isClosed = listing.status === 'closed';
+
+                                    // Override stats if closed
+                                    const displayStats = isClosed ? {
+                                        car: { ...stats?.car, open: 0 },
+                                        motorcycle: { ...stats?.motorcycle, open: 0 },
+                                        bicycle: { ...stats?.bicycle, open: 0 }
+                                    } : stats;
+
+                                    return (
+                                        <div key={listing.id} className="group relative bg-white dark:bg-[#1c1c1e] rounded-2xl p-4 border border-black/5 dark:border-white/10 shadow-sm transition-all hover:shadow-md active:scale-[0.99] cursor-pointer" onClick={() => setSelectedListing(listing)}>
+                                            <div className="flex flex-col items-start mb-3">
+                                                <div className="flex items-center justify-between w-full gap-2 mb-1">
+                                                    <div className="flex items-center gap-2 min-w-0">
+                                                        <h3 className="font-bold text-zinc-900 dark:text-white text-lg leading-tight truncate">{listing.listing_name}</h3>
+                                                        <span className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${listing.listing_type === 'public' ? 'bg-green-500/10 text-green-600' : 'bg-purple-500/10 text-purple-600'}`}>
+                                                            {listing.listing_type}
+                                                        </span>
+                                                        {isClosed && (
+                                                            <span className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-zinc-500/10 text-zinc-500 dark:text-zinc-400">
+                                                                CLOSED
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </div>
+
+                                                {/* Access List Button */}
+                                                <div className="absolute top-4 right-4 flex gap-1">
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setShowAccessListModal(listing);
+                                                        }}
+                                                        className="p-1.5 text-zinc-400 hover:text-blue-500 active:opacity-50 transition-colors"
+                                                    >
+                                                        <Users size={18} />
+                                                    </button>
+                                                    {activeTab === 'my' && (listing.owners.includes(pubkey!) || listing.managers.includes(pubkey!)) && (
+                                                        <>
+                                                            <button onClick={(e) => { e.stopPropagation(); setEditingListing(listing); setShowCreateForm(true); }} className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-white active:opacity-50 transition-colors">
+                                                                <Pencil size={18} />
+                                                            </button>
+                                                            <button onClick={(e) => { e.stopPropagation(); deleteListing(listing); }} className="p-1.5 text-zinc-400 hover:text-red-500 active:opacity-50 transition-colors">
+                                                                <Trash2 size={18} />
+                                                            </button>
+                                                        </>
+                                                    )}
+                                                </div>
+
+                                                <p className="text-xs text-zinc-500 dark:text-white/40 flex items-center gap-1">
+                                                    <MapPin size={12} /> {listing.location || 'No location'}
+                                                </p>
+                                                {listing.description && (
+                                                    <p className="text-xs text-zinc-500 dark:text-white/60 mt-1 line-clamp-2">
+                                                        {listing.description}
+                                                    </p>
+                                                )}
+                                            </div>
+
+                                            <div className="grid grid-cols-3 gap-2">
+                                                {[
+                                                    { type: 'car' as const, icon: '🚗', data: displayStats?.car, rate: listing.rates?.car },
+                                                    { type: 'motorcycle' as const, icon: '🏍️', data: displayStats?.motorcycle, rate: listing.rates?.motorcycle },
+                                                    { type: 'bicycle' as const, icon: '🚲', data: displayStats?.bicycle, rate: listing.rates?.bicycle }
+                                                ].map(v => {
+                                                    // Availability based strictly on capacity (spots > 0)
+                                                    // This ensures consistent "Not Available" state across Public and Private
+                                                    const isAvailable = (v.data?.total || 0) > 0;
+
+                                                    // Rate display logic:
+                                                    // - Always show if rate exists
+                                                    // - If Public and Available (has spots) but no rate, default to 0/hr
+                                                    const displayRate = v.rate || { hourly: 0, currency: 'INR' };
+                                                    const showRate = !!v.rate || (isAvailable && listing.listing_type === 'public');
+
+                                                    return (
+                                                        <div key={v.type} className={`bg-zinc-50 dark:bg-white/10 rounded-xl p-2 text-center flex flex-col items-center justify-center min-h-[80px] ${isClosed ? 'opacity-50' : ''}`}>
+                                                            <div className="text-3xl mb-1">{v.icon}</div>
+                                                            {isAvailable ? (
+                                                                <div className="flex flex-col items-center w-full">
+                                                                    <div className="font-bold text-sm flex items-center gap-1.5 mb-1.5">
+                                                                        <span className="text-green-500">{v.data?.open || 0}</span>
+                                                                        <span className="text-zinc-300 dark:text-white/20">|</span>
+                                                                        <span className="text-red-500">{v.data?.occupied || 0}</span>
+                                                                        <span className="text-zinc-300 dark:text-white/20">|</span>
+                                                                        <span className="text-zinc-400">{v.data?.closed || 0}</span>
+                                                                    </div>
+                                                                    {showRate && (
+                                                                        <div className="w-full bg-black/5 dark:bg-white/5 rounded-lg py-0.5 px-2">
+                                                                            <div className="text-zinc-900 dark:text-white font-bold text-sm">
+                                                                                {displayRate.currency === 'USD' ? '$' : displayRate.currency === 'EUR' ? '€' : displayRate.currency === 'GBP' ? '£' : '₹'}{displayRate.hourly}<span className="text-[10px] font-normal opacity-60">/hr</span>
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            ) : (
+                                                                <div className="text-xs text-zinc-400 dark:text-white/30 font-medium">Not Available</div>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+
+                                            {/* Close All Toggle */}
+                                            {activeTab === 'my' && (listing.owners.includes(pubkey!) || listing.managers.includes(pubkey!)) && (
+                                                <div className="mt-3 pt-3 border-t border-black/5 dark:border-white/5 flex items-center justify-between" onClick={(e) => e.stopPropagation()}>
+                                                    <span className={`text-sm font-semibold ${!isClosed ? 'text-green-600 dark:text-green-400' : 'text-zinc-500 dark:text-white/50'}`}>
+                                                        {!isClosed ? 'Listing Open' : 'Listing Closed'}
+                                                    </span>
+                                                    <button
+                                                        onClick={async () => {
+                                                            const newStatus = isClosed ? 'open' : 'closed';
+                                                            const confirmMsg = newStatus === 'closed'
+                                                                ? 'This will mark ALL spots as CLOSED. Continue?'
+                                                                : 'This will mark ALL spots as OPEN. Continue?';
+                                                            if (!confirm(confirmMsg)) return;
+
+                                                            // Optimistic UI update
+                                                            setListings(prev => prev.map(l =>
+                                                                l.id === listing.id ? { ...l, status: newStatus as 'open' | 'closed' } : l
+                                                            ));
+
+                                                            // Optimistic Stats update
+                                                            const currentStats = listingStats.get(listing.id);
+                                                            if (currentStats) {
+                                                                const updatedStats = { ...currentStats };
+                                                                (['car', 'motorcycle', 'bicycle'] as const).forEach(vType => {
+                                                                    const total = updatedStats[vType].total;
+                                                                    if (newStatus === 'closed') {
+                                                                        updatedStats[vType] = { ...updatedStats[vType], open: 0, occupied: 0, closed: total };
+                                                                    } else {
+                                                                        updatedStats[vType] = { ...updatedStats[vType], open: total, occupied: 0, closed: 0 };
+                                                                    }
+                                                                });
+                                                                setListingStats(prev => new Map(prev).set(listing.id, updatedStats));
+                                                            }
+
+                                                            try {
+                                                                // Fetch all spots for this listing
+                                                                const aTag = `${KINDS.LISTED_PARKING_METADATA}:${listing.pubkey}:${listing.d}`;
+                                                                const spotEvents = await pool.querySync(DEFAULT_RELAYS, {
+                                                                    kinds: [KINDS.PARKING_SPOT_LISTING],
+                                                                    '#a': [aTag]
+                                                                });
+
+                                                                // Publish status log (Kind 1714) for each spot
+                                                                for (const spot of spotEvents) {
+                                                                    const spotD = spot.tags.find((t: string[]) => t[0] === 'd')?.[1];
+                                                                    const spotATag = `${KINDS.PARKING_SPOT_LISTING}:${spot.pubkey}:${spotD}`;
+                                                                    const statusEvent = {
+                                                                        kind: KINDS.LISTED_SPOT_LOG,
+                                                                        created_at: Math.floor(Date.now() / 1000),
+                                                                        tags: [
+                                                                            ['a', spotATag],
+                                                                            ['status', newStatus],
+                                                                            ['updated_by', pubkey],
+                                                                            ['client', 'parlens']
+                                                                        ],
+                                                                        content: ''
+                                                                    };
+                                                                    const signed = await signEvent(statusEvent);
+                                                                    await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signed));
+                                                                }
+
+                                                                // Also update listing metadata status for display
+                                                                const metaEvent = {
+                                                                    ...listing.originalEvent,
+                                                                    created_at: Math.floor(Date.now() / 1000),
+                                                                    tags: [
+                                                                        ...listing.originalEvent.tags.filter((t: string[]) => t[0] !== 'status'),
+                                                                        ['status', newStatus]
+                                                                    ]
+                                                                };
+                                                                const signedMeta = await signEvent(metaEvent);
+                                                                await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedMeta));
+                                                            } catch (e) {
+                                                                // Revert optimistic update on error
+                                                                setListings(prev => prev.map(l =>
+                                                                    l.id === listing.id ? { ...l, status: isClosed ? 'closed' : 'open' } : l
+                                                                ));
+                                                                alert('Failed to update status');
+                                                            }
+                                                        }}
+                                                        className={`relative h-7 w-12 rounded-full transition-colors ${!isClosed ? 'bg-green-500' : 'bg-zinc-200 dark:bg-white/10'}`}
+                                                    >
+                                                        <span className={`block h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${!isClosed ? 'translate-x-[26px]' : 'translate-x-[4px]'}`} />
+                                                    </button>
+                                                </div>
+                                            )
+                                            }
+                                        </div>
+                                    );
+                                })
+                            )}
+                        </div>
+                    </>
+                )}
+            </div>
+
+            {/* Create Listing Modal */}
+            {
+                showCreateForm && (
+                    <CreateListingModal
+                        editing={editingListing}
+                        currentLocation={currentLocation}
+                        countryCode={countryCode}
+                        onPickLocation={onPickLocation}
+                        pickedLocation={pickedLocation}
+                        onClose={() => { setShowCreateForm(false); setEditingListing(null); }}
+                        onCreated={() => { setShowCreateForm(false); setEditingListing(null); fetchListings(); }}
+                    />
+                )
+            }
+
+            {/* Spot Details */}
+            {
+                selectedSpot && selectedListing && (
+                    <SpotDetailsModal
+                        spot={selectedSpot}
+                        listing={selectedListing}
+                        status={spotStatuses.get(selectedSpot.d)}
+                        isManager={selectedListing.owners.includes(pubkey!) || selectedListing.managers.includes(pubkey!)}
+                        onClose={() => setSelectedSpot(null)}
+                        onStatusChange={() => fetchSpots(selectedListing)}
+                    />
+                )
+            }
+
+            {/* Access List Modal */}
+            {
+                showAccessListModal && (
+                    <AccessListModal
+                        listing={showAccessListModal}
+                        onClose={() => setShowAccessListModal(null)}
+                    />
+                )
+            }
+        </div >
+    );
+};
+
+// Create Form Component
+const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, currentLocation, countryCode, onPickLocation, pickedLocation }) => {
+    const { pubkey, signEvent, pool } = useAuth();
+    const [step, setStep] = useState(1);
+    const [isSaving, setIsSaving] = useState(false);
+    const [showNewFloorForm, setShowNewFloorForm] = useState(false); // UI State for Add Floor
+
+    // Parse initial floors if editing
+    const initialFloors = useMemo(() => {
+        if (!editing?.floor_plan) return [];
+        return editing.floor_plan;
+    }, [editing]);
+
+    const [formData, setFormData] = useState({
+        listing_name: editing?.listing_name || '',
+        description: editing?.description || '',
+        location: editing?.location || '',
+        local_area: editing?.local_area || '',
+        city: editing?.city || '',
+        zipcode: editing?.zipcode || '',
+        country: editing?.country || '',
+        listing_type: editing?.listing_type || 'public',
+        qr_type: editing?.qr_type || 'static',
+        owners: editing?.owners?.join(', ') || '',
+        managers: editing?.managers?.join(', ') || '',
+        members: editing?.members?.join(', ') || '',
+        relays: editing?.relays?.join(', ') || '',
+        currency: 'USD'
+    });
+
+    const [floors, setFloors] = useState<any[]>(initialFloors);
+    const [newFloor, setNewFloor] = useState({
+        name: '',
+        counts: { car: 0, motorcycle: 0, bicycle: 0 },
+        rates: { car: 0, motorcycle: 0, bicycle: 0 }
+    });
+
+    // Initialize currency
+    useEffect(() => {
+        if (!editing && countryCode) {
+            const map: any = { 'US': 'USD', 'GB': 'GBP', 'EU': 'EUR', 'IN': 'INR' };
+            setFormData(prev => ({ ...prev, currency: map[countryCode] || 'USD' }));
+        } else if (editing?.rates?.car?.currency) {
+            setFormData(prev => ({ ...prev, currency: editing.rates.car.currency }));
+        }
+    }, [countryCode, editing]);
+
+    // Update location from pick and validate currency
+    useEffect(() => {
+        if (pickedLocation) {
+            setFormData(prev => ({ ...prev, location: `${pickedLocation.lat.toFixed(6)}, ${pickedLocation.lon.toFixed(6)} ` }));
+
+            // Validate currency
+            getCurrencyFromLocation(pickedLocation.lat, pickedLocation.lon).then(curr => {
+                if (curr && curr !== formData.currency) {
+                    // Just auto-switch if no currency set yet, or prompt?
+                    // For simplicity, just set it if it's the first set (or user hasn't manually changed it much).
+                    // Or better, set it and let user change back if needed.
+                    setFormData(prev => ({ ...prev, currency: curr }));
+                }
+            });
+        }
+    }, [pickedLocation]);
+
+    // Scroll to top on step change
+    useEffect(() => {
+        const modalContent = document.getElementById('create-listing-content');
+        if (modalContent) modalContent.scrollTo({ top: 0, behavior: 'smooth' });
+    }, [step]);
+
+    // Helper to render Npub chips
+    const renderNpubChips = (value: string) => {
+        if (!value) return null;
+        const items = value.split(',').map(s => s.trim()).filter(Boolean);
+        if (items.length === 0) return null;
+        return (
+            <div className="flex flex-wrap gap-2 mt-2">
+                {items.map((item, i) => (
+                    <span key={i} className="px-2 py-1 bg-zinc-200 dark:bg-white/10 rounded-lg text-[10px] font-mono text-zinc-600 dark:text-zinc-400 flex items-center gap-1 max-w-full">
+                        <span className="truncate max-w-[150px]">{item}</span>
+                    </span>
+                ))}
+            </div>
+        );
+    };
+
+    const addFloor = () => {
+        if (!newFloor.name) return;
+        setFloors([...floors, { ...newFloor, id: crypto.randomUUID() }]);
+        setNewFloor(prev => ({ ...prev, name: '', counts: { car: 0, motorcycle: 0, bicycle: 0 } })); // Keep rates for convenience
+    };
+
+    const removeFloor = (index: number) => {
+        setFloors(floors.filter((_, i) => i !== index));
+    };
+
+    const handleSubmit = async () => {
+        if (!formData.listing_name) return;
+
+        // Auto-add pending floor if user forgot to click "Add Floor"
+        let finalFloors = [...floors];
+        if (newFloor.name && (newFloor.counts.car > 0 || newFloor.counts.motorcycle > 0 || newFloor.counts.bicycle > 0)) {
+            // If the form is OPEN and valid, auto-save it
+            if (showNewFloorForm) {
+                console.log('[Parlens] Auto-adding pending floor from open form:', newFloor.name);
+                finalFloors.push({ ...newFloor, id: crypto.randomUUID() });
+            }
+        }
+
+        if (finalFloors.length === 0) {
+            alert('Please add at least one floor with parking spots.');
+            return;
+        }
+
+        let geohash = '';
+        if (formData.location) {
+            const [lat, lon] = formData.location.split(',').map((s: string) => parseFloat(s.trim()));
+            if (!isNaN(lat) && !isNaN(lon)) geohash = encodeGeohash(lat, lon, 10);
+        }
+
+        const listingId = (editing?.d || crypto.randomUUID()).trim();
+        console.log('[Parlens] Submitting Listing ID:', listingId);
+        const parseList = (s: string) => s.split(',').map(x => x.trim()).filter(Boolean).map(p => {
+            if (p.startsWith('npub')) {
+                try {
+                    const { data } = nip19.decode(p);
+                    return data as string;
+                } catch (e) { console.error('Invalid npub:', p); return p; }
+            }
+            return p;
+        });
+
+        // Compute totals and rates for display
+        let totalSpots = 0;
+        const displayRates: any = {};
+        // Use the first floor with a rate as the display rate, or just use the first floor
+        // Iterate to find rates
+        // Use the first floor with a rate as the display rate, or just use the first floor
+        // Iterate to find rates
+        finalFloors.forEach(f => {
+            totalSpots += (f.counts.car || 0) + (f.counts.motorcycle || 0) + (f.counts.bicycle || 0);
+            if (!displayRates.car && f.rates.car) displayRates.car = { hourly: f.rates.car, currency: formData.currency };
+            if (!displayRates.motorcycle && f.rates.motorcycle) displayRates.motorcycle = { hourly: f.rates.motorcycle, currency: formData.currency };
+            if (!displayRates.bicycle && f.rates.bicycle) displayRates.bicycle = { hourly: f.rates.bicycle, currency: formData.currency };
+        });
+
+        const metadata = {
+            kind: KINDS.LISTED_PARKING_METADATA,
+            created_at: Math.floor(Date.now() / 1000),
+            tags: [
+                ['d', listingId],
+                ['listing_name', formData.listing_name],
+                ['location', formData.location],
+                ['g', geohash],
+                ['local_area', formData.local_area || ''],
+                ['city', formData.city || ''],
+                ['zipcode', formData.zipcode || ''],
+                ['country', formData.country || ''],
+                ['floors', finalFloors.map(f => f.name).join(', ')],
+                ['floor_plan', JSON.stringify(finalFloors)],
+                ['total_spots', String(totalSpots + (editing && !editing.floor_plan ? (editing.total_spots || 0) : 0))], // Handle legacy edit edge case delicately, but sticking to logic
+                ['rates', JSON.stringify(displayRates)],
+                ['listing_type', formData.listing_type],
+                ['qr_type', formData.qr_type],
+                ['client', 'parlens'],
+                ...parseList(formData.owners).map(p => ['p', p, 'admin']),
+                ...parseList(formData.managers).map(p => ['p', p, 'write']),
+                ...parseList(formData.members).map(p => ['p', p, 'read']),
+                ...parseList(formData.relays).map(r => ['relay', r])
+            ],
+            content: formData.description
+        };
+
+        if (!metadata.tags.find(t => t[0] === 'p' && t[1] === pubkey && t[2] === 'admin')) {
+            metadata.tags.push(['p', pubkey, 'admin']);
+        }
+
+        setIsSaving(true);
+        try {
+            await Promise.allSettled(pool.publish(DEFAULT_RELAYS, await signEvent(metadata)));
+
+            // Create spots
+            if (!editing) {
+                console.log('[Parlens] Creating spots for floors:', finalFloors.length);
+                let globalNum = 1;
+                for (const floor of finalFloors) {
+                    for (const [type, count] of Object.entries(floor.counts)) {
+                        console.log(`[Parlens] Floor ${floor.name} Type ${type} Count ${count}`);
+                        for (let i = 0; i < (count as number); i++) {
+                            const spotId = `${listingId}-spot-${globalNum}`;
+                            const aTag = `${KINDS.LISTED_PARKING_METADATA}:${pubkey}:${listingId}`;
+                            // console.log('[Parlens] Creating spot:', spotId, 'linked to:', aTag);
+                            const spot = {
+                                kind: KINDS.PARKING_SPOT_LISTING,
+                                created_at: Math.floor(Date.now() / 1000),
+                                tags: [
+                                    ['d', spotId], ['a', aTag],
+                                    ['spot_number', String(globalNum)],
+                                    ['floor', floor.name],
+                                    ['type', type],
+                                    ['location', formData.location], ['g', geohash], ['client', 'parlens']
+                                ],
+                                content: `${formData.listing_name} #${globalNum}`
+                            };
+                            await Promise.allSettled(pool.publish(DEFAULT_RELAYS, await signEvent(spot)));
+                            globalNum++;
+                        }
+                    }
+                }
+            }
+            onCreated();
+        } catch (e) {
+            console.error('Failed to save listing:', e);
+            alert('Failed to save listing. Please try again.');
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    return (
+        <div className="fixed inset-0 z-[4000] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <div id="create-listing-content" className="w-full max-w-lg bg-white dark:bg-[#1c1c1e] rounded-3xl p-6 shadow-2xl overflow-y-auto max-h-[90vh]">
+                {isSaving && (
+                    <div className="absolute inset-0 z-50 bg-white/50 dark:bg-black/50 backdrop-blur-[2px] flex flex-col items-center justify-center rounded-3xl">
+                        <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-3"></div>
+                        <div className="text-zinc-900 dark:text-white font-bold animate-pulse">Saving Listing...</div>
+                    </div>
+                )}
+                <div className="flex justify-between items-center mb-6">
+                    <h2 className="text-xl font-bold text-zinc-900 dark:text-white">{editing ? 'Edit Listing' : 'Create Listing'}</h2>
+                    <button onClick={onClose}><X className="text-zinc-500 dark:text-white" /></button>
+                </div>
+
+                {step === 1 ? (
+                    <div className="space-y-4">
+                        <div className="space-y-1">
+                            <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Listing Name</label>
+                            <input className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400" value={formData.listing_name} onChange={e => setFormData({ ...formData, listing_name: e.target.value })} />
+                        </div>
+                        <div className="space-y-1">
+                            <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Description</label>
+                            <textarea className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400" rows={3} value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })} />
+                        </div>
+
+                        <div className="space-y-1">
+                            <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Location</label>
+                            <div className="flex gap-2">
+                                <input className="flex-1 p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400" placeholder="lat, lon" value={formData.location} onChange={e => setFormData({ ...formData, location: e.target.value })} />
+                                <button onClick={currentLocation ? () => setFormData({ ...formData, location: `${currentLocation[0].toFixed(6)}, ${currentLocation[1].toFixed(6)}` }) : undefined} className="p-3 bg-blue-500/10 text-blue-500 rounded-xl"><LocateFixed size={20} /></button>
+                                {onPickLocation && <button onClick={onPickLocation} className="p-3 bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20 rounded-xl"><MapPin size={20} /></button>}
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                            <div className="space-y-1">
+                                <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Local Area</label>
+                                <input className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400" placeholder="e.g. Indiranagar" value={formData.local_area} onChange={e => setFormData({ ...formData, local_area: e.target.value })} />
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-bold uppercase text-zinc-400 ml-1">City</label>
+                                <input className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400" placeholder="e.g. Bangalore" value={formData.city} onChange={e => setFormData({ ...formData, city: e.target.value })} />
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                            <div className="space-y-1">
+                                <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Zipcode</label>
+                                <input className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400" placeholder="e.g. 560038" value={formData.zipcode} onChange={e => setFormData({ ...formData, zipcode: e.target.value })} />
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Country</label>
+                                <input className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400" placeholder="e.g. India" value={formData.country} onChange={e => setFormData({ ...formData, country: e.target.value })} />
+                            </div>
+                        </div>
+
+                        <div className="space-y-1">
+                            <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Access Type</label>
+                            <div className="flex gap-2">
+                                <div className="flex gap-2">
+                                    <button onClick={() => setFormData({ ...formData, listing_type: 'public' })} className={`flex-1 p-3 rounded-xl font-bold transition-colors ${formData.listing_type === 'public' ? 'bg-green-500 text-white' : 'bg-zinc-100 text-zinc-600 dark:bg-white/5 dark:text-white hover:bg-zinc-200 dark:hover:bg-white/10'}`}>Public</button>
+                                    <button onClick={() => setFormData({ ...formData, listing_type: 'private' })} className={`flex-1 p-3 rounded-xl font-bold transition-colors ${formData.listing_type === 'private' ? 'bg-purple-500 text-white' : 'bg-zinc-100 text-zinc-600 dark:bg-white/5 dark:text-white hover:bg-zinc-200 dark:hover:bg-white/10'}`}>Private</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="p-4 bg-zinc-50 dark:bg-white/5 rounded-2xl space-y-2">
+                            <div className="text-xs font-bold uppercase text-zinc-400">QR Code Type</div>
+                            <div className="flex gap-4">
+                                <label className="flex items-center gap-2 text-zinc-900 dark:text-white font-medium text-sm"><input type="radio" checked={formData.qr_type === 'static'} onChange={() => setFormData({ ...formData, qr_type: 'static' })} /> Static (Standard)</label>
+                                <label className="flex items-center gap-2 text-zinc-900 dark:text-white font-medium text-sm"><input type="radio" checked={formData.qr_type === 'dynamic'} onChange={() => setFormData({ ...formData, qr_type: 'dynamic' })} /> Dynamic (Rotating)</label>
+                            </div>
+                        </div>
+
+                        {formData.listing_type === 'private' && (
+                            <>
+                                <div className="space-y-1">
+                                    <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Members</label>
+                                    <input className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400" placeholder="Pubkeys (comma separated)" value={formData.members} onChange={e => setFormData({ ...formData, members: e.target.value })} />
+                                    {renderNpubChips(formData.members)}
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Relays</label>
+                                    <input className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400" placeholder="URLs (comma separated)" value={formData.relays} onChange={e => setFormData({ ...formData, relays: e.target.value })} />
+                                </div>
+                            </>
+                        )}
+
+                        <div className="space-y-2">
+                            <div className="space-y-1">
+                                <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Owners</label>
+                                <input className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400" placeholder="Additional Pubkeys" value={formData.owners} onChange={e => setFormData({ ...formData, owners: e.target.value })} />
+                                {renderNpubChips(formData.owners)}
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Managers</label>
+                                <input className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400" placeholder="Pubkeys" value={formData.managers} onChange={e => setFormData({ ...formData, managers: e.target.value })} />
+                                {renderNpubChips(formData.managers)}
+                            </div>
+                        </div>
+
+                        <button onClick={() => setStep(2)} className="w-full py-3 bg-[#007AFF] text-white rounded-xl font-bold flex items-center justify-center gap-2">Next <ChevronRight size={16} /></button>
+                    </div>
+                ) : (
+                    <div className="space-y-6">
+                        <div className="flex justify-between items-center">
+                            <h3 className="font-bold dark:text-white">Floors & Spots</h3>
+                            <select className="p-2 bg-zinc-100 dark:bg-white/5 rounded-lg text-zinc-900 dark:text-white text-sm" value={formData.currency} onChange={e => setFormData({ ...formData, currency: e.target.value })}>
+                                <option value="USD">USD ($)</option><option value="EUR">EUR (€)</option><option value="GBP">GBP (£)</option><option value="INR">INR (₹)</option>
+                            </select>
+                        </div>
+
+                        {/* List Floors */}
+                        <div className="space-y-3">
+                            {floors.map((floor, idx) => (
+                                <div key={idx} className="p-3 bg-zinc-50 dark:bg-white/5 rounded-xl flex justify-between items-center">
+                                    <div>
+                                        <div className="font-bold dark:text-white">{floor.name}</div>
+                                        <div className="text-xs text-zinc-500">
+                                            {floor.counts.car > 0 && `🚗 ${floor.counts.car} `}
+                                            {floor.counts.motorcycle > 0 && `🏍️ ${floor.counts.motorcycle} `}
+                                            {floor.counts.bicycle > 0 && `🚲 ${floor.counts.bicycle} `}
+                                        </div>
+                                    </div>
+                                    <button onClick={() => removeFloor(idx)} className="p-2 text-red-500 bg-red-50 dark:bg-red-900/10 rounded-full"><Trash2 size={14} /></button>
+                                </div>
+                            ))}
+                        </div>
+
+                        {/* New Floor Form */}
+                        {showNewFloorForm ? (
+                            <div className="p-4 border border-blue-500/30 bg-blue-50/50 dark:bg-blue-900/10 rounded-2xl space-y-4">
+                                <h4 className="font-bold text-sm dark:text-white">New Floor Details</h4>
+                                <div className="space-y-1">
+                                    <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Floor Name</label>
+                                    <input className="w-full p-2 bg-white dark:bg-white/5 rounded-lg text-zinc-900 dark:text-white border border-zinc-200 dark:border-white/10" placeholder="e.g. B1, Ground" value={newFloor.name} onChange={e => setNewFloor({ ...newFloor, name: e.target.value })} />
+                                </div>
+
+                                {['car', 'motorcycle', 'bicycle'].map((type) => (
+                                    <div key={type} className="flex items-center gap-3">
+                                        <span className="text-2xl w-8">{type === 'car' ? '🚗' : type === 'motorcycle' ? '🏍️' : '🚲'}</span>
+                                        <div className="flex-1">
+                                            <label className="text-[10px] font-bold uppercase text-zinc-400">Spots</label>
+                                            <input type="number" className="w-full p-1 bg-white dark:bg-white/5 rounded text-zinc-900 dark:text-white border border-zinc-200 dark:border-white/10" placeholder="0" value={newFloor.counts[type as keyof typeof newFloor.counts] || ''} onChange={(e) => setNewFloor(prev => ({ ...prev, counts: { ...prev.counts, [type]: parseInt(e.target.value) || 0 } }))} />
+                                        </div>
+                                        <div className="flex-1">
+                                            <label className="text-[10px] font-bold uppercase text-zinc-400">Rate</label>
+                                            <input type="number" className="w-full p-1 bg-white dark:bg-white/5 rounded text-zinc-900 dark:text-white border border-zinc-200 dark:border-white/10" placeholder="0" value={newFloor.rates[type as keyof typeof newFloor.rates] || ''} onChange={(e) => setNewFloor(prev => ({ ...prev, rates: { ...prev.rates, [type]: parseFloat(e.target.value) || 0 } }))} />
+                                        </div>
+                                    </div>
+                                ))}
+
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={() => setShowNewFloorForm(false)}
+                                        className="flex-1 py-2 bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 rounded-xl font-bold text-sm"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            addFloor();
+                                            setShowNewFloorForm(false);
+                                        }}
+                                        className="flex-1 py-2 bg-blue-500 text-white rounded-xl font-bold text-sm"
+                                    >
+                                        Save Floor
+                                    </button>
+                                </div>
+                            </div>
+                        ) : (
+                            <button
+                                onClick={() => setShowNewFloorForm(true)}
+                                className="w-full py-3 bg-zinc-100 dark:bg-white/5 border-2 border-dashed border-zinc-300 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-zinc-200 dark:hover:bg-white/10 transition-colors"
+                            >
+                                <Plus size={18} /> Add Another Floor
+                            </button>
+                        )}
+
+                        <div className="flex gap-2 pt-2">
+                            <button onClick={() => setStep(1)} className="flex-1 py-3 bg-zinc-200 dark:bg-white/10 text-zinc-800 dark:text-white rounded-xl font-bold">Back</button>
+                            <button onClick={handleSubmit} className="flex-1 py-3 bg-[#007AFF] text-white rounded-xl font-bold">Save Listing</button>
+                        </div>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
+
+const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isManager, onStatusChange }) => {
+    const { pubkey, signEvent, pool } = useAuth();
+    // QR contains a-tag, authorizer (owner/manager pubkey), and auth token
+    const spotATag = `${KINDS.PARKING_SPOT_LISTING}:${spot.pubkey}:${spot.d} `;
+    // For static QR, auth token is fixed; for dynamic, it would regenerate
+    const qrAuthData = JSON.stringify({
+        a: spotATag,
+        authorizer: listing.owners?.[0] || pubkey,
+        auth: `static - ${spot.d} ` // Static token based on spot d-tag
+    });
+    const [copied, setCopied] = useState(false);
+    const [isEditing, setIsEditing] = useState(false);
+    const [editData, setEditData] = useState({
+        short_name: spot.short_name || '',
+        type: spot.type,
+        rate: spot.rates?.hourly || 0
+    });
+
+    // Status log & Notes state
+    const [logs, setLogs] = useState<any[]>([]);
+    const [notes, setNotes] = useState<Map<string, any[]>>(new Map()); // Map logId -> notes[]
+    const [logsLoading, setLogsLoading] = useState(true);
+    const [quickNote, setQuickNote] = useState('');
+    const [showLogs, setShowLogs] = useState(false);
+
+    // Fetch logs and notes on mount
+    useEffect(() => {
+        const fetchData = async () => {
+            if (!pool) return;
+            try {
+                // Fetch Logs (1714) and Notes (1417) linked to this spot
+                const events = await pool.querySync(DEFAULT_RELAYS, {
+                    kinds: [KINDS.LISTED_SPOT_LOG, KINDS.PRIVATE_LOG_NOTE],
+                    '#a': [spotATag],
+                    limit: 50 // Increase limit to catch enough history
+                });
+
+                const fetchedLogs = events.filter((e: any) => e.kind === KINDS.LISTED_SPOT_LOG)
+                    .sort((a: any, b: any) => b.created_at - a.created_at);
+
+                const fetchedNotes = events.filter((e: any) => e.kind === KINDS.PRIVATE_LOG_NOTE);
+
+                // Map notes to their target log event (e-tag)
+                const notesMap = new Map<string, any[]>();
+                fetchedNotes.forEach((note: any) => {
+                    const eTag = note.tags.find((t: string[]) => t[0] === 'e')?.[1];
+                    if (eTag) {
+                        const existing = notesMap.get(eTag) || [];
+                        existing.push(note);
+                        notesMap.set(eTag, existing);
+                    }
+                });
+
+                setLogs(fetchedLogs);
+                setNotes(notesMap);
+            } catch (e) {
+                console.error('Failed to fetch spot history:', e);
+            } finally {
+                setLogsLoading(false);
+            }
+        };
+        if (isManager) fetchData();
+    }, [pool, spotATag, isManager]);
+
+    const update = async (s: 'occupied' | 'open' | 'closed') => {
+        const content = JSON.stringify({
+            status: s,
+            hourly_rate: spot.rates?.hourly || 0,
+            currency: spot.rates?.currency || 'USD',
+            type: spot.type || 'car',
+            updated_at: Math.floor(Date.now() / 1000)
+        });
+
+        const tags = [
+            ['a', spotATag],
+            ['status', s],
+            ['updated_by', pubkey],
+            ['client', 'parlens']
+        ];
+
+        // Add search metadata tags
+        if (spot.location) tags.push(['location', spot.location]);
+        if (spot.g) tags.push(['g', spot.g]);
+        // Add type tag for filtering
+        if (spot.type) tags.push(['type', spot.type]);
+
+        const ev = {
+            kind: KINDS.LISTED_SPOT_LOG, created_at: Math.floor(Date.now() / 1000),
+            tags: tags,
+            content: content
+        };
+        const signed = await signEvent(ev);
+        await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signed));
+        // Add to local logs
+        setLogs(prev => [signed, ...prev]);
+        onStatusChange();
+    };
+
+    const addQuickNote = async (targetLogId?: string, content?: string) => {
+        const textToAdd = content || quickNote;
+        if (!textToAdd.trim()) return;
+
+        // Default to latest log if no target specified
+        const logId = targetLogId || logs[0]?.id;
+        if (!logId) {
+            alert("No activity log found to attach note to.");
+            return;
+        }
+
+        const noteEvent = {
+            kind: KINDS.PRIVATE_LOG_NOTE,
+            created_at: Math.floor(Date.now() / 1000),
+            tags: [
+                ['e', logId],
+                ['a', spotATag],
+                ['p', pubkey],
+                ['client', 'parlens']
+            ],
+            content: textToAdd // Unencrypted for now per plan
+        };
+
+        try {
+            const signed = await signEvent(noteEvent);
+            await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signed));
+            if (!content) setQuickNote(''); // Only clear main input if used main input
+
+            // Update local notes map
+            setNotes(prev => {
+                const newMap = new Map(prev);
+                const existing = newMap.get(logId) || [];
+                newMap.set(logId, [...existing, signed]);
+                return newMap;
+            });
+        } catch (e) {
+            alert('Failed to add note');
+        }
+    };
+
+    const handleSaveEdit = async () => {
+        // ... (Same Edit Logic) ...
+        const tags = [
+            ['d', spot.d], ['a', spot.a],
+            ['spot_number', spot.spot_number],
+            ['floor', spot.floor || ''],
+            ['type', editData.type],
+            ['short_name', editData.short_name],
+            ['location', spot.location],
+            ['g', spot.g],
+            ['client', 'parlens']
+        ];
+        if (editData.rate) { /* logic placeholder if rate added */ }
+
+        const ev = {
+            kind: KINDS.PARKING_SPOT_LISTING,
+            created_at: Math.floor(Date.now() / 1000),
+            tags: tags,
+            content: editData.short_name || `${listing.listing_name} #${spot.spot_number} `
+        };
+
+        await Promise.allSettled(pool.publish(DEFAULT_RELAYS, await signEvent(ev)));
+        onStatusChange();
+        setIsEditing(false);
+    };
+
+    if (isEditing) {
+        // ... (Same Edit View) ...
+        return (
+            <div className="fixed inset-0 z-[5000] bg-black/80 flex items-center justify-center p-4 text-center" onClick={onClose}>
+                <div className="bg-white dark:bg-[#1c1c1e] rounded-3xl p-6 w-full max-w-sm space-y-4 relative" onClick={e => e.stopPropagation()}>
+                    <button onClick={() => setIsEditing(false)} className="absolute top-4 right-4 p-2 rounded-full text-zinc-400 hover:text-zinc-600 dark:text-white/40 dark:hover:text-white/60">
+                        <X size={20} />
+                    </button>
+                    <h2 className="text-xl font-bold dark:text-white">Edit Spot</h2>
+                    <div className="space-y-2 text-left">
+                        <label className="text-xs font-bold uppercase text-zinc-400">Name / Short Code</label>
+                        <input className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl dark:text-white" value={editData.short_name} onChange={e => setEditData({ ...editData, short_name: e.target.value })} placeholder={`#${spot.spot_number} `} />
+                        <label className="text-xs font-bold uppercase text-zinc-400">Type</label>
+                        <select className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl dark:text-white" value={editData.type} onChange={e => setEditData({ ...editData, type: e.target.value as any })}>
+                            <option value="car">Car</option><option value="motorcycle">Motorcycle</option><option value="bicycle">Bicycle</option>
+                        </select>
+                    </div>
+                    <div className="flex gap-2">
+                        <button onClick={() => setIsEditing(false)} className="flex-1 py-3 bg-zinc-200 dark:bg-white/10 text-zinc-800 dark:text-white rounded-xl font-bold">Cancel</button>
+                        <button onClick={handleSaveEdit} className="flex-1 py-3 bg-[#007AFF] text-white rounded-xl font-bold">Save</button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="fixed inset-0 z-[5000] bg-black/80 flex items-center justify-center p-4 text-center" onClick={onClose}>
+            <div className="bg-white dark:bg-[#1c1c1e] rounded-3xl p-6 w-full max-w-sm space-y-4 relative max-h-[85vh] overflow-y-auto min-h-[400px]" onClick={e => e.stopPropagation()}>
+
+                {/* LOG VIEW MODE */}
+                {showLogs ? (
+                    <div className="flex flex-col h-full space-y-4 animate-in fade-in slide-in-from-right-4">
+                        <div className="flex items-center justify-between">
+                            <button onClick={() => setShowLogs(false)} className="p-2 -ml-2 rounded-full text-zinc-600 dark:text-white hover:bg-black/5 dark:hover:bg-white/10">
+                                <ArrowLeft size={24} />
+                            </button>
+                            <h3 className="font-bold text-lg dark:text-white">Status Log</h3>
+                            <div className="w-10"></div> {/* Spacer for alignment */}
+                        </div>
+
+                        {/* Quick Note Input (Always available at top of log view) */}
+                        <div className="flex gap-2">
+                            <input
+                                value={quickNote}
+                                onChange={e => setQuickNote(e.target.value)}
+                                placeholder="Add note to latest log..."
+                                className="flex-1 p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white text-sm placeholder:text-zinc-500"
+                            />
+                            <button onClick={() => addQuickNote()} disabled={!quickNote.trim()} className="px-4 py-3 bg-blue-500 text-white font-bold rounded-xl disabled:opacity-50">
+                                <Plus size={20} />
+                            </button>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto space-y-3 min-h-[300px]">
+                            {logsLoading ? (
+                                <div className="text-center text-zinc-400 py-8">Loading logs...</div>
+                            ) : logs.length === 0 ? (
+                                <div className="text-center text-zinc-400 py-8 flex flex-col items-center gap-2">
+                                    <div className="text-4xl opacity-20">📜</div>
+                                    <p>No activity yet</p>
+                                </div>
+                            ) : (
+                                logs.map((log: any, i: number) => {
+                                    const s = log.tags?.find((t: string[]) => t[0] === 'status')?.[1];
+                                    const updatedBy = log.tags?.find((t: string[]) => t[0] === 'updated_by')?.[1];
+                                    const authorizer = log.tags?.find((t: string[]) => t[0] === 'authorizer')?.[1];
+                                    const date = new Date(log.created_at * 1000);
+                                    const logNotes = notes.get(log.id) || [];
+
+                                    return (
+                                        <div key={log.id || i} className="p-4 bg-zinc-50 dark:bg-white/5 rounded-2xl text-left border border-black/5 dark:border-white/5">
+                                            <div className="flex items-center justify-between mb-2">
+                                                <div className={`font - bold capitalize flex items - center gap - 2 ${s === 'open' ? 'text-green-500' : s === 'occupied' ? 'text-red-500' : 'text-zinc-500'} `}>
+                                                    <div className={`w - 2 h - 2 rounded - full ${s === 'open' ? 'bg-green-500' : s === 'occupied' ? 'bg-red-500' : 'bg-zinc-500'} `} />
+                                                    {s || 'unknown'}
+                                                </div>
+                                                <div className="text-xs text-zinc-400 font-medium tabular-nums">
+                                                    {date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} • {date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+                                                </div>
+                                            </div>
+
+                                            <div className="text-xs text-zinc-500 dark:text-white/40 flex flex-col gap-1">
+                                                <div>By: {updatedBy ? (updatedBy === pubkey ? 'You' : `${updatedBy.slice(0, 8)}...`) : 'Unknown'}</div>
+                                                {authorizer && <div>Auth: {authorizer.slice(0, 8)}...</div>}
+                                            </div>
+
+                                            {/* Log Item Note Input Toggle */}
+                                            <div className="flex justify-end mt-1">
+                                                <button
+                                                    onClick={() => {
+                                                        const el = document.getElementById(`note-input-${log.id}`);
+                                                        if (el) el.focus();
+                                                    }}
+                                                    className="text-[10px] text-[#007AFF] font-bold uppercase tracking-wider hover:underline"
+                                                >
+                                                    + Add Note
+                                                </button>
+                                            </div>
+
+                                            {/* Note Input for specific log */}
+                                            <div className="mt-2 flex gap-2">
+                                                <input
+                                                    id={`note-input-${log.id}`}
+                                                    placeholder="Add private note..."
+                                                    className="flex-1 p-2 bg-zinc-100 dark:bg-white/10 rounded-lg text-xs text-zinc-900 dark:text-white border-none focus:ring-1 focus:ring-blue-500 placeholder:text-zinc-500"
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === 'Enter') {
+                                                            addQuickNote(log.id, (e.target as HTMLInputElement).value);
+                                                            (e.target as HTMLInputElement).value = '';
+                                                        }
+                                                    }}
+                                                />
+                                            </div>
+
+                                            {/* Notes attached to this log */}
+                                            {logNotes.length > 0 && (
+                                                <div className="mt-3 space-y-2 pt-3 border-t border-black/5 dark:border-white/5">
+                                                    {logNotes.map((n: any) => (
+                                                        <div key={n.id} className="text-xs bg-yellow-50 dark:bg-yellow-900/10 p-2 rounded-lg text-zinc-700 dark:text-yellow-100/80">
+                                                            {n.content}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })
+                            )}
+                        </div>
+                    </div>
+                ) : (
+                    /* MAIN DETAILS VIEW */
+                    <>
+                        <button onClick={onClose} className="absolute top-4 right-4 p-2 rounded-full text-zinc-400 hover:text-zinc-600 dark:text-white/40 dark:hover:text-white/60">
+                            <X size={20} />
+                        </button>
+
+                        <h2 className="text-xl font-bold dark:text-white pr-8 text-left">{spot.short_name || spot.content}</h2>
+
+                        {/* Auth QR Code - Only visible to managers/owners */}
+                        {isManager && (
+                            <>
+                                <div className="p-8 bg-white dark:bg-white rounded-3xl flex justify-center shadow-sm border border-black/5">
+                                    <QrCode size={160} className="text-black" />
+                                </div>
+                                <div onClick={() => { navigator.clipboard.writeText(qrAuthData); setCopied(true); setTimeout(() => setCopied(false), 2000); }} className="flex justify-center items-center gap-2 text-[#007AFF] font-bold cursor-pointer py-2 hover:opacity-80 transition-opacity">
+                                    {copied ? <Check size={18} /> : <Copy size={18} />} {copied ? 'Copied' : 'Copy Auth Code'}
+                                </div>
+                            </>
+                        )}
+
+                        <div className="grid grid-cols-2 gap-3 text-left">
+                            <div className="p-4 bg-zinc-50 dark:bg-white/5 rounded-2xl">
+                                <div className="text-xs font-bold uppercase text-zinc-400 mb-1">Rate</div>
+                                <div className="text-lg font-bold dark:text-white tabular-nums">{spot.rates?.currency || listing.rates?.car?.currency || '$'}{spot.rates?.hourly || listing.rates?.[spot.type]?.hourly}/hr</div>
+                            </div>
+                            <div className="p-4 bg-zinc-50 dark:bg-white/5 rounded-2xl">
+                                <div className="text-xs font-bold uppercase text-zinc-400 mb-1">Status</div>
+                                {/* Use LATEST log status if available, fallback to props */}
+                                {(() => {
+                                    const latestLogStatus = logs.length > 0 ? logs[0].tags.find((t: string[]) => t[0] === 'status')?.[1] : null;
+                                    const displayStatus = latestLogStatus || status?.status || 'open';
+                                    return (
+                                        <div className={`text-lg font-bold capitalize ${displayStatus === 'occupied' ? 'text-red-500' : displayStatus === 'closed' ? 'text-zinc-500' : 'text-green-500'}`}>
+                                            {displayStatus}
+                                        </div>
+                                    );
+                                })()}
+                            </div>
+                        </div>
+
+                        {/* Latest Note Display & Quick Add (Main View) */}
+                        <div className="p-4 bg-zinc-50 dark:bg-white/5 rounded-2xl text-left space-y-2">
+                            <div className="text-xs font-bold uppercase text-zinc-400 mb-1">Latest Note</div>
+                            {(() => {
+                                // Find latest note across all logs
+                                let latestNote: any = null;
+                                let latestNoteTime = 0;
+                                notes.forEach((noteList: any[]) => {
+                                    noteList.forEach((n: any) => {
+                                        if (n.created_at > latestNoteTime) {
+                                            latestNote = n;
+                                            latestNoteTime = n.created_at;
+                                        }
+                                    });
+                                });
+
+                                return latestNote ? (
+                                    <div className="text-sm dark:text-white italic">"{latestNote.content}" <span className="text-xs text-zinc-400 not-italic">- {new Date(latestNote.created_at * 1000).toLocaleDateString()}</span></div>
+                                ) : (
+                                    <div className="text-sm text-zinc-400 italic">No notes added yet</div>
+                                );
+                            })()}
+
+                            <div className="flex gap-2 pt-2">
+                                <input
+                                    value={quickNote}
+                                    onChange={e => setQuickNote(e.target.value)}
+                                    placeholder="Add visible note..."
+                                    className="flex-1 p-2.5 bg-white dark:bg-white/10 rounded-xl text-sm text-zinc-900 dark:text-white border border-black/5 dark:border-white/10 focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder:text-zinc-400"
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') addQuickNote();
+                                    }}
+                                />
+                                <button
+                                    onClick={() => addQuickNote()}
+                                    disabled={!quickNote.trim()}
+                                    className="p-2.5 bg-[#007AFF] text-white rounded-xl disabled:opacity-50"
+                                >
+                                    <Plus size={20} />
+                                </button>
+                            </div>
+                        </div>
+
+                        {isManager && (
+                            <div className="space-y-4 pt-2">
+                                <div className="flex gap-2 p-1 bg-zinc-100 dark:bg-white/5 rounded-2xl">
+                                    <button onClick={() => update('open')} className="flex-1 py-3 text-green-600 dark:text-green-400 font-bold text-sm rounded-xl hover:bg-white dark:hover:bg-white/10 transition-colors">Open</button>
+                                    <button onClick={() => update('occupied')} className="flex-1 py-3 text-red-500 font-bold text-sm rounded-xl hover:bg-white dark:hover:bg-white/10 transition-colors">Occupied</button>
+                                    <button onClick={() => update('closed')} className="flex-1 py-3 text-zinc-500 dark:text-zinc-400 font-bold text-sm rounded-xl hover:bg-white dark:hover:bg-white/10 transition-colors">Closed</button>
+                                </div>
+
+                                {/* Status Log Button - Main Entry Point for Notes/History */}
+                                <button
+                                    onClick={() => setShowLogs(true)}
+                                    className="w-full py-4 bg-blue-500/10 text-[#007AFF] font-bold rounded-2xl flex items-center justify-center gap-2 hover:bg-blue-500/15 transition-colors"
+                                >
+                                    View Status Log & Notes ({logs.length}) <ChevronRight size={18} />
+                                </button>
+
+                                {/* Edit/Delete Buttons */}
+                                <div className="flex gap-3 pt-2 border-t border-black/5 dark:border-white/5">
+                                    <button onClick={() => setIsEditing(true)} className="flex-1 py-3 text-zinc-600 dark:text-zinc-300 font-bold text-sm flex items-center justify-center gap-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl transition-colors">
+                                        <Pencil size={16} /> Edit
+                                    </button>
+                                    <button onClick={async () => {
+                                        if (!confirm('Delete this spot?')) return;
+                                        const deleteSpot = {
+                                            kind: 5, created_at: Math.floor(Date.now() / 1000),
+                                            tags: [['e', spot.id], ['a', `${KINDS.PARKING_SPOT_LISTING}:${pubkey}:${spot.d}`]],
+                                            content: 'Deleted'
+                                        };
+                                        await Promise.allSettled(pool.publish(DEFAULT_RELAYS, await signEvent(deleteSpot)));
+                                        onStatusChange(); onClose();
+                                    }} className="flex-1 py-3 text-red-500 font-bold text-sm flex items-center justify-center gap-2 hover:bg-red-500/5 rounded-xl transition-colors">
+                                        <Trash2 size={16} /> Delete
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </>
+                )}
+            </div>
+        </div>
+    );
+};
+
+// Access List Modal Component
+const AccessListModal: React.FC<{ listing: ListedParkingMetadata; onClose: () => void }> = ({ listing, onClose }) => {
+    // Helper to render sections
+    const renderSection = (title: string, pubkeys: string[]) => {
+        if (!pubkeys || pubkeys.length === 0) return null;
+        return (
+            <div className="space-y-2">
+                <div className="text-xs font-bold uppercase text-zinc-400 tracking-wider">{title}</div>
+                <div className="space-y-1">
+                    {pubkeys.map(pk => (
+                        <div key={pk} className="flex items-center justify-between p-3 bg-zinc-50 dark:bg-white/5 rounded-xl">
+                            <div className="flex flex-col overflow-hidden">
+                                {pk.startsWith('npub') ? (
+                                    <div className="text-xs font-mono truncate max-w-[200px] text-zinc-600 dark:text-zinc-300">{pk}</div>
+                                ) : (
+                                    <div className="text-xs font-mono truncate max-w-[200px] text-zinc-600 dark:text-zinc-300">
+                                        {(() => { try { return nip19.npubEncode(pk); } catch (e) { return pk; } })()}
+                                    </div>
+                                )}
+                            </div>
+                            <button onClick={() => {
+                                const val = pk.startsWith('npub') ? pk : (() => { try { return nip19.npubEncode(pk); } catch (e) { return pk; } })();
+                                navigator.clipboard.writeText(val);
+                                alert('Copied');
+                            }} className="p-2 text-blue-500 bg-blue-500/10 rounded-full hover:bg-blue-500/20 active:scale-95 transition-all">
+                                <Copy size={16} />
+                            </button>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        );
+    };
+
+    return (
+        <div className="fixed inset-0 z-[5000] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={onClose}>
+            <div className="bg-white dark:bg-[#1c1c1e] rounded-3xl p-6 w-full max-w-sm space-y-6 relative border border-black/5 dark:border-white/10 shadow-2xl" onClick={e => e.stopPropagation()}>
+                <div className="flex justify-between items-center">
+                    <h2 className="text-xl font-bold dark:text-white">Access List</h2>
+                    <button onClick={onClose}><X className="text-zinc-400 hover:text-zinc-600 dark:hover:text-white" /></button>
+                </div>
+
+                <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
+                    {renderSection('Owners', listing.owners)}
+                    {renderSection('Managers', listing.managers)}
+                    {renderSection('Members', listing.members)}
+                    {renderSection('Relays', listing.relays || [])}
+
+                    {(!listing.owners?.length && !listing.managers?.length && !listing.members?.length) && (
+                        <div className="text-center text-zinc-400 py-8">No access details found</div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
+
+export default ListedParkingPage;

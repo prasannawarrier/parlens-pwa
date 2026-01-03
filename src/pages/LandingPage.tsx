@@ -3,7 +3,7 @@
  * Replaces Leaflet for native vector map rotation and smooth zoom
  */
 import React, { useState, useEffect, useRef, useCallback, memo, useMemo } from 'react';
-import { HelpCircle, X, MapPin, Locate, ChevronUp, ChevronDown, ArrowUp, Trash, Check, Pencil } from 'lucide-react';
+import { MapPin, Locate, X, ChevronDown, Check, Trash, Pencil, QrCode, ArrowUp, ArrowRight, ArrowLeft, ChevronUp, Copy, ScanLine } from 'lucide-react';
 import Map, { Marker, Source, Layer, type MapRef } from 'react-map-gl/maplibre';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
@@ -12,8 +12,13 @@ import { ProfileButton } from '../components/ProfileButton';
 import { RouteButton } from '../components/RouteButton';
 import { clusterSpots, isCluster } from '../lib/clustering';
 import { getCurrencySymbol } from '../lib/currency';
+// @ts-ignore
+import Geohash from 'ngeohash';
 import { StableLocationTracker, LocationSmoother, PositionAnimator, BearingAnimator } from '../lib/locationSmoothing';
 import { useWakeLock } from '../hooks/useWakeLock';
+import { ListedParkingPage } from './ListedParkingPage';
+import { useAuth } from '../contexts/AuthContext';
+import { KINDS, DEFAULT_RELAYS } from '../lib/nostr';
 
 // Free vector tile styles - using simpler styles that match better
 const MAP_STYLES = {
@@ -244,6 +249,7 @@ VehicleToggle.displayName = 'VehicleToggle';
 
 // Main Landing Page Component
 export const LandingPage: React.FC = () => {
+    const { pubkey, signEvent, pool } = useAuth();
     const mapRef = useRef<MapRef>(null);
     const [location, setLocation] = useState<[number, number] | null>(null);
     const locationSmoother = useRef(new LocationSmoother());
@@ -257,6 +263,8 @@ export const LandingPage: React.FC = () => {
     const [orientationMode, setOrientationMode] = useState<'fixed' | 'recentre' | 'auto'>('fixed');
     const [pendingAutoMode, setPendingAutoMode] = useState(false); // Immediate visual feedback for button
     const [showHelp, setShowHelp] = useState(false);
+    const [showListedParking, setShowListedParking] = useState(false);
+    const [showQRScanner, setShowQRScanner] = useState(false);
     // Currency state - removed (logic in FAB)
     const [vehicleType, setVehicleType] = useState<'bicycle' | 'motorcycle' | 'car'>(() => {
         const saved = localStorage.getItem('parlens_vehicle_type');
@@ -265,6 +273,248 @@ export const LandingPage: React.FC = () => {
     const [openSpots, setOpenSpots] = useState<any[]>([]);
     const [historySpots, setHistorySpots] = useState<any[]>([]);
     const [parkLocation, setParkLocation] = useState<[number, number] | null>(null);
+
+    // Listed Parking Session - for overlay display
+    const [listedParkingSession, setListedParkingSession] = useState<{
+        spotATag: string;
+        startTime: number;
+        dTag?: string;
+        listingName?: string;
+        spotNumber?: string;
+        shortName?: string;
+        authorizer?: string;
+        tempPubkey?: string;
+        listingLocation?: [number, number];
+    } | null>(() => {
+        const saved = localStorage.getItem('parlens_listed_parking_session');
+        return saved ? JSON.parse(saved) : null;
+    });
+    const [showListedDetails, setShowListedDetails] = useState(false);
+
+    // QR Code Handler for Listed Parking - Session Toggle with Temp Keys
+    const handleScannedCode = useCallback(async (code: string) => {
+        console.log('[Parlens] Processing scanned code:', code);
+        setShowQRScanner(false);
+
+        try {
+            // Dynamic import for temp key generation
+            const { generateSecretKey, finalizeEvent, getPublicKey } = await import('nostr-tools/pure');
+
+            // Try to parse as JSON auth data
+            let authData: { a: string; authorizer: string; auth: string; listingName?: string; spotNumber?: string; shortName?: string; listingLocation?: [number, number] };
+            try {
+                authData = JSON.parse(code);
+            } catch {
+                // Fallback: if it's just an a-tag, create minimal auth
+                authData = { a: code, authorizer: '', auth: '' };
+            }
+
+            if (!authData.a) {
+                alert('Invalid QR code format');
+                return;
+            }
+
+            // Check for existing session in localStorage
+            const sessionKey = 'parlens_listed_parking_session';
+            const existingSession = localStorage.getItem(sessionKey);
+            let isEndingSession = false;
+
+            if (existingSession) {
+                const session = JSON.parse(existingSession);
+                if (session.spotATag === authData.a) {
+                    // Same spot - ending session
+                    isEndingSession = true;
+                }
+            }
+
+            // Generate ephemeral keypair for Kind 1714
+            const tempPrivkey = generateSecretKey();
+            const tempPubkey = getPublicKey(tempPrivkey);
+
+            if (isEndingSession) {
+                // Set pending session for Popup Modal
+                const session = JSON.parse(existingSession!);
+                setPendingEndSession({
+                    authData,
+                    session,
+                    tempPrivkey,
+                    tempPubkey
+                });
+                setShowListedEndPopup(true);
+                return;
+            }
+
+            const newStatus = 'occupied';
+            // Start Session Logic (unchanged)
+            const tags = [
+                ['a', authData.a],
+                ['status', newStatus],
+                ['updated_by', tempPubkey], // Temp pubkey
+                ['authorizer', authData.authorizer || pubkey || ''], // Owner/manager who authorized
+                ...(authData.auth ? [['auth', authData.auth]] : []),
+                ['client', 'parlens']
+            ];
+
+            // Add location/geohash for search discovery (if available)
+            // Use listingLocation from authData or session, or current location as fallback if starting
+            const loc = authData.listingLocation || null;
+            if (loc) {
+                tags.push(['location', `${loc[0]},${loc[1]}`]);
+                try {
+                    const g = Geohash.encode(loc[0], loc[1], 9);
+                    tags.push(['g', g]);
+                } catch { }
+            }
+
+            const statusEventTemplate = {
+                kind: KINDS.LISTED_SPOT_LOG,
+                created_at: Math.floor(Date.now() / 1000),
+                tags: tags as string[][],
+                content: ''
+            };
+
+            // Sign with temp key
+            const signedStatus = finalizeEvent(statusEventTemplate, tempPrivkey);
+            await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedStatus));
+            console.log('[Parlens] Status update published:', signedStatus.id);
+
+            // Start parking session - create Kind 31417 with 'parked' status
+            const dTag = `parking-${Date.now()}`;
+            const listingLocation = authData.listingLocation || location;
+
+            // Encrypted content with all listing refs
+            const logContent = JSON.stringify({
+                spotATag: authData.a,
+                listingATag: authData.a.replace(/37141:/, '31147:').split(':').slice(0, 2).join(':'), // Derive listing a-tag
+                statusLogEventId: signedStatus.id,
+                listingName: authData.listingName || '',
+                spotNumber: authData.spotNumber || '',
+                shortName: authData.shortName || '',
+                tempPubkey,
+                started_at: Date.now()
+            });
+
+            const logEvent = {
+                kind: KINDS.PARKING_LOG,
+                created_at: Math.floor(Date.now() / 1000),
+                tags: [
+                    ['d', dTag],
+                    ['a', authData.a],
+                    ['status', 'parked'],
+                    ['client', 'parlens']
+                ],
+                content: logContent // TODO: NIP-44 encrypt
+            };
+            const signedLog = await signEvent(logEvent);
+            await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedLog));
+
+            // Store session with all details
+            const sessionData = {
+                spotATag: authData.a,
+                dTag,
+                startTime: Date.now(),
+                authorizer: authData.authorizer,
+                tempPubkey,
+                listingName: authData.listingName || '',
+                spotNumber: authData.spotNumber || '',
+                shortName: authData.shortName || '',
+                listingLocation: listingLocation || undefined
+            };
+            localStorage.setItem(sessionKey, JSON.stringify(sessionData));
+            setListedParkingSession(sessionData);
+
+            // Update UI state - behave like regular parking
+            setStatus('parked');
+            setParkLocation(listingLocation as [number, number] || null);
+            setSessionStart(Math.floor(Date.now() / 1000));
+
+            console.log('[Parlens] Listed parking started:', signedLog.id);
+
+        } catch (e) {
+            console.error('Failed to process QR code:', e);
+            alert('Failed to process parking. Please try again.');
+        }
+    }, [pubkey, signEvent, pool, location, setStatus]);
+
+    const handleConfirmEndListedSession = async () => {
+        if (!pendingEndSession) return;
+        const { authData, session, tempPrivkey, tempPubkey } = pendingEndSession;
+
+        try {
+            const { finalizeEvent } = await import('nostr-tools/pure');
+
+            // 1. Update Status to 'open' (Kind 1714) using NEW temp key (or reused one?)
+            // We generated a NEW temp key in handleScannedCode just now.
+            const tags = [
+                ['a', authData.a],
+                ['status', 'open'],
+                ['updated_by', tempPubkey],
+                ['authorizer', authData.authorizer || pubkey || ''],
+                ...(authData.auth ? [['auth', authData.auth]] : []),
+                ['client', 'parlens']
+            ];
+
+            const loc = authData.listingLocation || session.listingLocation;
+            if (loc) {
+                tags.push(['location', `${loc[0]},${loc[1]}`]);
+                try {
+                    const g = Geohash.encode(loc[0], loc[1], 9);
+                    tags.push(['g', g]);
+                } catch { }
+            }
+
+            const statusEventTemplate = {
+                kind: KINDS.LISTED_SPOT_LOG,
+                created_at: Math.floor(Date.now() / 1000),
+                tags: tags as string[][],
+                content: ''
+            };
+
+            const signedStatus = finalizeEvent(statusEventTemplate, tempPrivkey);
+            await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedStatus));
+
+            // 2. Publish End Log (Kind 31417)
+            const logContent = JSON.stringify({
+                spotATag: authData.a,
+                statusLogEventId: signedStatus.id,
+                listingName: session.listingName || '',
+                spotNumber: session.spotNumber || '',
+                shortName: session.shortName || '',
+                ended_at: Date.now(),
+                fee: endSessionCost,
+                currency: 'USD' // TODO: Detect or use listing currency? Default USD for now matching FAB simple logic
+            });
+
+            const endLogEvent = {
+                kind: KINDS.PARKING_LOG,
+                created_at: Math.floor(Date.now() / 1000),
+                tags: [
+                    ['d', session.dTag || `parking-${Date.now()}`],
+                    ['a', authData.a],
+                    ['status', 'idle'],
+                    ['client', 'parlens']
+                ],
+                content: logContent
+            };
+            const signedEndLog = await signEvent(endLogEvent);
+            await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedEndLog));
+
+            // Clear session
+            localStorage.removeItem('parlens_listed_parking_session');
+            setListedParkingSession(null);
+            setStatus('idle');
+            setParkLocation(null);
+            setSessionStart(null);
+            setShowListedEndPopup(false);
+            setPendingEndSession(null);
+            setEndSessionCost('0');
+
+            console.log('[Parlens] Listed parking ended');
+        } catch (e) {
+            console.error('Failed to end listed session:', e);
+            alert('Failed to end session. Please try again.');
+        }
+    };
     const [needsRecenter, setNeedsRecenter] = useState(false);
     const [zoomLevel, setZoomLevel] = useState(17);
     const [routeCoords, setRouteCoords] = useState<[number, number][] | null>(null);
@@ -302,6 +552,36 @@ export const LandingPage: React.FC = () => {
     const [editingName, setEditingName] = useState('');
     const [, setRouteButtonOpen] = useState(false);
     const [listWaypoints, setListWaypoints] = useState<{ id: string; lat: number; lon: number; name: string }[]>([]);
+
+    // Listed Session End Popup State
+    const [showListedEndPopup, setShowListedEndPopup] = useState(false);
+    const [endSessionCost, setEndSessionCost] = useState('0');
+    const [pendingEndSession, setPendingEndSession] = useState<any>(null);
+
+    // Listed Parking Picker State
+    const [isPickingLocation, setIsPickingLocation] = useState(false);
+    const [pickedListingLocation, setPickedListingLocation] = useState<{ lat: number, lon: number } | null>(null);
+    const [countryCode, setCountryCode] = useState<string | null>(null);
+
+    // Fetch Country Code for Currency
+    useEffect(() => {
+        const fetchCountry = async () => {
+            if (!location || countryCode) return;
+            try {
+                const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${location[0]}&lon=${location[1]}&format=json`);
+                const data = await res.json();
+                if (data && data.address && data.address.country_code) {
+                    console.log('[Parlens] Detected Country:', data.address.country_code);
+                    setCountryCode(data.address.country_code.toUpperCase());
+                }
+            } catch (e) {
+                console.error('[Parlens] Failed to detect country:', e);
+            }
+        };
+        // Simple debounce/check
+        const timer = setTimeout(fetchCountry, 2000);
+        return () => clearTimeout(timer);
+    }, [location, countryCode]);
 
     // Handlers for Drop Pin
     const handleDropPin = useCallback(() => {
@@ -1482,6 +1762,85 @@ export const LandingPage: React.FC = () => {
                         </Marker>
                     )}
 
+                    {/* Listed Parking Bubble Marker - Click to open details */}
+                    {listedParkingSession && (listedParkingSession.listingLocation || parkLocation) && (
+                        <Marker
+                            longitude={(listedParkingSession.listingLocation || parkLocation!)[1]}
+                            latitude={(listedParkingSession.listingLocation || parkLocation!)[0]}
+                            anchor="bottom"
+                            onClick={(e) => {
+                                e.originalEvent.stopPropagation();
+                                setShowListedDetails(true);
+                            }}
+                            style={{ zIndex: 1800 }} // Above parked marker
+                        >
+                            <div className="flex flex-col items-center -translate-y-8">
+                                {/* Bubble */}
+                                <div className="bg-white dark:bg-zinc-800 p-3 rounded-full shadow-xl border-2 border-[#007AFF] cursor-pointer hover:scale-110 transition-transform">
+                                    <QrCode size={20} className="text-[#007AFF]" />
+                                </div>
+                                <div className="w-0.5 h-3 bg-[#007AFF]/50"></div>
+                            </div>
+                        </Marker>
+                    )}
+
+                    {/* Listed Parking Details Modal */}
+                    {showListedDetails && listedParkingSession && (
+                        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setShowListedDetails(false)}>
+                            <div className="bg-white dark:bg-[#1c1c1e] w-full max-w-sm rounded-[2rem] shadow-2xl p-6 space-y-6 relative border border-black/5 dark:border-white/10" onClick={e => e.stopPropagation()}>
+                                <button
+                                    onClick={() => setShowListedDetails(false)}
+                                    className="absolute top-4 right-4 p-2 rounded-full text-zinc-400 hover:text-zinc-600 dark:text-white/40 dark:hover:text-white/60"
+                                >
+                                    <X size={24} />
+                                </button>
+
+                                <div className="text-center space-y-1">
+                                    <div className="text-xs font-bold uppercase text-zinc-400 tracking-wider">Active Session</div>
+                                    <h2 className="text-2xl font-bold dark:text-white leading-tight">
+                                        {listedParkingSession.listingName || 'Parking Spot'}
+                                    </h2>
+                                    <div className="text-lg text-blue-500 font-bold">
+                                        {listedParkingSession.shortName || `#${listedParkingSession.spotNumber}`}
+                                    </div>
+                                </div>
+
+                                {/* QR / ID Display */}
+                                <div className="space-y-4">
+                                    <div className="p-6 bg-zinc-50 dark:bg-white/5 rounded-3xl flex justify-center border border-black/5 dark:border-white/5">
+                                        {/* Ideally we regenerate the QR here, but for now just show iconic representation or d-tag */}
+                                        <QrCode size={120} className="dark:text-white opacity-80" />
+                                    </div>
+
+                                    <div
+                                        onClick={() => {
+                                            navigator.clipboard.writeText(listedParkingSession.dTag || '');
+                                            alert('Copied parking ID');
+                                        }}
+                                        className="flex items-center justify-between p-4 bg-zinc-50 dark:bg-white/5 rounded-2xl cursor-pointer hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors"
+                                    >
+                                        <div className="overflow-hidden">
+                                            <div className="text-xs font-bold text-zinc-400 uppercase mb-1">Parking ID</div>
+                                            <div className="text-sm font-mono text-zinc-600 dark:text-white/70 truncate">
+                                                {listedParkingSession.dTag || 'N/A'}
+                                            </div>
+                                        </div>
+                                        <div className="p-2 bg-blue-500/10 rounded-full text-blue-500">
+                                            <Copy size={20} />
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <button
+                                    onClick={() => setShowListedDetails(false)}
+                                    className="w-full py-4 bg-zinc-100 dark:bg-white/10 text-zinc-900 dark:text-white font-bold rounded-2xl"
+                                >
+                                    Close
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
                     {/* User location marker - Unified for ALL modes for smooth transitions */}
                     {location && orientationMode !== 'auto' && (
                         <Marker
@@ -1560,12 +1919,30 @@ export const LandingPage: React.FC = () => {
                     disabled={status !== 'idle'}
                 />
 
-                {/* Help Button */}
+                {/* QR Scan Button - Camera with Scan Viewfinder */}
+                {/* QR Scan Button - Camera with Scan Viewfinder */}
                 <button
-                    onClick={() => setShowHelp(true)}
+                    onClick={() => setShowQRScanner(true)}
+                    onContextMenu={(e) => {
+                        e.preventDefault();
+                        const code = prompt("Enter Parking Code manually:");
+                        if (code) handleScannedCode(code);
+                    }}
                     className="h-12 w-12 flex items-center justify-center rounded-[1.5rem] bg-white/80 dark:bg-zinc-800/80 backdrop-blur-md border border-black/5 dark:border-white/10 shadow-lg text-zinc-600 dark:text-white/70 transition-all active:scale-95"
+                    title="Scan QR Code (Long press for manual)"
                 >
-                    <HelpCircle size={20} />
+                    <div className="relative">
+                        <ScanLine size={20} />
+                    </div>
+                </button>
+
+                {/* Listed Parking Button */}
+                <button
+                    onClick={() => setShowListedParking(true)}
+                    className="h-12 w-12 flex items-center justify-center rounded-[1.5rem] bg-white/80 dark:bg-zinc-800/80 backdrop-blur-md border border-black/5 dark:border-white/10 shadow-lg text-zinc-600 dark:text-white/70 transition-all active:scale-95"
+                    title="Listed Parking"
+                >
+                    <span className="text-3xl font-light leading-none pb-1">‽</span>
                 </button>
             </div>
 
@@ -1783,6 +2160,7 @@ export const LandingPage: React.FC = () => {
                     <div className="relative z-[1010]">
                         <ProfileButton
                             setHistorySpots={setHistorySpots}
+                            onHelpClick={() => setShowHelp(true)}
                         />
                     </div>
                 )}
@@ -1799,6 +2177,8 @@ export const LandingPage: React.FC = () => {
                         setParkLocation={setParkLocation}
                         sessionStart={sessionStart}
                         setSessionStart={setSessionStart}
+                        listedParkingSession={listedParkingSession}
+                        onQRScan={() => setShowQRScanner(true)}
                     />
                 )}
             </div>
@@ -1819,14 +2199,14 @@ export const LandingPage: React.FC = () => {
                         >
                             <button
                                 onClick={() => setShowHelp(false)}
-                                className="absolute top-6 right-6 p-2 rounded-full bg-black/5 dark:bg-white/10 transition-colors"
+                                className="absolute top-6 left-6 p-2 rounded-full transition-colors text-black/60 dark:text-white/60 hover:bg-black/10 dark:hover:bg-white/20"
                             >
-                                <X size={20} className="text-black/60 dark:text-white/60" />
+                                <ArrowLeft size={20} />
                             </button>
 
                             <div className="text-center space-y-2 pt-4">
                                 <div className="mx-auto w-16 h-16 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-500 dark:text-blue-400 mb-4">
-                                    <HelpCircle size={32} />
+                                    <span className="text-3xl font-bold">?</span>
                                 </div>
                                 <h2 className="text-2xl font-bold text-zinc-900 dark:text-white">How to use Parlens</h2>
                                 <p className="text-sm text-zinc-500 dark:text-zinc-400">Decentralized Route & Parking Management</p>
@@ -1893,11 +2273,16 @@ export const LandingPage: React.FC = () => {
 
                                 <p>
                                     <strong className="text-zinc-900 dark:text-white block mb-1">3. Find and log parking</strong>
-                                    Click the main button once to see open spots reported by others live or within the last 5 minutes. Click again to mark your location. When leaving, click once more to end the session and report the fee. Use the profile button to see your parking history.
+                                    Click the main button once to see open spots in listed parking spaces and open spots reported by others live or within the last 5 minutes. For standard parking: Click again to mark your location. When leaving, click once more to end the session, log the fee and report the spot. For listed parking: Click the QR code scanner button below the vehicle type selector. Scan the QR code at the parking location to start the session. When leaving, scan it again to end the session and log the fee. Use the profile button to see your parking history.
                                 </p>
 
                                 <p>
-                                    <strong className="text-zinc-900 dark:text-white block mb-1">4. Create your own mirror (optional)</strong>
+                                    <strong className="text-zinc-900 dark:text-white block mb-1">4. Create and manage a listed parking (optional)</strong>
+                                    Users who oversee one or more parking spots can create a listed parking to simplify spot and lot management. Click the parking services button (‽) at the bottom left-hand corner of the screen, and click the '+' button to create a listing. Provide the relevant details requested in form to create an online listing that matches your real-world space. Listed parkings can be public (open to all users) or private (open to select users and only publish to select relays). Once created you can see your listings as viewed by other users in the public or private listing page. You should use the my listing page to manage your listing(s). Larger listings may take longer to create.
+                                </p>
+
+                                <p>
+                                    <strong className="text-zinc-900 dark:text-white block mb-1">5. Create your own mirror (optional)</strong>
                                     <a
                                         href="https://github.com/prasannawarrier/parlens-pwa/blob/main/MIRROR_CREATION.md"
                                         target="_blank"
@@ -1909,8 +2294,8 @@ export const LandingPage: React.FC = () => {
                                 </p>
 
                                 <p>
-                                    <strong className="text-zinc-900 dark:text-white block mb-1">5. User privacy</strong>
-                                    Parlens does not collect or share any user data. Your log and route data is encrypted by your keys and only accessible by you. Open spot broadcasts are ephemeral and not linked to any personal identifiers.
+                                    <strong className="text-zinc-900 dark:text-white block mb-1">6. User privacy</strong>
+                                    Parlens does not collect or share any user data. Your log and route data is encrypted by your keys, only accessible by you and stored on relays of your preference. Open spot broadcasts and listed parking log updates use temporary identifiers to prevent your permanent public key from being shared.
                                 </p>
 
                                 {/* Bottom tip */}
@@ -1925,6 +2310,144 @@ export const LandingPage: React.FC = () => {
                     </div>
                 )
             }
+
+            {/* Listed Parking Fullscreen Page */}
+            {/* Listed Parking Page Overlay */}
+            <div style={{ display: showListedParking && !isPickingLocation ? 'block' : 'none' }}>
+                {showListedParking && (
+                    <ListedParkingPage
+                        onClose={() => setShowListedParking(false)}
+                        currentLocation={location}
+                        countryCode={countryCode}
+                        onPickLocation={() => setIsPickingLocation(true)}
+                        pickedLocation={pickedListingLocation}
+                    />
+                )}
+            </div>
+
+            {/* Location Picker UI for Listings */}
+            {isPickingLocation && (
+                <>
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none z-[1500]">
+                        <div className="relative">
+                            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-4 bg-black/50" />
+                            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-1 bg-black/50" />
+                            <div className="w-8 h-8 border-2 border-purple-500 rounded-full flex items-center justify-center bg-white/20 backdrop-blur-sm shadow-xl animate-in zoom-in spin-in-180 duration-500">
+                                <MapPin size={16} className="text-purple-600 fill-current" />
+                            </div>
+                        </div>
+                    </div>
+                    <div className="absolute bottom-10 left-0 right-0 z-[2000] flex justify-center gap-4 px-4 pb-safe animate-in slide-in-from-bottom">
+                        <button
+                            onClick={() => setIsPickingLocation(false)}
+                            className="px-6 py-3 rounded-full bg-white text-zinc-900 font-bold shadow-lg"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            onClick={() => {
+                                setPickedListingLocation({ lat: viewState.latitude, lon: viewState.longitude });
+                                setIsPickingLocation(false);
+                            }}
+                            className="px-6 py-3 rounded-full bg-purple-600 text-white font-bold shadow-lg shadow-purple-500/30"
+                        >
+                            Confirm Location
+                        </button>
+                    </div>
+                </>
+            )}
+
+            {/* QR Scanner Overlay */}
+            {/* Listed Session End Cost Popup */}
+            {showListedEndPopup && (
+                <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/60 backdrop-blur-xl animate-in fade-in duration-300 p-4">
+                    <div className="w-full max-w-sm bg-white dark:bg-[#1c1c1e] rounded-[2rem] shadow-2xl p-6 flex flex-col items-center space-y-5 animate-in zoom-in-95 border border-black/5 dark:border-white/10 transition-colors">
+                        <div className="text-center space-y-1">
+                            <h3 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-white">End Session</h3>
+                            <p className="text-xs font-medium text-zinc-500 dark:text-white/40">Enter total parking fee</p>
+                        </div>
+
+                        <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-3 bg-zinc-100 dark:bg-white/5 px-5 py-4 rounded-[1.5rem] border border-black/5 dark:border-white/5">
+                                <span className="text-2xl font-bold text-blue-500">$</span>
+                                <input
+                                    type="number"
+                                    value={endSessionCost}
+                                    onChange={(e) => setEndSessionCost(e.target.value)}
+                                    autoFocus
+                                    className="w-20 bg-transparent text-4xl font-black text-center text-zinc-900 dark:text-white focus:outline-none placeholder:text-zinc-300 dark:placeholder:text-white/10 appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]"
+                                    min="0"
+                                />
+                                <span className="text-sm font-bold text-zinc-400 dark:text-white/20">USD</span>
+                            </div>
+
+                            <div className="flex flex-col gap-1.5">
+                                <button
+                                    onClick={() => setEndSessionCost(String(Math.max(0, parseFloat(endSessionCost || '0') + 1)))}
+                                    className="h-10 w-10 rounded-xl bg-zinc-100 dark:bg-white/10 active:scale-95 transition-all flex items-center justify-center"
+                                >
+                                    <ChevronUp size={22} className="text-zinc-600 dark:text-white/70" />
+                                </button>
+                                <button
+                                    onClick={() => setEndSessionCost(String(Math.max(0, parseFloat(endSessionCost || '0') - 1)))}
+                                    className="h-10 w-10 rounded-xl bg-zinc-100 dark:bg-white/10 active:scale-95 transition-all flex items-center justify-center"
+                                >
+                                    <ChevronDown size={22} className="text-zinc-600 dark:text-white/70" />
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="w-full space-y-3">
+                            <button
+                                onClick={handleConfirmEndListedSession}
+                                className="w-full h-14 rounded-[1.5rem] bg-[#007AFF] text-white text-lg font-bold flex items-center justify-center gap-2 shadow-xl active:scale-95 transition-all"
+                            >
+                                Log Parking <ArrowRight size={20} />
+                            </button>
+
+                            <button
+                                onClick={() => {
+                                    setShowListedEndPopup(false);
+                                    setPendingEndSession(null);
+                                    setEndSessionCost('0');
+                                }}
+                                className="w-full text-xs font-bold text-zinc-400 dark:text-white/30 tracking-widest uppercase py-3 transition-colors"
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* QR Scanner Overlay */}
+            {showQRScanner && (
+                <div className="fixed inset-0 z-[3000] bg-black/90 flex flex-col items-center justify-center animate-in fade-in">
+                    <button
+                        onClick={() => setShowQRScanner(false)}
+                        className="absolute top-6 right-6 p-3 rounded-full bg-white/10 text-white"
+                    >
+                        <X size={24} />
+                    </button>
+                    <div className="text-center space-y-6 px-8">
+                        <div className="w-64 h-64 border-4 border-white/50 rounded-3xl flex items-center justify-center mx-auto">
+                            <QrCode size={64} className="text-white/30" />
+                        </div>
+                        <p className="text-white/60 text-sm">Point your camera at the parking spot QR code</p>
+                        <button
+                            onClick={() => {
+                                const code = prompt('Enter QR code manually:');
+                                if (code) {
+                                    handleScannedCode(code);
+                                }
+                            }}
+                            className="px-6 py-3 bg-white/10 text-white rounded-full text-sm font-medium active:scale-95 transition-transform"
+                        >
+                            Enter Code Manually
+                        </button>
+                    </div>
+                </div>
+            )}
         </div >
     );
 };

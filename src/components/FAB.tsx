@@ -17,6 +17,8 @@ interface FABProps {
     setParkLocation: (loc: [number, number] | null) => void;
     sessionStart: number | null;
     setSessionStart: (time: number | null) => void;
+    listedParkingSession?: any; // Active listed parking session
+    onQRScan?: () => void; // Trigger QR scanner
 }
 
 export const FAB: React.FC<FABProps> = ({
@@ -28,7 +30,9 @@ export const FAB: React.FC<FABProps> = ({
     parkLocation,
     setParkLocation,
     sessionStart,
-    setSessionStart
+    setSessionStart,
+    listedParkingSession,
+    onQRScan
 }) => {
     const { pubkey, pool, signEvent } = useAuth();
     const [showCostPopup, setShowCostPopup] = useState(false);
@@ -79,60 +83,87 @@ export const FAB: React.FC<FABProps> = ({
         }
     }, [status, searchLocation, setOpenSpots]);
 
-    // REAL-TIME SUBSCRIPTION for open spots
+    // Fetch Open Spots (Kind 31714 & Kind 1714 'open')
     useEffect(() => {
+        if (!pool) return;
+
+        spotsMapRef.current.clear();
+        setOpenSpots([]);
+
         if (status === 'search' && sessionGeohashes.size > 0) {
             console.log('[Parlens] Subscribing to spots in geohashes:', Array.from(sessionGeohashes));
 
             const now = Math.floor(Date.now() / 1000);
 
-            // 1. Immediate fetch of existing spots (Fix for "spots not showing up")
+            const processSpotEvent = (event: any) => {
+                try {
+                    const currentTime = Math.floor(Date.now() / 1000);
+
+                    // Check expiration for Kind 31714
+                    if (event.kind === KINDS.OPEN_SPOT_BROADCAST) {
+                        const expirationTag = event.tags.find((t: string[]) => t[0] === 'expiration');
+                        if (expirationTag) {
+                            const expTime = parseInt(expirationTag[1]);
+                            if (expTime < currentTime) return; // Expired
+                        }
+                    }
+
+                    // Check valid location
+                    const locTag = event.tags.find((t: string[]) => t[0] === 'location');
+                    if (!locTag) return;
+
+                    const [lat, lon] = locTag[1].split(',').map(Number);
+                    let spotType = 'car';
+                    let price = 0;
+                    let spotCurrency = 'USD';
+
+                    if (event.kind === KINDS.OPEN_SPOT_BROADCAST) {
+                        const priceTag = event.tags.find((t: string[]) => t[0] === 'hourly_rate');
+                        const currencyTag = event.tags.find((t: string[]) => t[0] === 'currency');
+                        const typeTag = event.tags.find((t: string[]) => t[0] === 'type');
+                        price = priceTag ? parseFloat(priceTag[1]) : 0;
+                        spotCurrency = currencyTag ? currencyTag[1] : 'USD';
+                        spotType = typeTag ? typeTag[1] : 'car';
+                    } else if (event.kind === KINDS.LISTED_SPOT_LOG) {
+                        // For Kind 1714, parse content for details
+                        const content = JSON.parse(event.content);
+                        if (content.status !== 'open') return; // Only show open spots
+                        price = content.hourly_rate || 0;
+                        spotCurrency = content.currency || 'USD';
+                        spotType = content.type || 'car';
+                    }
+
+                    const spot = {
+                        id: event.id,
+                        lat,
+                        lon,
+                        price: price,
+                        currency: spotCurrency,
+                        type: spotType
+                    };
+
+                    if (!spotsMapRef.current.has(event.id)) {
+                        spotsMapRef.current.set(event.id, spot);
+                    }
+                } catch (e) {
+                    console.warn('[Parlens] Error parsing spot event:', e);
+                }
+            };
+
+            // 1. Immediate fetch of existing spots
             const initialFetch = async () => {
                 try {
                     const events = await pool.querySync(
                         DEFAULT_RELAYS,
                         {
-                            kinds: [KINDS.OPEN_SPOT_BROADCAST],
+                            kinds: [KINDS.OPEN_SPOT_BROADCAST, KINDS.LISTED_SPOT_LOG],
                             '#g': Array.from(sessionGeohashes),
                             since: now - 600 // Past 10 mins
                         } as any
                     );
 
-                    const currentTime = Math.floor(Date.now() / 1000);
                     for (const event of events) {
-                        try {
-                            // Check expiration
-                            const expirationTag = event.tags.find((t: string[]) => t[0] === 'expiration');
-                            if (expirationTag) {
-                                const expTime = parseInt(expirationTag[1]);
-                                if (expTime < currentTime) continue;
-                            }
-
-                            const locTag = event.tags.find((t: string[]) => t[0] === 'location');
-                            if (!locTag) continue;
-
-                            const priceTag = event.tags.find((t: string[]) => t[0] === 'hourly_rate');
-                            const currencyTag = event.tags.find((t: string[]) => t[0] === 'currency');
-                            const typeTag = event.tags.find((t: string[]) => t[0] === 'type');
-
-                            const [lat, lon] = locTag[1].split(',').map(Number);
-                            const spotType = typeTag ? typeTag[1] : 'car';
-
-                            const spot = {
-                                id: event.id,
-                                lat,
-                                lon,
-                                price: priceTag ? parseFloat(priceTag[1]) : 0,
-                                currency: currencyTag ? currencyTag[1] : 'USD',
-                                type: spotType
-                            };
-
-                            if (!spotsMapRef.current.has(event.id)) {
-                                spotsMapRef.current.set(event.id, spot);
-                            }
-                        } catch (e) {
-                            console.warn('[Parlens] Error parsing spot:', e);
-                        }
+                        processSpotEvent(event);
                     }
                     // Update state after initial fetch
                     if (spotsMapRef.current.size > 0) {
@@ -145,56 +176,23 @@ export const FAB: React.FC<FABProps> = ({
             initialFetch();
 
             // 2. Subscribe to NEW spots in real-time
-            // Query past 10 mins to catch recently published valid spots
             const sub = pool.subscribeMany(
                 DEFAULT_RELAYS,
                 [
                     {
-                        kinds: [KINDS.OPEN_SPOT_BROADCAST],
+                        kinds: [KINDS.OPEN_SPOT_BROADCAST, KINDS.LISTED_SPOT_LOG],
                         '#g': Array.from(sessionGeohashes),
                         since: now - 600
                     }
                 ] as any,
                 {
                     onevent(event) {
-                        try {
-                            const currentTime = Math.floor(Date.now() / 1000);
-
-                            // Check expiration
-                            const expirationTag = event.tags.find((t: string[]) => t[0] === 'expiration');
-                            if (expirationTag) {
-                                const expTime = parseInt(expirationTag[1]);
-                                if (expTime < currentTime) return; // Expired
-                            }
-
-                            // Check valid location
-                            const locTag = event.tags.find((t: string[]) => t[0] === 'location');
-                            if (!locTag) return;
-
-                            const priceTag = event.tags.find((t: string[]) => t[0] === 'hourly_rate');
-                            const currencyTag = event.tags.find((t: string[]) => t[0] === 'currency');
-                            const typeTag = event.tags.find((t: string[]) => t[0] === 'type');
-
-                            const [lat, lon] = locTag[1].split(',').map(Number);
-                            const spotType = typeTag ? typeTag[1] : 'car';
-
-                            const spot = {
-                                id: event.id,
-                                lat,
-                                lon,
-                                price: priceTag ? parseFloat(priceTag[1]) : 0,
-                                currency: currencyTag ? currencyTag[1] : 'USD',
-                                type: spotType
-                            };
-
-                            // Update map ref and trigger state update
-                            // Using ref + debounce-like update prevents flickering
-                            if (!spotsMapRef.current.has(event.id)) {
-                                spotsMapRef.current.set(event.id, spot);
-                                setOpenSpots(Array.from(spotsMapRef.current.values()));
-                            }
-                        } catch (e) {
-                            console.warn('[Parlens] Error parsing spot event:', e);
+                        processSpotEvent(event);
+                        // Update map ref and trigger state update
+                        // Using ref + debounce-like update prevents flickering
+                        if (!spotsMapRef.current.has(event.id)) {
+                            spotsMapRef.current.set(event.id, event); // Store raw event for now
+                            setOpenSpots(Array.from(spotsMapRef.current.values()));
                         }
                     },
                     oneose() {
@@ -210,8 +208,13 @@ export const FAB: React.FC<FABProps> = ({
         }
     }, [status, sessionGeohashes, pool, setOpenSpots]);
 
+    const hasCheckedCurrency = useRef(false);
+
     useEffect(() => {
         const detectCurrency = async () => {
+            // Only check once
+            if (hasCheckedCurrency.current) return;
+
             // First use locale as fallback
             const localCurrency = getLocalCurrency();
             setCurrency(localCurrency);
@@ -219,6 +222,7 @@ export const FAB: React.FC<FABProps> = ({
 
             // Then try GPS-based detection
             if (searchLocation) {
+                hasCheckedCurrency.current = true; // Mark as checked
                 try {
                     const gpsCurrency = await getCurrencyFromLocation(searchLocation[0], searchLocation[1]);
                     setCurrency(gpsCurrency);
@@ -239,8 +243,12 @@ export const FAB: React.FC<FABProps> = ({
             setParkLocation(searchLocation ? [searchLocation[0], searchLocation[1]] : null);
             setStatus('parked');
         } else if (status === 'parked') {
-            setCost('0'); // Reset to 0 for new session
-            setShowCostPopup(true);
+            if (listedParkingSession) {
+                onQRScan?.();
+            } else {
+                setCost('0'); // Reset to 0 for new session
+                setShowCostPopup(true);
+            }
         }
     };
 
