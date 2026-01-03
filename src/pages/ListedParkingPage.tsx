@@ -550,10 +550,20 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                     // Spot View
                     <div className="flex-1 flex flex-col p-4 bg-zinc-50 dark:bg-black/50 overflow-hidden">
                         <div className="flex gap-2 mb-4 overflow-x-auto pb-2 no-scrollbar">
-                            <button onClick={() => setVehicleFilter('all')} className={`px-4 py-2 rounded-full text-sm font-bold whitespace-nowrap ${vehicleFilter === 'all' ? 'bg-zinc-800 text-white' : 'bg-white dark:bg-zinc-800/50 text-zinc-600 dark:text-zinc-400'}`}>All Spots</button>
-                            <button onClick={() => setVehicleFilter('car')} className={`px-4 py-2 rounded-full text-sm font-bold whitespace-nowrap ${vehicleFilter === 'car' ? 'bg-blue-500 text-white' : 'bg-white dark:bg-zinc-800/50 text-zinc-600 dark:text-zinc-400'}`}>🚗 Cars</button>
-                            <button onClick={() => setVehicleFilter('motorcycle')} className={`px-4 py-2 rounded-full text-sm font-bold whitespace-nowrap ${vehicleFilter === 'motorcycle' ? 'bg-orange-500 text-white' : 'bg-white dark:bg-zinc-800/50 text-zinc-600 dark:text-zinc-400'}`}>🏍️ Moto</button>
-                            <button onClick={() => setVehicleFilter('bicycle')} className={`px-4 py-2 rounded-full text-sm font-bold whitespace-nowrap ${vehicleFilter === 'bicycle' ? 'bg-green-500 text-white' : 'bg-white dark:bg-zinc-800/50 text-zinc-600 dark:text-zinc-400'}`}>🚲 Bikes</button>
+                            <div className="w-full flex justify-between items-center gap-2 p-1 bg-zinc-100 dark:bg-white/5 rounded-[1.5rem] border border-black/5 dark:border-white/5">
+                                {(['all', 'bicycle', 'motorcycle', 'car'] as const).map((type) => (
+                                    <button
+                                        key={type}
+                                        onClick={() => setVehicleFilter(type)}
+                                        className={`flex-1 flex items-center justify-center py-2.5 rounded-[1.2rem] text-sm transition-all active:scale-95 ${vehicleFilter === type
+                                            ? 'bg-white dark:bg-white/10 text-zinc-900 dark:text-white font-bold shadow-sm'
+                                            : 'text-zinc-400 dark:text-white/40 hover:text-zinc-600 dark:hover:text-white/60'
+                                            }`}
+                                    >
+                                        {type === 'all' ? 'All' : <span className="text-xl">{type === 'bicycle' ? '🚲' : type === 'motorcycle' ? '🏍️' : '🚗'}</span>}
+                                    </button>
+                                ))}
+                            </div>
                         </div>
 
                         <div className="flex-1 overflow-y-auto">
