@@ -19,6 +19,7 @@ import { useWakeLock } from '../hooks/useWakeLock';
 import { ListedParkingPage } from './ListedParkingPage';
 import { useAuth } from '../contexts/AuthContext';
 import { KINDS, DEFAULT_RELAYS } from '../lib/nostr';
+import { Html5Qrcode } from 'html5-qrcode';
 
 // Free vector tile styles - using simpler styles that match better
 const MAP_STYLES = {
@@ -49,6 +50,122 @@ const SpotMarkerContent = memo(({ price, emoji, currency, isHistory = false }: {
         </div>
     );
 });
+
+// QR Scanner Overlay Component with real camera
+const QRScannerOverlay = ({ onClose, onScan }: { onClose: () => void; onScan: (code: string) => void }) => {
+    const scannerRef = useRef<Html5Qrcode | null>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
+    const [error, setError] = useState<string | null>(null);
+    const [isStarting, setIsStarting] = useState(true);
+
+    useEffect(() => {
+        let isMounted = true;
+        const startScanner = async () => {
+            if (!containerRef.current) return;
+
+            try {
+                const scanner = new Html5Qrcode('qr-reader');
+                scannerRef.current = scanner;
+
+                await scanner.start(
+                    { facingMode: 'environment' },
+                    {
+                        fps: 10,
+                        qrbox: { width: 250, height: 250 }
+                    },
+                    (decodedText) => {
+                        // Success callback
+                        if (isMounted) {
+                            scanner.stop().catch(console.error);
+                            onScan(decodedText);
+                            onClose();
+                        }
+                    },
+                    (_errorMessage) => {
+                        // Error callback (ignore scan errors)
+                    }
+                );
+
+                if (isMounted) setIsStarting(false);
+            } catch (err: any) {
+                console.error('Camera error:', err);
+                if (isMounted) {
+                    setError(err.message || 'Failed to access camera');
+                    setIsStarting(false);
+                }
+            }
+        };
+
+        startScanner();
+
+        return () => {
+            isMounted = false;
+            if (scannerRef.current) {
+                scannerRef.current.stop().catch(console.error);
+            }
+        };
+    }, [onScan, onClose]);
+
+    return (
+        <div className="fixed inset-0 z-[3000] bg-black flex flex-col items-center justify-center animate-in fade-in">
+            <button
+                onClick={onClose}
+                className="absolute top-6 right-6 p-3 rounded-full bg-white/10 text-white z-10 active:scale-95 transition-transform"
+            >
+                <X size={24} />
+            </button>
+
+            <div className="text-center space-y-6 px-8 w-full max-w-sm">
+                {isStarting && (
+                    <div className="text-white/60 text-sm animate-pulse">Starting camera...</div>
+                )}
+
+                {error ? (
+                    <div className="space-y-4">
+                        <p className="text-red-400 text-sm">{error}</p>
+                        <button
+                            onClick={() => {
+                                const code = prompt('Enter QR code manually:');
+                                if (code) {
+                                    onScan(code);
+                                    onClose();
+                                }
+                            }}
+                            className="px-6 py-3 bg-white/10 border border-white/20 text-white rounded-full text-sm font-medium active:scale-95 transition-transform"
+                        >
+                            Enter Code Manually
+                        </button>
+                    </div>
+                ) : (
+                    <>
+                        <div
+                            id="qr-reader"
+                            ref={containerRef}
+                            className="w-full aspect-square rounded-3xl overflow-hidden bg-black"
+                        />
+                        <p className="text-white/60 text-sm">Point your camera at the parking spot QR code</p>
+                        <button
+                            onClick={() => {
+                                const code = prompt('Enter QR code manually:');
+                                if (code) {
+                                    if (scannerRef.current) {
+                                        scannerRef.current.stop().catch(console.error);
+                                    }
+                                    onScan(code);
+                                    onClose();
+                                }
+                            }}
+                            className="px-6 py-3 bg-white/10 border border-white/20 text-white rounded-full text-sm font-medium active:scale-95 transition-transform"
+                        >
+                            Enter Code Manually
+                        </button>
+                    </>
+                )}
+            </div>
+        </div>
+    );
+};
+
 
 
 // User Location Marker Component
@@ -2422,31 +2539,10 @@ export const LandingPage: React.FC = () => {
 
             {/* QR Scanner Overlay */}
             {showQRScanner && (
-                <div className="fixed inset-0 z-[3000] bg-black/90 flex flex-col items-center justify-center animate-in fade-in">
-                    <button
-                        onClick={() => setShowQRScanner(false)}
-                        className="absolute top-6 right-6 p-3 rounded-full bg-white/10 text-white"
-                    >
-                        <X size={24} />
-                    </button>
-                    <div className="text-center space-y-6 px-8">
-                        <div className="w-64 h-64 border-4 border-white/50 rounded-3xl flex items-center justify-center mx-auto">
-                            <QrCode size={64} className="text-white/30" />
-                        </div>
-                        <p className="text-white/60 text-sm">Point your camera at the parking spot QR code</p>
-                        <button
-                            onClick={() => {
-                                const code = prompt('Enter QR code manually:');
-                                if (code) {
-                                    handleScannedCode(code);
-                                }
-                            }}
-                            className="px-6 py-3 bg-white/10 text-white rounded-full text-sm font-medium active:scale-95 transition-transform"
-                        >
-                            Enter Code Manually
-                        </button>
-                    </div>
-                </div>
+                <QRScannerOverlay
+                    onClose={() => setShowQRScanner(false)}
+                    onScan={handleScannedCode}
+                />
             )}
         </div >
     );

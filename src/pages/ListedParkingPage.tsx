@@ -4,12 +4,13 @@
  * Refined based on user feedback (Style, Form, Features)
  */
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { MapPin, Plus, QrCode, Trash2, X, Check, Copy, Pencil, ChevronRight, LocateFixed, Users, ArrowLeft, Search, RotateCcw } from 'lucide-react';
+import { MapPin, Plus, Trash2, X, Check, Copy, Pencil, ChevronRight, LocateFixed, Users, ArrowLeft, Search, RotateCcw } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { KINDS, DEFAULT_RELAYS } from '../lib/nostr';
 import { encodeGeohash, calculateDistance } from '../lib/geo';
 import { getCurrencyFromLocation } from '../lib/currency'; // Import currency utility
 import * as nip19 from 'nostr-tools/nip19';
+import { QRCodeSVG } from 'qrcode.react';
 
 // Types for Listed Parking
 export interface ListedParkingMetadata {
@@ -93,6 +94,8 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
         bicycle: { open: number; occupied: number; closed: number; total: number; rate: number };
     }>>(new Map());
     const [showAccessListModal, setShowAccessListModal] = useState<ListedParkingMetadata | null>(null);
+    const [floorFilter, setFloorFilter] = useState<string>('all');
+    const [statusFilter, setStatusFilter] = useState<'all' | 'open' | 'occupied' | 'closed'>('all');
 
 
     // Fetch listings and their stats
@@ -511,7 +514,26 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
         return res;
     }, [listings, activeTab, pubkey, searchTerm, listingStats, vehicleFilter, currentLocation]);
 
-    const filteredSpots = useMemo(() => spots.filter(s => vehicleFilter === 'all' || s.type === vehicleFilter), [spots, vehicleFilter]);
+    // Get unique floors for filter dropdown
+    const uniqueFloors = useMemo(() => {
+        const floors = new Set<string>();
+        spots.forEach(s => {
+            if (s.floor) floors.add(s.floor);
+        });
+        return Array.from(floors).sort();
+    }, [spots]);
+
+    // Enhanced filtered spots with floor and status filters
+    const filteredSpots = useMemo(() => spots.filter(s => {
+        if (vehicleFilter !== 'all' && s.type !== vehicleFilter) return false;
+        if (floorFilter !== 'all' && s.floor !== floorFilter) return false;
+        if (statusFilter !== 'all') {
+            const status = spotStatuses.get(s.d);
+            const spotStatus = status?.status || 'open';
+            if (spotStatus !== statusFilter) return false;
+        }
+        return true;
+    }), [spots, vehicleFilter, floorFilter, statusFilter, spotStatuses]);
 
     return (
         <div className="fixed inset-0 z-[3000] bg-zinc-50 dark:bg-black flex flex-col transition-colors">
@@ -524,23 +546,48 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             )}
 
             {/* Header */}
-            <div className="flex items-center justify-between px-4 py-4 border-b border-black/5 dark:border-white/10 bg-white dark:bg-[#1c1c1e]">
-                <div className="flex items-center gap-3">
-                    <button onClick={selectedListing ? () => setSelectedListing(null) : onClose} className="p-2 rounded-full bg-black/5 dark:bg-white/10">
-                        <ChevronRight size={20} className="text-black/60 dark:text-white/60 rotate-180" />
-                    </button>
-                    <h1 className="text-xl font-bold bg-gradient-to-r from-blue-500 to-cyan-500 bg-clip-text text-transparent">
-                        {selectedListing ? selectedListing.listing_name : 'Listed Parking'}
-                    </h1>
+            <div className="bg-white dark:bg-[#1c1c1e] border-b border-black/5 dark:border-white/10">
+                {/* Top Row - Title and Create Button */}
+                <div className="flex items-center justify-between px-4 py-3">
+                    <div className="flex items-center gap-3">
+                        <button onClick={selectedListing ? () => setSelectedListing(null) : onClose} className="p-2 rounded-full bg-black/5 dark:bg-white/10 active:scale-95 transition-transform">
+                            <ChevronRight size={20} className="text-black/60 dark:text-white/60 rotate-180" />
+                        </button>
+                        <h1 className="text-xl font-bold bg-gradient-to-r from-blue-500 to-cyan-500 bg-clip-text text-transparent">
+                            {selectedListing ? selectedListing.listing_name : 'Listed Parking'}
+                        </h1>
+                    </div>
+                    {!selectedListing && (
+                        <button
+                            onClick={() => setShowCreateForm(true)}
+                            className="flex items-center gap-2 p-3 md:px-4 md:py-2 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-full text-sm font-bold shadow-lg shadow-blue-500/20 active:scale-95 transition-transform"
+                        >
+                            <Plus size={20} />
+                            <span className="hidden md:inline">Create Listing</span>
+                        </button>
+                    )}
                 </div>
+
+                {/* Search Row - Only for List View */}
                 {!selectedListing && (
-                    <button
-                        onClick={() => setShowCreateForm(true)}
-                        className="flex items-center gap-2 p-3 md:px-4 md:py-2 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-full text-sm font-bold shadow-lg shadow-blue-500/20 active:scale-95 transition-transform"
-                    >
-                        <Plus size={20} />
-                        <span className="hidden md:inline">Create Listing</span>
-                    </button>
+                    <div className="flex items-center gap-2 px-4 pb-3">
+                        <div className="relative flex-1">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={16} />
+                            <input
+                                value={searchTerm}
+                                onChange={e => setSearchTerm(e.target.value)}
+                                placeholder="Search listing name or location"
+                                className="w-full pl-10 pr-4 py-2.5 bg-zinc-100 dark:bg-white/10 rounded-xl text-sm font-medium text-zinc-900 dark:text-white border border-black/5 dark:border-white/10 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-all placeholder:text-zinc-400 dark:placeholder:text-white/40"
+                            />
+                        </div>
+                        <button
+                            onClick={() => fetchListings()}
+                            className="p-2.5 bg-zinc-100 dark:bg-white/10 border border-black/5 dark:border-white/10 rounded-xl active:scale-95 transition-all text-zinc-600 dark:text-white"
+                            title="Refresh Listings"
+                        >
+                            <RotateCcw size={20} />
+                        </button>
+                    </div>
                 )}
             </div>
 
@@ -549,21 +596,43 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                 {selectedListing ? (
                     // Spot View
                     <div className="flex-1 flex flex-col p-4 bg-zinc-50 dark:bg-black/50 overflow-hidden">
-                        <div className="flex gap-2 mb-4 overflow-x-auto pb-2 no-scrollbar">
-                            <div className="w-full flex justify-between items-center gap-2 p-1 bg-zinc-100 dark:bg-white/5 rounded-[1.5rem] border border-black/5 dark:border-white/5">
-                                {(['all', 'bicycle', 'motorcycle', 'car'] as const).map((type) => (
-                                    <button
-                                        key={type}
-                                        onClick={() => setVehicleFilter(type)}
-                                        className={`flex-1 flex items-center justify-center py-2.5 rounded-[1.2rem] text-sm transition-all active:scale-95 ${vehicleFilter === type
-                                            ? 'bg-white dark:bg-white/10 text-zinc-900 dark:text-white font-bold shadow-sm'
-                                            : 'text-zinc-400 dark:text-white/40 hover:text-zinc-600 dark:hover:text-white/60'
-                                            }`}
-                                    >
-                                        {type === 'all' ? 'All' : <span className="text-xl">{type === 'bicycle' ? '🚲' : type === 'motorcycle' ? '🏍️' : '🚗'}</span>}
-                                    </button>
+                        {/* Dropdown Filters */}
+                        <div className="flex gap-2 mb-4 flex-wrap">
+                            {/* Vehicle Type Filter */}
+                            <select
+                                value={vehicleFilter}
+                                onChange={e => setVehicleFilter(e.target.value as any)}
+                                className="px-3 py-2 bg-white dark:bg-white/10 border border-black/10 dark:border-white/10 rounded-xl text-sm font-medium text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                                <option value="all">All Types</option>
+                                <option value="car">🚗 Cars</option>
+                                <option value="motorcycle">🏍️ Motorcycles</option>
+                                <option value="bicycle">🚲 Bicycles</option>
+                            </select>
+
+                            {/* Floor Filter */}
+                            <select
+                                value={floorFilter}
+                                onChange={e => setFloorFilter(e.target.value)}
+                                className="px-3 py-2 bg-white dark:bg-white/10 border border-black/10 dark:border-white/10 rounded-xl text-sm font-medium text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                                <option value="all">All Floors</option>
+                                {uniqueFloors.map(floor => (
+                                    <option key={floor} value={floor}>{floor}</option>
                                 ))}
-                            </div>
+                            </select>
+
+                            {/* Status Filter */}
+                            <select
+                                value={statusFilter}
+                                onChange={e => setStatusFilter(e.target.value as any)}
+                                className="px-3 py-2 bg-white dark:bg-white/10 border border-black/10 dark:border-white/10 rounded-xl text-sm font-medium text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                                <option value="all">All Statuses</option>
+                                <option value="open">✅ Open</option>
+                                <option value="occupied">🔴 Occupied</option>
+                                <option value="closed">⚪ Closed</option>
+                            </select>
                         </div>
 
                         <div className="flex-1 overflow-y-auto">
@@ -608,33 +677,11 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                             ))}
                         </div>
 
-                        <div className="flex flex-col gap-3 px-4 py-2">
-                            {/* Search Box */}
-                            <div className="flex flex-col gap-2">
-                                <div className="relative w-full flex items-center gap-2">
-                                    <div className="relative flex-1">
-                                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={16} />
-                                        <input
-                                            value={searchTerm}
-                                            onChange={e => setSearchTerm(e.target.value)}
-                                            placeholder="Search listing name or location"
-                                            className="w-full pl-10 pr-4 py-2.5 bg-zinc-100 dark:bg-white/10 rounded-xl text-sm font-medium text-zinc-900 dark:text-white border border-black/5 dark:border-white/10 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-all placeholder:text-zinc-400 dark:placeholder:text-white/40"
-                                        />
-                                    </div>
-                                    <button
-                                        onClick={() => fetchListings()}
-                                        className="p-2.5 bg-zinc-100 dark:bg-white/10 border border-black/5 dark:border-white/10 rounded-xl hover:bg-zinc-200 dark:hover:bg-white/20 active:scale-95 transition-all text-zinc-600 dark:text-white shadow-sm"
-                                        title="Refresh Listings"
-                                    >
-                                        <RotateCcw size={20} />
-                                    </button>
-                                </div>
-                                <div className="flex items-center gap-4 text-[10px] font-bold uppercase tracking-wider text-zinc-500 justify-start pl-1">
-                                    <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-green-500"></div>Open</div>
-                                    <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-red-500"></div>Occupied</div>
-                                    <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-zinc-400"></div>Closed</div>
-                                </div>
-                            </div>
+                        {/* Status Legend */}
+                        <div className="flex items-center gap-4 text-[10px] font-bold uppercase tracking-wider text-zinc-500 justify-start px-4 py-2">
+                            <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-green-500"></div>Open</div>
+                            <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-red-500"></div>Occupied</div>
+                            <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-zinc-400"></div>Closed</div>
                         </div>
 
                         <div className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -869,6 +916,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                         isManager={selectedListing.owners.includes(pubkey!) || selectedListing.managers.includes(pubkey!)}
                         onClose={() => setSelectedSpot(null)}
                         onStatusChange={() => fetchSpots(selectedListing)}
+                        setSpotStatuses={setSpotStatuses}
                     />
                 )
             }
@@ -1294,7 +1342,7 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
     );
 };
 
-const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isManager, onStatusChange }) => {
+const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isManager, onStatusChange, setSpotStatuses }) => {
     const { pubkey, signEvent, pool } = useAuth();
     // QR contains a-tag, authorizer (owner/manager pubkey), and auth token
     const spotATag = `${KINDS.PARKING_SPOT_LISTING}:${spot.pubkey}:${spot.d} `;
@@ -1389,6 +1437,24 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
         await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signed));
         // Add to local logs
         setLogs(prev => [signed, ...prev]);
+
+        // Immediately update spotStatuses for instant UI feedback
+        if (setSpotStatuses) {
+            setSpotStatuses((prev: Map<string, SpotStatus>) => {
+                const newMap = new Map(prev);
+                newMap.set(spot.d, {
+                    id: signed.id,
+                    pubkey: signed.pubkey,
+                    a: spotATag,
+                    status: s,
+                    updated_by: pubkey || '',
+                    authorizer: '',
+                    created_at: signed.created_at
+                });
+                return newMap;
+            });
+        }
+
         onStatusChange();
     };
 
@@ -1601,8 +1667,8 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
                         {/* Auth QR Code - Only visible to managers/owners */}
                         {isManager && (
                             <>
-                                <div className="p-8 bg-white dark:bg-white rounded-3xl flex justify-center shadow-sm border border-black/5">
-                                    <QrCode size={160} className="text-black" />
+                                <div className="p-4 bg-white rounded-3xl flex justify-center shadow-sm border border-black/5">
+                                    <QRCodeSVG value={qrAuthData} size={160} level="M" />
                                 </div>
                                 <div onClick={() => { navigator.clipboard.writeText(qrAuthData); setCopied(true); setTimeout(() => setCopied(false), 2000); }} className="flex justify-center items-center gap-2 text-[#007AFF] font-bold cursor-pointer py-2 hover:opacity-80 transition-opacity">
                                     {copied ? <Check size={18} /> : <Copy size={18} />} {copied ? 'Copied' : 'Copy Auth Code'}
@@ -1676,22 +1742,22 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
                         {isManager && (
                             <div className="space-y-4 pt-2">
                                 <div className="flex gap-2 p-1 bg-zinc-100 dark:bg-white/5 rounded-2xl">
-                                    <button onClick={() => update('open')} className="flex-1 py-3 text-green-600 dark:text-green-400 font-bold text-sm rounded-xl hover:bg-white dark:hover:bg-white/10 transition-colors">Open</button>
-                                    <button onClick={() => update('occupied')} className="flex-1 py-3 text-red-500 font-bold text-sm rounded-xl hover:bg-white dark:hover:bg-white/10 transition-colors">Occupied</button>
-                                    <button onClick={() => update('closed')} className="flex-1 py-3 text-zinc-500 dark:text-zinc-400 font-bold text-sm rounded-xl hover:bg-white dark:hover:bg-white/10 transition-colors">Closed</button>
+                                    <button onClick={() => update('open')} className="flex-1 py-3 bg-green-500/10 border border-green-500/20 text-green-600 dark:text-green-400 font-bold text-sm rounded-xl active:scale-95 transition-all">Open</button>
+                                    <button onClick={() => update('occupied')} className="flex-1 py-3 bg-red-500/10 border border-red-500/20 text-red-500 font-bold text-sm rounded-xl active:scale-95 transition-all">Occupied</button>
+                                    <button onClick={() => update('closed')} className="flex-1 py-3 bg-zinc-500/10 border border-zinc-500/20 text-zinc-500 dark:text-zinc-400 font-bold text-sm rounded-xl active:scale-95 transition-all">Closed</button>
                                 </div>
 
                                 {/* Status Log Button - Main Entry Point for Notes/History */}
                                 <button
                                     onClick={() => setShowLogs(true)}
-                                    className="w-full py-4 bg-blue-500/10 text-[#007AFF] font-bold rounded-2xl flex items-center justify-center gap-2 hover:bg-blue-500/15 transition-colors"
+                                    className="w-full py-4 bg-blue-500/10 border border-blue-500/20 text-[#007AFF] font-bold rounded-2xl flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
                                 >
                                     View Status Log & Notes ({logs.length}) <ChevronRight size={18} />
                                 </button>
 
                                 {/* Edit/Delete Buttons */}
                                 <div className="flex gap-3 pt-2 border-t border-black/5 dark:border-white/5">
-                                    <button onClick={() => setIsEditing(true)} className="flex-1 py-3 text-zinc-600 dark:text-zinc-300 font-bold text-sm flex items-center justify-center gap-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl transition-colors">
+                                    <button onClick={() => setIsEditing(true)} className="flex-1 py-3 bg-zinc-100 dark:bg-white/10 border border-zinc-200 dark:border-white/10 text-zinc-600 dark:text-zinc-300 font-bold text-sm flex items-center justify-center gap-2 rounded-xl active:scale-95 transition-transform">
                                         <Pencil size={16} /> Edit
                                     </button>
                                     <button onClick={async () => {
@@ -1703,7 +1769,7 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
                                         };
                                         await Promise.allSettled(pool.publish(DEFAULT_RELAYS, await signEvent(deleteSpot)));
                                         onStatusChange(); onClose();
-                                    }} className="flex-1 py-3 text-red-500 font-bold text-sm flex items-center justify-center gap-2 hover:bg-red-500/5 rounded-xl transition-colors">
+                                    }} className="flex-1 py-3 bg-red-500/10 border border-red-500/20 text-red-500 font-bold text-sm flex items-center justify-center gap-2 rounded-xl active:scale-95 transition-transform">
                                         <Trash2 size={16} /> Delete
                                     </button>
                                 </div>

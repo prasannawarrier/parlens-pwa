@@ -125,12 +125,25 @@ export const FAB: React.FC<FABProps> = ({
                         spotCurrency = currencyTag ? currencyTag[1] : 'USD';
                         spotType = typeTag ? typeTag[1] : 'car';
                     } else if (event.kind === KINDS.LISTED_SPOT_LOG) {
-                        // For Kind 1714, parse content for details
-                        const content = JSON.parse(event.content);
-                        if (content.status !== 'open') return; // Only show open spots
-                        price = content.hourly_rate || 0;
-                        spotCurrency = content.currency || 'USD';
-                        spotType = content.type || 'car';
+                        // For Kind 1714, check status from tags first (primary), then content (fallback)
+                        const statusTag = event.tags.find((t: string[]) => t[0] === 'status')?.[1];
+                        const typeTag = event.tags.find((t: string[]) => t[0] === 'type')?.[1];
+
+                        // Parse content if available
+                        let contentData: any = {};
+                        if (event.content) {
+                            try {
+                                contentData = JSON.parse(event.content);
+                            } catch { }
+                        }
+
+                        // Status from tag (preferred) or content
+                        const spotStatus = statusTag || contentData.status;
+                        if (spotStatus !== 'open') return; // Only show open spots
+
+                        price = contentData.hourly_rate || 0;
+                        spotCurrency = contentData.currency || 'USD';
+                        spotType = typeTag || contentData.type || 'car';
                     }
 
                     const spot = {
