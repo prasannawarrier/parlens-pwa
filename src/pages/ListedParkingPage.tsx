@@ -138,6 +138,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
     const [showAccessListModal, setShowAccessListModal] = useState<ListedParkingMetadata | null>(null);
     const [floorFilter, setFloorFilter] = useState<string>('all');
     const [statusFilter, setStatusFilter] = useState<'all' | 'open' | 'occupied' | 'closed'>('all');
+    const [isTogglingStatus, setIsTogglingStatus] = useState(false);
     const [displayedCount, setDisplayedCount] = useState(10); // Pagination - show 10 at a time
     const [showHideMenu, setShowHideMenu] = useState<string | null>(null); // Listing ID for dropdown
 
@@ -195,9 +196,14 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
 
 
     // Fetch listings and their stats
-    const fetchListings = useCallback(async () => {
+    const fetchListings = useCallback(async (arg?: boolean | unknown) => {
         if (!pool) return;
-        setIsLoading(true);
+        const silent = typeof arg === 'boolean' ? arg : false;
+
+        if (!silent) {
+            setIsLoading(true);
+            setStatusLoading(true);
+        }
 
         try {
             // 1. Fetch Metadata
@@ -1258,11 +1264,17 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                             </div>
                                                         );
                                                     })}
+                                                    ```
                                                 </div>
 
                                                 {/* Close All Toggle */}
                                                 {activeTab === 'my' && (listing.owners.includes(pubkey!) || listing.managers.includes(pubkey!)) && (
-                                                    <div className="mt-3 pt-3 border-t border-black/5 dark:border-white/5 flex items-center justify-between" onClick={(e) => e.stopPropagation()}>
+                                                    <div className="mt-3 pt-3 border-t border-black/5 dark:border-white/5 flex items-center justify-between relative" onClick={(e) => e.stopPropagation()}>
+                                                        {isTogglingStatus && (
+                                                            <div className="absolute inset-0 flex items-center justify-center bg-white/70 dark:bg-black/70 rounded-lg z-10">
+                                                                <div className="w-5 h-5 rounded-full border-2 border-blue-500/20 border-t-blue-500 animate-spin" />
+                                                            </div>
+                                                        )}
                                                         <span className={`text-sm font-semibold ${!isClosed ? 'text-green-600 dark:text-green-400' : 'text-zinc-500 dark:text-white/50'}`}>
                                                             {!isClosed ? 'Listing Open' : 'Listing Closed'}
                                                         </span>
@@ -1274,6 +1286,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                                     : 'This will mark ALL spots as OPEN. Continue?';
                                                                 if (!confirm(confirmMsg)) return;
 
+                                                                setIsTogglingStatus(true);
                                                                 try {
                                                                     // Fetch all spots for this listing
                                                                     const aTag = `${KINDS.LISTED_PARKING_METADATA}:${listing.pubkey}:${listing.d}`;
@@ -1284,15 +1297,21 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
 
                                                                     // Calculate new Snapshot Stats immediately
                                                                     const snapshotStats = {
-                                                                        car: { open: 0, occupied: 0, total: 0, closed: 0 },
-                                                                        motorcycle: { open: 0, occupied: 0, total: 0, closed: 0 },
-                                                                        bicycle: { open: 0, occupied: 0, total: 0, closed: 0 }
+                                                                        car: { open: 0, occupied: 0, total: 0, closed: 0, rate: 0 },
+                                                                        motorcycle: { open: 0, occupied: 0, total: 0, closed: 0, rate: 0 },
+                                                                        bicycle: { open: 0, occupied: 0, total: 0, closed: 0, rate: 0 }
                                                                     };
 
                                                                     // Publish status log (Kind 1714) for each spot AND aggregate snapshot
-                                                                    for (const spot of spotEvents) {
+                                                                    // ... existing loop ... 
+                                                                    // Note: We need to preserve the rate from existing stats if possible, or recalculate
+                                                                    const currentStats = listingStats.get(listing.d);
+
+                                                                    const promises = spotEvents.map(async (spot) => {
                                                                         const spotD = spot.tags.find((t: string[]) => t[0] === 'd')?.[1];
-                                                                        const type = spot.tags.find((t: string[]) => t[0] === 'type')?.[1] as 'car' | 'motorcycle' | 'bicycle' || 'car';
+                                                                        let type = spot.tags.find((t: string[]) => t[0] === 'type')?.[1]?.toLowerCase() as 'car' | 'motorcycle' | 'bicycle' || 'car';
+                                                                        if (!['car', 'motorcycle', 'bicycle'].includes(type)) type = 'car';
+
                                                                         const spotATag = `${KINDS.PARKING_SPOT_LISTING}:${spot.pubkey}:${spotD}`;
 
                                                                         // Update stats
@@ -1300,6 +1319,12 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                                             snapshotStats[type].total++;
                                                                             if (newStatus === 'closed') snapshotStats[type].closed++;
                                                                             else snapshotStats[type].open++;
+
+                                                                            // Preserve or fetch rates? For snapshot, rate is average/min?
+                                                                            // Using currentStats rates to persist UI values 
+                                                                            if (currentStats && currentStats[type]) {
+                                                                                snapshotStats[type].rate = currentStats[type].rate;
+                                                                            }
                                                                         }
 
                                                                         const statusEvent = {
@@ -1314,8 +1339,10 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                                             content: ''
                                                                         };
                                                                         const signed = await signEvent(statusEvent);
-                                                                        await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signed));
-                                                                    }
+                                                                        return pool.publish(DEFAULT_RELAYS, signed);
+                                                                    });
+
+                                                                    await Promise.allSettled(promises);
 
                                                                     // Publish Kind 1147 Listing Status Log
                                                                     const listingATag = `${KINDS.LISTED_PARKING_METADATA}:${listing.pubkey}:${listing.d}`;
@@ -1330,7 +1357,6 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                                         content: JSON.stringify(snapshotStats)
                                                                     };
                                                                     await Promise.allSettled(pool.publish(DEFAULT_RELAYS, await signEvent(statusLogEvent)));
-                                                                    console.log('[Parlens] Published Status Log for listing:', listing.d);
 
                                                                     // Update listing metadata
                                                                     const newTags = listing.originalEvent.tags.filter((t: string[]) => t[0] !== 'status');
@@ -1344,20 +1370,17 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                                     const signedMeta = await signEvent(metaEvent);
                                                                     await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedMeta));
 
-                                                                    // Update local state
-                                                                    setListings(prev => prev.map(l => {
-                                                                        if (l.id === listing.id) {
-                                                                            return { ...l, status: newStatus };
-                                                                        }
-                                                                        return l;
-                                                                    }));
-                                                                    if (selectedListing && (selectedListing as any).id === (listing as any).id) {
-                                                                        setSelectedListing(prev => prev ? { ...prev, status: newStatus } : null);
-                                                                    }
-                                                                    await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedMeta));
+                                                                    // NO Local Updates (Relay Only)
+
+                                                                    // Wait for propagation (1.5s) then Silent Refresh
+                                                                    await new Promise(resolve => setTimeout(resolve, 1500));
+                                                                    await fetchListings(true);
+
                                                                 } catch (e) {
                                                                     console.error('Failed to update status:', e);
                                                                     alert('Failed to update status');
+                                                                } finally {
+                                                                    setIsTogglingStatus(false);
                                                                 }
                                                             }}
                                                             className={`relative h-7 w-12 rounded-full transition-colors ${!isClosed ? 'bg-green-500' : 'bg-zinc-200 dark:bg-white/10'}`}
