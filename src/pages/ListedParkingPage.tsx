@@ -1338,7 +1338,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                                         }
                                                                         return l;
                                                                     }));
-                                                                    if (selectedListing && selectedListing.id === listing.id) {
+                                                                    if (selectedListing && (selectedListing as any).id === (listing as any).id) {
                                                                         setSelectedListing(prev => prev ? { ...prev, status: newStatus } : null);
                                                                     }
                                                                     await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedMeta));
