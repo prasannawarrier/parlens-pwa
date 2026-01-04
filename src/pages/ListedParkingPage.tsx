@@ -1045,8 +1045,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                             {statusLoading ? (
                                 <div className="flex-1 flex items-center justify-center py-20">
                                     <div className="text-center">
-                                        <div className="animate-spin w-8 h-8 border-4 border-blue-500/20 border-t-blue-500 rounded-full mx-auto mb-4"></div>
-                                        <p className="text-zinc-500 dark:text-white/50">Loading...</p>
+                                        <div className="animate-spin w-8 h-8 border-4 border-blue-500/20 border-t-blue-500 rounded-full mx-auto"></div>
                                     </div>
                                 </div>
                             ) : (
