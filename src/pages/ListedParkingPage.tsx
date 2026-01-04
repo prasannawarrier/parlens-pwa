@@ -285,10 +285,24 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             let allStatuses: any[] = [];
 
             if (spotATags.length > 0) {
-                // Fetch Spot Status Logs (Kind 1714)
-                console.log('[Parlens] Fetching Kind 1714 logs for', spotATags.length, 'spot a-tags');
-                allStatuses = await pool.querySync(DEFAULT_RELAYS, { kinds: [KINDS.LISTED_SPOT_LOG], '#a': spotATags });
-                console.log('[Parlens] Fetched', allStatuses.length, 'Kind 1714 status log events');
+                // Fetch Spot Status Logs (Kind 1714) - Batch to avoid relay limits
+                console.log('[Parlens] Fetching Kind 1714 logs for', spotATags.length, 'spot a-tags (batched)');
+
+                const chunkSize = 10;
+                const chunks = [];
+                for (let i = 0; i < spotATags.length; i += chunkSize) {
+                    chunks.push(spotATags.slice(i, i + chunkSize));
+                }
+
+                try {
+                    const chunkResults = await Promise.all(
+                        chunks.map(chunk => pool.querySync(DEFAULT_RELAYS, { kinds: [KINDS.LISTED_SPOT_LOG], '#a': chunk }))
+                    );
+                    allStatuses = chunkResults.flat();
+                    console.log('[Parlens] Fetched', allStatuses.length, 'Kind 1714 status log events (total from batches)');
+                } catch (e) {
+                    console.error('[Parlens] Error fetching batched status logs:', e);
+                }
             }
 
             // Map most recent status per spot
@@ -358,6 +372,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
 
                 // Always use Ground-Up Calculation from Kind 1714 logs (spotStatuses)
                 // This ensures list view and multi-spot view use the same data source
+                console.log('[Parlens] Calculating ground-up stats for:', listing.listing_name, 'with', lSpots.length, 'spots');
                 calculateGroundUpStats(lSpots, statusMap, stats);
                 console.log('[Parlens] Ground-up stats for', listing.listing_name, ':', stats.car.total, 'spots,', stats.car.open, 'open,', stats.car.occupied, 'occupied,', stats.car.closed, 'closed');
                 newStats.set(listing.d, stats);
