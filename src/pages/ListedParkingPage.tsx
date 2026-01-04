@@ -1111,10 +1111,23 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                 <>
                                     {paginatedListings.map(listing => {
                                         const stats = listingStats.get(listing.d);
-                                        const isClosed = listing.status === 'closed';
 
-                                        // Use Ground-Up Stats directly (don't override with isClosed status)
-                                        // This allows opening individual spots even if listing is marked closed
+                                        // Ground-Up Status Derivation:
+                                        // If stats exist, determine "Closed" state based on actual spots.
+                                        // Listing is CLOSED if there are spots but NONE are open or occupied (i.e. all closed).
+                                        let isClosed = listing.status === 'closed';
+
+                                        if (stats) {
+                                            const totalOpen = (stats.car?.open || 0) + (stats.motorcycle?.open || 0) + (stats.bicycle?.open || 0);
+                                            const totalOccupied = (stats.car?.occupied || 0) + (stats.motorcycle?.occupied || 0) + (stats.bicycle?.occupied || 0);
+                                            const totalSpots = (stats.car?.total || 0) + (stats.motorcycle?.total || 0) + (stats.bicycle?.total || 0);
+
+                                            if (totalSpots > 0) {
+                                                isClosed = (totalOpen + totalOccupied) === 0;
+                                            }
+                                        }
+
+                                        // Use Ground-Up Stats directly
                                         const displayStats = stats;
 
                                         return (
