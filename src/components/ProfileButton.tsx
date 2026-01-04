@@ -722,7 +722,7 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                                                     ) : (
                                                         <>
                                                             <span
-                                                                className={`flex-1 cursor-pointer ${content.note ? '' : 'text-zinc-400 dark:text-white/30'}`}
+                                                                className={`flex-1 text-left cursor-pointer ${content.note ? '' : 'text-zinc-400 dark:text-white/30'}`}
                                                                 onClick={() => {
                                                                     setEditingNoteLogId(log.id);
                                                                     setEditingNoteValue(content.note || '');

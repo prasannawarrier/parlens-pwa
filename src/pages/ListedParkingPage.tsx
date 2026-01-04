@@ -282,19 +282,20 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             });
 
             // Fetch Snapshots (Kind 11012) - One per listing
-            // const snapshotATags = parsedListings.map(l => `${KINDS.LISTED_PARKING_SNAPSHOT}:${l.pubkey}:${l.id}`);
+            // Build listing a-tags for Kind 1147 query
+            const listingATags = parsedListings.map(l => `${KINDS.LISTED_PARKING_METADATA}:${l.pubkey}:${l.d}`);
 
             let allStatuses: any[] = [];
-            let allSnapshots: any[] = [];
+            let allStatusLogs: any[] = []; // Kind 1147 listing status logs
 
             if (spotATags.length > 0) {
-                // Parallel fetch for Logs and Snapshots
-                const [statusEvents, snapshotEvents] = await Promise.all([
+                // Parallel fetch for Spot Logs (1714) and Listing Status Logs (1147)
+                const [statusEvents, statusLogEvents] = await Promise.all([
                     pool.querySync(DEFAULT_RELAYS, { kinds: [KINDS.LISTED_SPOT_LOG], '#a': spotATags }),
-                    pool.querySync(DEFAULT_RELAYS, { kinds: [KINDS.LISTED_PARKING_SNAPSHOT], '#d': parsedListings.map(l => l.d) }) // Fetch by d-tag value (listing identifier)
+                    pool.querySync(DEFAULT_RELAYS, { kinds: [KINDS.LISTING_STATUS_LOG], '#a': listingATags })
                 ]);
                 allStatuses = statusEvents;
-                allSnapshots = snapshotEvents;
+                allStatusLogs = statusLogEvents;
             }
 
             // Map most recent status per spot
@@ -353,24 +354,27 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                     if (d) newSpotMapping.set(d, { listingId: listing.id, type });
                 }
 
-                // Check for Snapshot first (match by listing's d-tag identifier)
-                const snapshot = allSnapshots.find((s: any) => s.tags.find((t: string[]) => t[0] === 'd')?.[1] === listing.d);
+                // Check for Listing Status Log (Kind 1147) - find latest by a-tag
+                const statusLogsForListing = allStatusLogs
+                    .filter((s: any) => s.tags.find((t: string[]) => t[0] === 'a')?.[1] === listingATag)
+                    .sort((a: any, b: any) => b.created_at - a.created_at);
+                const latestStatusLog = statusLogsForListing[0];
 
-                if (snapshot) {
-                    // Use Snapshot Data (Optimized)
+                if (latestStatusLog) {
+                    // Use Status Log Data (Optimized)
                     try {
-                        const snapContent = JSON.parse(snapshot.content);
-                        // console.log('[Parlens] Using Snapshot for listing:', listing.listing_name);
-                        newStats.set(listing.d, snapContent);
+                        const logContent = JSON.parse(latestStatusLog.content);
+                        console.log('[Parlens] Using Status Log for listing:', listing.listing_name);
+                        newStats.set(listing.d, logContent);
                     } catch (e) {
-                        console.warn('Invalid snapshot content for', listing.listing_name, e);
-                        // Fallback to ground-up calculation if snapshot corrupt
+                        console.warn('Invalid status log content for', listing.listing_name, e);
+                        // Fallback to ground-up calculation if log corrupt
                         calculateGroundUpStats(lSpots, statusMap, stats);
                         newStats.set(listing.d, stats);
                     }
                 } else {
-                    // Fallback to Ground-Up Calculation (No Snapshot or Initial)
-                    // console.log('[Parlens] No Snapshot, calculating ground-up for:', listing.listing_name);
+                    // Fallback to Ground-Up Calculation (No Status Log or Initial)
+                    console.log('[Parlens] No Status Log, calculating ground-up for:', listing.listing_name);
                     calculateGroundUpStats(lSpots, statusMap, stats);
                     newStats.set(listing.d, stats);
                 }
@@ -568,45 +572,48 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
         };
     }, [pool]);
 
-    // Real-time subscription for Parking Status Snapshots (Kind 11012)
+    // Real-time subscription for Listing Status Logs (Kind 1147)
     // This ensures List View counts update immediately when ANYONE changes a status
     useEffect(() => {
         if (!pool) return;
 
-        console.log('[Parlens] Subscribing to global snapshot updates (11012)');
+        console.log('[Parlens] Subscribing to global status log updates (1147)');
 
         const sub = pool.subscribeMany(
             DEFAULT_RELAYS,
             [{
-                kinds: [KINDS.LISTED_PARKING_SNAPSHOT],
+                kinds: [KINDS.LISTING_STATUS_LOG],
                 since: Math.floor(Date.now() / 1000) // Watch for new updates
             }] as any,
             {
                 onevent(event: any) {
-                    const d = event.tags.find((t: string[]) => t[0] === 'd')?.[1];
-                    if (!d) return;
+                    // Extract listing identifier from a-tag (format: "31147:pubkey:d-tag")
+                    const aTag = event.tags.find((t: string[]) => t[0] === 'a')?.[1];
+                    if (!aTag) return;
+                    const listingD = aTag.split(':').pop(); // Get the d-tag part
+                    if (!listingD) return;
 
                     try {
-                        const snapContent = JSON.parse(event.content);
-                        // console.log('[Parlens] Received real-time snapshot for:', d);
+                        const logContent = JSON.parse(event.content);
+                        console.log('[Parlens] Received real-time status log for:', listingD);
 
                         setListingStats(prev => {
                             const newMap = new Map(prev);
-                            newMap.set(d, snapContent);
+                            newMap.set(listingD, logContent);
                             return newMap;
                         });
                     } catch (e) {
-                        console.warn('Error parsing incoming snapshot:', e);
+                        console.warn('Error parsing incoming status log:', e);
                     }
                 },
                 oneose() {
-                    console.log('[Parlens] Snapshot subscription active');
+                    console.log('[Parlens] Status log subscription active');
                 }
             }
         );
 
         return () => {
-            console.log('[Parlens] Closing snapshot subscription');
+            console.log('[Parlens] Closing status log subscription');
             sub.close();
         };
     }, [pool]);
@@ -1272,19 +1279,20 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                                         await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signed));
                                                                     }
 
-                                                                    // Publish Kind 11012 Snapshot
-                                                                    const snapshotEvent = {
-                                                                        kind: KINDS.LISTED_PARKING_SNAPSHOT,
+                                                                    // Publish Kind 1147 Listing Status Log
+                                                                    const listingATag = `${KINDS.LISTED_PARKING_METADATA}:${listing.pubkey}:${listing.d}`;
+                                                                    const statusLogEvent = {
+                                                                        kind: KINDS.LISTING_STATUS_LOG,
                                                                         created_at: Math.floor(Date.now() / 1000),
                                                                         tags: [
-                                                                            ['d', listing.d],
+                                                                            ['a', listingATag],
                                                                             ['g', listing.g],
                                                                             ['client', 'parlens']
                                                                         ],
                                                                         content: JSON.stringify(snapshotStats)
                                                                     };
-                                                                    await Promise.allSettled(pool.publish(DEFAULT_RELAYS, await signEvent(snapshotEvent)));
-                                                                    console.log('[Parlens] Published Snapshot for listing:', listing.id);
+                                                                    await Promise.allSettled(pool.publish(DEFAULT_RELAYS, await signEvent(statusLogEvent)));
+                                                                    console.log('[Parlens] Published Status Log for listing:', listing.d);
 
                                                                     // Update listing metadata to REMOVE status tag (Ground-Up Source of Truth)
                                                                     const metaEvent = {
@@ -1918,20 +1926,21 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
                     else if (s === 'closed') typeStats.closed++;
                     else typeStats.open++;
 
-                    // Publish Snapshot
+                    // Publish Listing Status Log (Kind 1147)
                     try {
-                        const snapshotEvent = {
-                            kind: KINDS.LISTED_PARKING_SNAPSHOT,
+                        const listingATag = `${KINDS.LISTED_PARKING_METADATA}:${listing.pubkey}:${listing.d}`;
+                        const statusLogEvent = {
+                            kind: KINDS.LISTING_STATUS_LOG,
                             created_at: Math.floor(Date.now() / 1000),
                             tags: [
-                                ['d', listing.d],
+                                ['a', listingATag],
                                 ['g', listing.g],
                                 ['client', 'parlens']
                             ],
                             content: JSON.stringify(newStats)
                         };
-                        await Promise.allSettled(pool.publish(DEFAULT_RELAYS, await signEvent(snapshotEvent)));
-                        console.log('[Parlens] Published updated Snapshot for spot:', spot.d);
+                        await Promise.allSettled(pool.publish(DEFAULT_RELAYS, await signEvent(statusLogEvent)));
+                        console.log('[Parlens] Published updated Status Log for spot:', spot.d);
 
                         // Immediately update local state for instant UI feedback
                         setListingStats((prev: Map<string, any>) => {

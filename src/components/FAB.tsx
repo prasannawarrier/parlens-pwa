@@ -116,8 +116,8 @@ export const FAB: React.FC<FABProps> = ({
 
                     if (locTag) {
                         [lat, lon] = locTag[1].split(',').map(Number);
-                    } else if (event.kind !== KINDS.LISTED_PARKING_SNAPSHOT) {
-                        // If not a snapshot (which has 'g'), and no location tag, invalid.
+                    } else if (event.kind !== KINDS.LISTING_STATUS_LOG) {
+                        // If not a status log (which has 'g'), and no location tag, invalid.
                         return;
                     }
 
@@ -133,8 +133,8 @@ export const FAB: React.FC<FABProps> = ({
                         price = priceTag ? parseFloat(priceTag[1]) : 0;
                         spotCurrency = currencyTag ? currencyTag[1] : 'USD';
                         spotType = typeTag ? typeTag[1] : 'car';
-                    } else if (event.kind === KINDS.LISTED_PARKING_SNAPSHOT) {
-                        // Handle Listing Snapshot (Kind 11012)
+                    } else if (event.kind === KINDS.LISTING_STATUS_LOG) {
+                        // Handle Listing Status Log (Kind 1147)
                         // 1. Get location from 'g' tag (Geohash)
                         const gTag = event.tags.find((t: string[]) => t[0] === 'g');
                         if (!gTag) return;
@@ -151,8 +151,8 @@ export const FAB: React.FC<FABProps> = ({
                         } catch { return; }
 
                         // 3. Check availability for selected vehicle type
-                        // contentData structure: { listing_id, g, stats: { car: { open, rate, ... }, ... } }
-                        const typeStats = contentData.stats?.[vehicleType];
+                        // contentData structure: { car: { open, rate, ... }, ... }
+                        const typeStats = contentData[vehicleType];
                         if (!typeStats || typeStats.open <= 0) return; // No open spots for this type
 
                         // 4. Set details
@@ -195,11 +195,11 @@ export const FAB: React.FC<FABProps> = ({
                         } as any
                     );
 
-                    // Fetch listed spot snapshots (Kind 11012) - Replaceable, one per listing
+                    // Fetch listed spot status logs (Kind 1147) - Regular, one or more per listing
                     const listedEvents = await pool.querySync(
                         DEFAULT_RELAYS,
                         {
-                            kinds: [KINDS.LISTED_PARKING_SNAPSHOT],
+                            kinds: [KINDS.LISTING_STATUS_LOG],
                             '#g': Array.from(sessionGeohashes),
                         } as any
                     );
@@ -238,7 +238,7 @@ export const FAB: React.FC<FABProps> = ({
                 DEFAULT_RELAYS,
                 [
                     {
-                        kinds: [KINDS.OPEN_SPOT_BROADCAST, KINDS.LISTED_PARKING_SNAPSHOT],
+                        kinds: [KINDS.OPEN_SPOT_BROADCAST, KINDS.LISTING_STATUS_LOG],
                         '#g': Array.from(sessionGeohashes),
                         since: now  // Only NEW events from this point on
                     }
