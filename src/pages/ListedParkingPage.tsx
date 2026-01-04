@@ -286,7 +286,9 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
 
             if (spotATags.length > 0) {
                 // Fetch Spot Status Logs (Kind 1714)
+                console.log('[Parlens] Fetching Kind 1714 logs for', spotATags.length, 'spot a-tags');
                 allStatuses = await pool.querySync(DEFAULT_RELAYS, { kinds: [KINDS.LISTED_SPOT_LOG], '#a': spotATags });
+                console.log('[Parlens] Fetched', allStatuses.length, 'Kind 1714 status log events');
             }
 
             // Map most recent status per spot
@@ -319,6 +321,15 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                     }
                 }
             });
+
+            // Log status distribution
+            const statusCounts = { open: 0, occupied: 0, closed: 0 };
+            initialSpotStatuses.forEach((s) => {
+                if (s.status === 'open') statusCounts.open++;
+                else if (s.status === 'occupied') statusCounts.occupied++;
+                else if (s.status === 'closed') statusCounts.closed++;
+            });
+            console.log('[Parlens] Extracted statuses from Kind 1714 logs:', statusCounts, 'for', initialSpotStatuses.size, 'spots');
 
             // Set the global spot statuses immediately!
             setSpotStatuses(initialSpotStatuses);
