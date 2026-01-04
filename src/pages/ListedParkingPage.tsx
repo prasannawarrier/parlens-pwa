@@ -935,6 +935,15 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
     return (
         <div className="fixed inset-0 z-[3000] bg-zinc-50 dark:bg-black flex flex-col transition-colors">
             {/* Loading Overlay for Deleting */}
+            {isTogglingStatus && (
+                <div className="fixed inset-0 z-[6000] bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center animate-in fade-in duration-200">
+                    <div className="bg-white dark:bg-[#1c1c1e] p-6 rounded-3xl shadow-2xl flex flex-col items-center gap-4 border border-black/5 dark:border-white/10">
+                        <div className="animate-spin w-10 h-10 border-4 border-blue-500/20 border-t-blue-500 rounded-full"></div>
+                        <div className="text-zinc-900 dark:text-white font-bold animate-pulse">Updating Status...</div>
+                    </div>
+                </div>
+            )}
+
             {isDeleting && (
                 <div className="fixed inset-0 z-[3100] flex items-center justify-center bg-black/50 backdrop-blur-sm flex-col">
                     <div className="animate-spin w-8 h-8 border-4 border-white/20 border-t-white rounded-full"></div>
@@ -1047,7 +1056,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                             <button
                                                 key={spot.id}
                                                 onClick={() => setSelectedSpot(spot)}
-                                                className={`p-3 rounded-2xl border ${statusColor} text-center active:scale-[0.98] transition-transform`}
+                                                className={`p-3 rounded-2xl border ${statusColor} text-center active:scale-[0.98] transition-transform relative`}
                                             >
                                                 <div className="text-3xl mb-1">
                                                     {spot.type === 'car' ? '🚗' : spot.type === 'motorcycle' ? '🏍️' : '🚲'}
@@ -1264,17 +1273,11 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                             </div>
                                                         );
                                                     })}
-                                                    ```
                                                 </div>
 
                                                 {/* Close All Toggle */}
                                                 {activeTab === 'my' && (listing.owners.includes(pubkey!) || listing.managers.includes(pubkey!)) && (
                                                     <div className="mt-3 pt-3 border-t border-black/5 dark:border-white/5 flex items-center justify-between relative" onClick={(e) => e.stopPropagation()}>
-                                                        {isTogglingStatus && (
-                                                            <div className="absolute inset-0 flex items-center justify-center bg-white/70 dark:bg-black/70 rounded-lg z-10">
-                                                                <div className="w-5 h-5 rounded-full border-2 border-blue-500/20 border-t-blue-500 animate-spin" />
-                                                            </div>
-                                                        )}
                                                         <span className={`text-sm font-semibold ${!isClosed ? 'text-green-600 dark:text-green-400' : 'text-zinc-500 dark:text-white/50'}`}>
                                                             {!isClosed ? 'Listing Open' : 'Listing Closed'}
                                                         </span>
