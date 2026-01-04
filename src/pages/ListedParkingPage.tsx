@@ -936,11 +936,9 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
         <div className="fixed inset-0 z-[3000] bg-zinc-50 dark:bg-black flex flex-col transition-colors">
             {/* Loading Overlay for Deleting */}
             {isTogglingStatus && (
-                <div className="fixed inset-0 z-[6000] bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center animate-in fade-in duration-200">
-                    <div className="bg-white dark:bg-[#1c1c1e] p-6 rounded-3xl shadow-2xl flex flex-col items-center gap-4 border border-black/5 dark:border-white/10">
-                        <div className="animate-spin w-10 h-10 border-4 border-blue-500/20 border-t-blue-500 rounded-full"></div>
-                        <div className="text-zinc-900 dark:text-white font-bold animate-pulse">Updating Status...</div>
-                    </div>
+                <div className="fixed inset-0 z-[6000] flex items-center justify-center bg-black/60 backdrop-blur-sm flex-col animate-in fade-in duration-200">
+                    <div className="animate-spin w-10 h-10 border-4 border-white/20 border-t-white rounded-full"></div>
+                    <div className="text-white font-bold mt-4 animate-pulse">Updating Status...</div>
                 </div>
             )}
 
@@ -1432,13 +1430,14 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                 selectedSpot && selectedListing && (
                     <SpotDetailsModal
                         spot={selectedSpot}
-                        listing={selectedListing}
-                        status={spotStatuses.get(selectedSpot.d)}
-                        isManager={selectedListing.owners.includes(pubkey!) || selectedListing.managers.includes(pubkey!)}
-                        onClose={() => setSelectedSpot(null)}
+                        listing={listings.find(l => l.d === selectedSpot!.a.split(':')[2])!}
+                        status={spotStatuses.get(selectedSpot!.d)}
+                        isManager={listings.find(l => l.d === selectedSpot!.a.split(':')[2])!.owners.includes(pubkey || '') || listings.find(l => l.d === selectedSpot!.a.split(':')[2])!.managers.includes(pubkey || '')}
                         listingStats={listingStats}
                         setListingStats={setListingStats}
                         setSpotStatuses={setSpotStatuses}
+                        onSpotUpdate={() => fetchListings(true)}
+                        onClose={() => setSelectedSpot(null)}
                     />
                 )
             }
@@ -1885,7 +1884,7 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
     );
 };
 
-const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isManager, listingStats, setListingStats, setSpotStatuses }) => {
+const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isManager, listingStats, setListingStats, setSpotStatuses, onSpotUpdate, ...props }) => {
     const { pubkey, signEvent, pool } = useAuth();
     // QR contains a-tag, authorizer (owner/manager pubkey), and auth token
     const spotATag = `${KINDS.PARKING_SPOT_LISTING}:${spot.pubkey}:${spot.d} `;
@@ -1909,146 +1908,103 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
     const [logsLoading, setLogsLoading] = useState(true);
     const [quickNote, setQuickNote] = useState('');
     const [showLogs, setShowLogs] = useState(false);
+    const [isUpdating, setIsUpdating] = useState(false);
 
-    // Fetch logs and notes on mount
+    // Fetch logs and notes (extracted for reuse)
+    const fetchData = useCallback(async () => {
+        if (!pool) return;
+        setLogsLoading(true);
+        try {
+            // Fetch Logs (1714) and Notes (1417) linked to this spot
+            const events = await pool.querySync(DEFAULT_RELAYS, {
+                kinds: [KINDS.LISTED_SPOT_LOG, KINDS.PRIVATE_LOG_NOTE],
+                '#a': [spotATag],
+                limit: 50 // Increase limit to catch enough history
+            });
+
+            const fetchedLogs = events.filter((e: any) => e.kind === KINDS.LISTED_SPOT_LOG)
+                .sort((a: any, b: any) => b.created_at - a.created_at);
+
+            const fetchedNotes = events.filter((e: any) => e.kind === KINDS.PRIVATE_LOG_NOTE);
+
+            // Map notes to their target log event (e-tag)
+            const notesMap = new Map<string, any[]>();
+            fetchedNotes.forEach((note: any) => {
+                const eTag = note.tags.find((t: string[]) => t[0] === 'e')?.[1];
+                if (eTag) {
+                    const existing = notesMap.get(eTag) || [];
+                    existing.push(note);
+                    notesMap.set(eTag, existing);
+                }
+            });
+
+            setLogs(fetchedLogs);
+            setNotes(notesMap);
+        } catch (e) {
+            console.error('Failed to fetch spot history:', e);
+        } finally {
+            setLogsLoading(false);
+        }
+    }, [pool, spotATag]);
+
+    // Fetch on mount
     useEffect(() => {
-        const fetchData = async () => {
-            if (!pool) return;
-            try {
-                // Fetch Logs (1714) and Notes (1417) linked to this spot
-                const events = await pool.querySync(DEFAULT_RELAYS, {
-                    kinds: [KINDS.LISTED_SPOT_LOG, KINDS.PRIVATE_LOG_NOTE],
-                    '#a': [spotATag],
-                    limit: 50 // Increase limit to catch enough history
-                });
-
-                const fetchedLogs = events.filter((e: any) => e.kind === KINDS.LISTED_SPOT_LOG)
-                    .sort((a: any, b: any) => b.created_at - a.created_at);
-
-                const fetchedNotes = events.filter((e: any) => e.kind === KINDS.PRIVATE_LOG_NOTE);
-
-                // Map notes to their target log event (e-tag)
-                const notesMap = new Map<string, any[]>();
-                fetchedNotes.forEach((note: any) => {
-                    const eTag = note.tags.find((t: string[]) => t[0] === 'e')?.[1];
-                    if (eTag) {
-                        const existing = notesMap.get(eTag) || [];
-                        existing.push(note);
-                        notesMap.set(eTag, existing);
-                    }
-                });
-
-                setLogs(fetchedLogs);
-                setNotes(notesMap);
-            } catch (e) {
-                console.error('Failed to fetch spot history:', e);
-            } finally {
-                setLogsLoading(false);
-            }
-        };
         if (isManager) fetchData();
-    }, [pool, spotATag, isManager]);
+    }, [fetchData, isManager]);
 
     const update = async (s: 'occupied' | 'open' | 'closed') => {
-        const content = JSON.stringify({
-            status: s,
-            hourly_rate: spot.rates?.hourly || 0,
-            currency: spot.rates?.currency || 'USD',
-            type: spot.type || 'car',
-            updated_at: Math.floor(Date.now() / 1000)
-        });
-
-        const tags = [
-            ['a', spotATag],
-            ['status', s],
-            ['updated_by', pubkey],
-            ['client', 'parlens']
-        ];
-
-        // Add search metadata tags - use LISTING location/geohash for search discoverability
-        if (listing.location) tags.push(['location', listing.location]);
-        if (listing.g) tags.push(['g', listing.g]);
-        // Add type tag for filtering
-        if (spot.type) tags.push(['type', spot.type]);
-        // Add relay tags for discoverability
-        DEFAULT_RELAYS.forEach(relay => tags.push(['r', relay]));
-
-        const ev = {
-            kind: KINDS.LISTED_SPOT_LOG, created_at: Math.floor(Date.now() / 1000),
-            tags: tags,
-            content: content
-        };
-        const signed = await signEvent(ev);
-        await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signed));
-        // Add to local logs
-        setLogs(prev => [signed, ...prev]);
-
-        // Immediately update spotStatuses for instant multi-spot view feedback
-        setSpotStatuses((prev: Map<string, any>) => {
-            const updated = new Map(prev);
-            updated.set(spot.d, {
-                id: signed.id,
-                pubkey: signed.pubkey,
-                a: spotATag,
+        setIsUpdating(true);
+        try {
+            const content = JSON.stringify({
                 status: s,
-                updated_by: pubkey,
-                created_at: signed.created_at
+                hourly_rate: spot.rates?.hourly || 0,
+                currency: spot.rates?.currency || 'USD',
+                type: spot.type || 'car',
+                updated_at: Math.floor(Date.now() / 1000)
             });
-            return updated;
-        });
 
-        // Publish Kind 11012 Snapshot (Ground-Up Ground Truth)
-        // Client aggregates current state + this change
-        if (listingStats) {
-            const currentStats = listingStats.get(listing.d);
-            if (currentStats) {
-                // Determine old status
-                const oldStatus = status?.status || 'open';
+            const tags = [
+                ['a', spotATag],
+                ['status', s],
+                ['updated_by', pubkey],
+                ['client', 'parlens']
+            ];
 
-                // Clone stats to calculate new snapshot
-                const newStats = JSON.parse(JSON.stringify(currentStats)); // Deep clone
-                const typeStats = newStats[spot.type || 'car'];
+            // Add search metadata tags - use LISTING location/geohash for search discoverability
+            if (listing.location) tags.push(['location', listing.location]);
+            if (listing.g) tags.push(['g', listing.g]);
+            // Add type tag for filtering
+            if (spot.type) tags.push(['type', spot.type]);
+            // Add relay tags for discoverability
+            DEFAULT_RELAYS.forEach(relay => tags.push(['r', relay]));
 
-                if (typeStats) {
-                    // Decrement old
-                    if (oldStatus === 'occupied') typeStats.occupied = Math.max(0, typeStats.occupied - 1);
-                    else if (oldStatus === 'closed') typeStats.closed = Math.max(0, typeStats.closed - 1);
-                    else typeStats.open = Math.max(0, typeStats.open - 1);
+            const ev = {
+                kind: KINDS.LISTED_SPOT_LOG, created_at: Math.floor(Date.now() / 1000),
+                tags: tags,
+                content: content
+            };
+            const signed = await signEvent(ev);
+            await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signed));
 
-                    // Increment new
-                    if (s === 'occupied') typeStats.occupied++;
-                    else if (s === 'closed') typeStats.closed++;
-                    else typeStats.open++;
+            // NO Optimistic Updates. Wait for Relay.
+            await new Promise(resolve => setTimeout(resolve, 1500));
 
-                    // Publish Listing Status Log (Kind 1147)
-                    try {
-                        const listingATag = `${KINDS.LISTED_PARKING_METADATA}:${listing.pubkey}:${listing.d}`;
-                        const statusLogEvent = {
-                            kind: KINDS.LISTING_STATUS_LOG,
-                            created_at: Math.floor(Date.now() / 1000),
-                            tags: [
-                                ['a', listingATag],
-                                ['g', listing.g],
-                                ['client', 'parlens']
-                            ],
-                            content: JSON.stringify(newStats)
-                        };
-                        await Promise.allSettled(pool.publish(DEFAULT_RELAYS, await signEvent(statusLogEvent)));
-                        console.log('[Parlens] Published updated Status Log for spot:', spot.d);
+            // Refresh Local Logs (for Modal UI)
+            await fetchData();
 
-                        // Immediately update local state for instant UI feedback
-                        setListingStats((prev: Map<string, any>) => {
-                            const updated = new Map(prev);
-                            updated.set(listing.d, newStats);
-                            return updated;
-                        });
-                    } catch (e) {
-                        console.error('Failed to publish snapshot:', e);
-                    }
-                }
+            // Refresh Global Stats (Parent)
+            if ((props as any).onSpotUpdate) {
+                (props as any).onSpotUpdate();
             }
+
+        } catch (e) {
+            console.error('Failed to update spot:', e);
+            alert('Failed to update status');
+        } finally {
+            setIsUpdating(false);
         }
     };
+
 
     const addQuickNote = async (targetLogId?: string, content?: string) => {
         const textToAdd = content || quickNote;
@@ -2145,6 +2101,12 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
     return (
         <div className="fixed inset-0 z-[5000] bg-black/80 flex items-center justify-center p-4 text-center" onClick={onClose}>
             <div className="bg-white dark:bg-[#1c1c1e] rounded-3xl p-6 w-full max-w-sm space-y-4 relative max-h-[85vh] overflow-y-auto min-h-[400px]" onClick={e => e.stopPropagation()}>
+                {isUpdating && (
+                    <div className="fixed inset-0 z-[6000] flex items-center justify-center bg-black/60 backdrop-blur-sm flex-col animate-in fade-in duration-200">
+                        <div className="animate-spin w-10 h-10 border-4 border-white/20 border-t-white rounded-full"></div>
+                        <div className="text-white font-bold mt-4 animate-pulse">Updating Status...</div>
+                    </div>
+                )}
 
                 {/* LOG VIEW MODE */}
                 {showLogs ? (
