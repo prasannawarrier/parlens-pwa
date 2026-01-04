@@ -347,10 +347,11 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
 
                 // Always use Ground-Up Calculation from Kind 1714 logs (spotStatuses)
                 // This ensures list view and multi-spot view use the same data source
-                console.log('[Parlens] Calculating ground-up stats for:', listing.listing_name);
                 calculateGroundUpStats(lSpots, statusMap, stats);
+                console.log('[Parlens] Ground-up stats for', listing.listing_name, ':', stats.car.total, 'spots,', stats.car.open, 'open,', stats.car.occupied, 'occupied,', stats.car.closed, 'closed');
                 newStats.set(listing.d, stats);
             }
+            console.log('[Parlens] Setting listingStats with', newStats.size, 'listings');
             setListingStats(newStats);
             setSpotToListingMap(newSpotMapping);
 
@@ -358,6 +359,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             console.error('Error fetching listings:', error);
         } finally {
             setIsLoading(false);
+            setStatusLoading(false); // Also stop status loading after fetch completes
         }
     }, [pool]);
 
