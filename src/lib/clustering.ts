@@ -11,6 +11,7 @@ export interface SpotBase {
     lon: number;
     price: number;
     currency: string;
+    count?: number; // Weighted count (e.g. for listings)
 }
 
 export interface Cluster<T extends SpotBase> {
@@ -48,7 +49,17 @@ export function clusterSpots<T extends SpotBase>(
 ): (T | Cluster<SpotBase>)[] {
     // Always cluster if there are at least 2 spots
     if (!shouldCluster || spots.length < 2) {
-        return spots;
+        // BUT if any spot has count > 1 (listing), we must return it as a cluster? 
+        // No, LandingPage checks isCluster which checks valid props.
+        // Actually, if we return T (Spot), it doesn't have minPrice.
+        // If a listing has count 5, we might want to display "5".
+        // LandingPage map loop handles T or Cluster.
+        // If T has count 5, logic in LandingPage needs to handle it.
+        // The clusterSpots return loop creates the Cluster object. 
+        // So skipping this function for <2 spots might skip creating the Cluster wrapper.
+        // Let's remove this early return optimization if we have weighted spots.
+        const hasWeighted = spots.some(s => (s.count || 1) > 1);
+        if (!hasWeighted && spots.length < 2) return spots;
     }
 
     const precision = getClusterPrecision(zoom);
@@ -62,15 +73,22 @@ export function clusterSpots<T extends SpotBase>(
             ? `${spot.lat.toFixed(4)},${spot.lon.toFixed(4)}`
             : encodeGeohash(spot.lat, spot.lon, precision);
 
+        const spotWeight = spot.count || 1;
+
         if (clusters.has(hash)) {
             const cluster = clusters.get(hash)!;
             cluster.spots.push(spot);
-            cluster.count++;
+            cluster.count += spotWeight;
             cluster.minPrice = Math.min(cluster.minPrice, spot.price);
             cluster.maxPrice = Math.max(cluster.maxPrice, spot.price);
-            // Update center to average
-            cluster.lat = cluster.spots.reduce((sum, s) => sum + s.lat, 0) / cluster.count;
-            cluster.lon = cluster.spots.reduce((sum, s) => sum + s.lon, 0) / cluster.count;
+            // Update center to average (weighted? simple average of locations is decent enough)
+            // Ideally weighted average but simple is fine for visual center.
+            // Actually, cluster.lat/lon is updated iteratively?
+            // "cluster.lat = cluster.spots.reduce... / cluster.spots.length"
+            // Re-calculating average every time.
+            const totalCount = cluster.spots.length; // Number of items, not weight
+            cluster.lat = cluster.spots.reduce((sum, s) => sum + s.lat, 0) / totalCount;
+            cluster.lon = cluster.spots.reduce((sum, s) => sum + s.lon, 0) / totalCount;
         } else {
             clusters.set(hash, {
                 id: `cluster-${hash}`,
@@ -80,7 +98,7 @@ export function clusterSpots<T extends SpotBase>(
                 minPrice: spot.price,
                 maxPrice: spot.price,
                 currency: spot.currency,
-                count: 1
+                count: spotWeight
             });
         }
     }
@@ -102,5 +120,5 @@ export function clusterSpots<T extends SpotBase>(
  * Helper to check if an item is a cluster.
  */
 export function isCluster<T extends SpotBase>(item: T | Cluster<T>): item is Cluster<T> {
-    return 'count' in item && item.count > 1;
+    return typeof item.count === 'number' && item.count > 1;
 }

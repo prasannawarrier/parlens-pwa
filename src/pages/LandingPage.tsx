@@ -1192,6 +1192,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             lon: s.lon,
             price: s.price,
             currency: s.currency,
+            count: s.count,
             original: s
         }));
     }, [openSpots, vehicleType, status]);

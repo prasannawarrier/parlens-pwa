@@ -66,10 +66,11 @@ export interface SpotStatus {
 
 export interface ParkingSnapshot {
     listing_id: string;
+    g?: string;
     stats: {
-        car: { open: number; occupied: number; total: number; closed: number };
-        motorcycle: { open: number; occupied: number; total: number; closed: number };
-        bicycle: { open: number; occupied: number; total: number; closed: number };
+        car: { open: number; occupied: number; total: number; closed: number; rate: number };
+        motorcycle: { open: number; occupied: number; total: number; closed: number; rate: number };
+        bicycle: { open: number; occupied: number; total: number; closed: number; rate: number };
     };
     last_updated: number;
 }
@@ -563,6 +564,49 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
 
         return () => {
             console.log('[Parlens] Closing listing subscription');
+            sub.close();
+        };
+    }, [pool]);
+
+    // Real-time subscription for Parking Status Snapshots (Kind 11012)
+    // This ensures List View counts update immediately when ANYONE changes a status
+    useEffect(() => {
+        if (!pool) return;
+
+        console.log('[Parlens] Subscribing to global snapshot updates (11012)');
+
+        const sub = pool.subscribeMany(
+            DEFAULT_RELAYS,
+            [{
+                kinds: [KINDS.LISTED_PARKING_SNAPSHOT],
+                since: Math.floor(Date.now() / 1000) // Watch for new updates
+            }] as any,
+            {
+                onevent(event: any) {
+                    const d = event.tags.find((t: string[]) => t[0] === 'd')?.[1];
+                    if (!d) return;
+
+                    try {
+                        const snapContent = JSON.parse(event.content);
+                        // console.log('[Parlens] Received real-time snapshot for:', d);
+
+                        setListingStats(prev => {
+                            const newMap = new Map(prev);
+                            newMap.set(d, snapContent);
+                            return newMap;
+                        });
+                    } catch (e) {
+                        console.warn('Error parsing incoming snapshot:', e);
+                    }
+                },
+                oneose() {
+                    console.log('[Parlens] Snapshot subscription active');
+                }
+            }
+        );
+
+        return () => {
+            console.log('[Parlens] Closing snapshot subscription');
             sub.close();
         };
     }, [pool]);
@@ -1234,6 +1278,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                                         created_at: Math.floor(Date.now() / 1000),
                                                                         tags: [
                                                                             ['d', listing.id],
+                                                                            ['g', listing.g],
                                                                             ['client', 'parlens']
                                                                         ],
                                                                         content: JSON.stringify(snapshotStats)
@@ -1879,6 +1924,7 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
                             created_at: Math.floor(Date.now() / 1000),
                             tags: [
                                 ['d', listing.id],
+                                ['g', listing.g],
                                 ['client', 'parlens']
                             ],
                             content: JSON.stringify(newStats)

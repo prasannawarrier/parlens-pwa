@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Search, MapPin, ArrowRight, ChevronUp, ChevronDown } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { KINDS, DEFAULT_RELAYS } from '../lib/nostr';
-import { encodeGeohash, getGeohashNeighbors } from '../lib/geo';
+import { encodeGeohash, getGeohashNeighbors, geohashToBounds } from '../lib/geo';
 import { encryptParkingLog } from '../lib/encryption';
 import { getCurrencyFromLocation, getCurrencySymbol, getLocalCurrency } from '../lib/currency';
 import { generateSecretKey, finalizeEvent } from 'nostr-tools/pure';
@@ -108,14 +108,23 @@ export const FAB: React.FC<FABProps> = ({
                         }
                     }
 
-                    // Check valid location
+                    // Check valid location (Kind 31714 uses 'location', Kind 11012 uses 'g')
                     const locTag = event.tags.find((t: string[]) => t[0] === 'location');
-                    if (!locTag) return;
 
-                    const [lat, lon] = locTag[1].split(',').map(Number);
+                    let lat = 0;
+                    let lon = 0;
+
+                    if (locTag) {
+                        [lat, lon] = locTag[1].split(',').map(Number);
+                    } else if (event.kind !== KINDS.LISTED_PARKING_SNAPSHOT) {
+                        // If not a snapshot (which has 'g'), and no location tag, invalid.
+                        return;
+                    }
+
                     let spotType = 'car';
                     let price = 0;
                     let spotCurrency = 'USD';
+                    let spotCount = 1; // Default count
 
                     if (event.kind === KINDS.OPEN_SPOT_BROADCAST) {
                         const priceTag = event.tags.find((t: string[]) => t[0] === 'hourly_rate');
@@ -124,26 +133,35 @@ export const FAB: React.FC<FABProps> = ({
                         price = priceTag ? parseFloat(priceTag[1]) : 0;
                         spotCurrency = currencyTag ? currencyTag[1] : 'USD';
                         spotType = typeTag ? typeTag[1] : 'car';
-                    } else if (event.kind === KINDS.LISTED_SPOT_LOG) {
-                        // For Kind 1714, check status from tags first (primary), then content (fallback)
-                        const statusTag = event.tags.find((t: string[]) => t[0] === 'status')?.[1];
-                        const typeTag = event.tags.find((t: string[]) => t[0] === 'type')?.[1];
+                    } else if (event.kind === KINDS.LISTED_PARKING_SNAPSHOT) {
+                        // Handle Listing Snapshot (Kind 11012)
+                        // 1. Get location from 'g' tag (Geohash)
+                        const gTag = event.tags.find((t: string[]) => t[0] === 'g');
+                        if (!gTag) return;
 
-                        // Parse content if available
+                        // Decode geohash to get center
+                        const bounds = geohashToBounds(gTag[1]);
+                        lat = (bounds.sw[0] + bounds.ne[0]) / 2;
+                        lon = (bounds.sw[1] + bounds.ne[1]) / 2;
+
+                        // 2. Parse content for stats and rates
                         let contentData: any = {};
-                        if (event.content) {
-                            try {
-                                contentData = JSON.parse(event.content);
-                            } catch { }
-                        }
+                        try {
+                            contentData = JSON.parse(event.content);
+                        } catch { return; }
 
-                        // Status from tag (preferred) or content
-                        const spotStatus = statusTag || contentData.status;
-                        if (spotStatus !== 'open') return; // Only show open spots
+                        // 3. Check availability for selected vehicle type
+                        // contentData structure: { listing_id, g, stats: { car: { open, rate, ... }, ... } }
+                        const typeStats = contentData.stats?.[vehicleType];
+                        if (!typeStats || typeStats.open <= 0) return; // No open spots for this type
 
-                        price = contentData.hourly_rate || 0;
-                        spotCurrency = contentData.currency || 'USD';
-                        spotType = typeTag || contentData.type || 'car';
+                        // 4. Set details
+                        price = typeStats.rate || 0;
+                        spotCount = typeStats.open;
+                        spotCurrency = 'USD'; // Default or from content if added later
+                        spotType = vehicleType; // Match requested type
+                    } else if (event.kind === KINDS.LISTED_SPOT_LOG) {
+                        return;
                     }
 
                     const spot = {
@@ -152,7 +170,8 @@ export const FAB: React.FC<FABProps> = ({
                         lon,
                         price: price,
                         currency: spotCurrency,
-                        type: spotType
+                        type: spotType,
+                        count: spotCount
                     };
 
                     if (!spotsMapRef.current.has(event.id)) {
@@ -176,13 +195,12 @@ export const FAB: React.FC<FABProps> = ({
                         } as any
                     );
 
-                    // Fetch listed spot status (Kind 1714) - NO time limit, latest status is always current
+                    // Fetch listed spot snapshots (Kind 11012) - Replaceable, one per listing
                     const listedEvents = await pool.querySync(
                         DEFAULT_RELAYS,
                         {
-                            kinds: [KINDS.LISTED_SPOT_LOG],
+                            kinds: [KINDS.LISTED_PARKING_SNAPSHOT],
                             '#g': Array.from(sessionGeohashes),
-                            limit: 500 // Get enough to cover area
                         } as any
                     );
 
@@ -220,7 +238,7 @@ export const FAB: React.FC<FABProps> = ({
                 DEFAULT_RELAYS,
                 [
                     {
-                        kinds: [KINDS.OPEN_SPOT_BROADCAST, KINDS.LISTED_SPOT_LOG],
+                        kinds: [KINDS.OPEN_SPOT_BROADCAST, KINDS.LISTED_PARKING_SNAPSHOT],
                         '#g': Array.from(sessionGeohashes),
                         since: now  // Only NEW events from this point on
                     }
