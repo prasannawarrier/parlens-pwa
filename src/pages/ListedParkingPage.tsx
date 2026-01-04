@@ -1367,6 +1367,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                         onClose={() => setSelectedSpot(null)}
                         listingStats={listingStats}
                         setListingStats={setListingStats}
+                        setSpotStatuses={setSpotStatuses}
                     />
                 )
             }
@@ -1813,7 +1814,7 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
     );
 };
 
-const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isManager, listingStats, setListingStats }) => {
+const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isManager, listingStats, setListingStats, setSpotStatuses }) => {
     const { pubkey, signEvent, pool } = useAuth();
     // QR contains a-tag, authorizer (owner/manager pubkey), and auth token
     const spotATag = `${KINDS.PARKING_SPOT_LISTING}:${spot.pubkey}:${spot.d} `;
@@ -1910,6 +1911,20 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
         await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signed));
         // Add to local logs
         setLogs(prev => [signed, ...prev]);
+
+        // Immediately update spotStatuses for instant multi-spot view feedback
+        setSpotStatuses((prev: Map<string, any>) => {
+            const updated = new Map(prev);
+            updated.set(spot.d, {
+                id: signed.id,
+                pubkey: signed.pubkey,
+                a: spotATag,
+                status: s,
+                updated_by: pubkey,
+                created_at: signed.created_at
+            });
+            return updated;
+        });
 
         // Publish Kind 11012 Snapshot (Ground-Up Ground Truth)
         // Client aggregates current state + this change
