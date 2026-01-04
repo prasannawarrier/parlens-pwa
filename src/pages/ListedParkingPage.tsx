@@ -1887,12 +1887,12 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
 const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isManager, listingStats, setListingStats, setSpotStatuses, onSpotUpdate, ...props }) => {
     const { pubkey, signEvent, pool } = useAuth();
     // QR contains a-tag, authorizer (owner/manager pubkey), and auth token
-    const spotATag = `${KINDS.PARKING_SPOT_LISTING}:${spot.pubkey}:${spot.d} `;
+    const spotATag = `${KINDS.PARKING_SPOT_LISTING}:${spot.pubkey}:${spot.d}`;
     // For static QR, auth token is fixed; for dynamic, it would regenerate
     const qrAuthData = JSON.stringify({
         a: spotATag,
         authorizer: listing.owners?.[0] || pubkey,
-        auth: `static - ${spot.d} ` // Static token based on spot d-tag
+        auth: `static - ${spot.d}` // Static token based on spot d-tag
     });
     const [copied, setCopied] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
