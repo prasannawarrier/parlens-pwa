@@ -86,19 +86,30 @@ interface ListedParkingPageProps {
 type TabType = 'public' | 'private' | 'my';
 
 const calculateGroundUpStats = (spots: any[], statusMap: Map<string, string>, stats: any) => {
+    let defaultsCount = 0;
     for (const spot of spots) {
         const d = spot.tags.find((t: string[]) => t[0] === 'd')?.[1];
-        const type = spot.tags.find((t: string[]) => t[0] === 'type')?.[1] as 'car' | 'motorcycle' | 'bicycle' || 'car';
+        let type = spot.tags.find((t: string[]) => t[0] === 'type')?.[1]?.toLowerCase() as 'car' | 'motorcycle' | 'bicycle' || 'car';
+
+        // Normalize type just in case
+        if (!['car', 'motorcycle', 'bicycle'].includes(type)) type = 'car';
 
         const spotTag = `${KINDS.PARKING_SPOT_LISTING}:${spot.pubkey}:${d}`;
-        const status = statusMap.get(spotTag) || 'open';
+        const status = statusMap.get(spotTag);
+
+        if (!status) defaultsCount++;
+
+        const finalStatus = status || 'open';
 
         if (stats[type]) {
             stats[type].total++;
-            if (status === 'occupied') stats[type].occupied++;
-            else if (status === 'closed') stats[type].closed++;
+            if (finalStatus === 'occupied') stats[type].occupied++;
+            else if (finalStatus === 'closed') stats[type].closed++;
             else stats[type].open++;
         }
+    }
+    if (defaultsCount > 0) {
+        console.log(`[Parlens] ${defaultsCount}/${spots.length} spots defaulted to 'open' (no status log found)`);
     }
 };
 
@@ -1102,12 +1113,9 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                         const stats = listingStats.get(listing.d);
                                         const isClosed = listing.status === 'closed';
 
-                                        // Override stats if closed
-                                        const displayStats = isClosed ? {
-                                            car: { ...stats?.car, open: 0 },
-                                            motorcycle: { ...stats?.motorcycle, open: 0 },
-                                            bicycle: { ...stats?.bicycle, open: 0 }
-                                        } : stats;
+                                        // Use Ground-Up Stats directly (don't override with isClosed status)
+                                        // This allows opening individual spots even if listing is marked closed
+                                        const displayStats = stats;
 
                                         return (
                                             <div key={listing.id} className="group relative bg-white dark:bg-[#1c1c1e] rounded-2xl p-4 border border-black/5 dark:border-white/10 shadow-sm transition-all hover:shadow-md active:scale-[0.99] cursor-pointer" onClick={() => setSelectedListing(listing)}>
@@ -1311,13 +1319,28 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                                     await Promise.allSettled(pool.publish(DEFAULT_RELAYS, await signEvent(statusLogEvent)));
                                                                     console.log('[Parlens] Published Status Log for listing:', listing.d);
 
-                                                                    // Update listing metadata to REMOVE status tag (Ground-Up Source of Truth)
+                                                                    // Update listing metadata
+                                                                    const newTags = listing.originalEvent.tags.filter((t: string[]) => t[0] !== 'status');
+                                                                    newTags.push(['status', newStatus]);
+
                                                                     const metaEvent = {
                                                                         ...listing.originalEvent,
                                                                         created_at: Math.floor(Date.now() / 1000),
-                                                                        tags: listing.originalEvent.tags.filter((t: string[]) => t[0] !== 'status')
+                                                                        tags: newTags
                                                                     };
                                                                     const signedMeta = await signEvent(metaEvent);
+                                                                    await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedMeta));
+
+                                                                    // Update local state
+                                                                    setListings(prev => prev.map(l => {
+                                                                        if (l.id === listing.id) {
+                                                                            return { ...l, status: newStatus };
+                                                                        }
+                                                                        return l;
+                                                                    }));
+                                                                    if (selectedListing && selectedListing.id === listing.id) {
+                                                                        setSelectedListing(prev => prev ? { ...prev, status: newStatus } : null);
+                                                                    }
                                                                     await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedMeta));
                                                                 } catch (e) {
                                                                     console.error('Failed to update status:', e);
