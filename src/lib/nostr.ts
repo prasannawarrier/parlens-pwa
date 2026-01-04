@@ -7,6 +7,7 @@ export const KINDS = {
     LISTED_PARKING_METADATA: 31147, // Listed Parking Metadata (Parent - Addressable)
     PARKING_SPOT_LISTING: 37141, // Parking Spot Listing (Child - Addressable)
     LISTED_SPOT_LOG: 1714, // Listed Spot Log Update (Status - Regular)
+    LISTED_PARKING_SNAPSHOT: 11012, // Listed Parkings Status Snapshot (Replaceable)
     PRIVATE_LOG_NOTE: 1417, // Private Log Status Note (Encrypted - Regular)
 };
 

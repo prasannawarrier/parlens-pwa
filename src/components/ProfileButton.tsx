@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Key, X, Shield, ChevronRight, MapPin, Clock, User, Trash2, Plus, Radio, Pencil, Check } from 'lucide-react';
+import { Key, X, Shield, ChevronRight, MapPin, Clock, User, Trash2, Plus, Radio, Pencil, Check, EyeOff } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useParkingLogs } from '../hooks/useParkingLogs';
 import { nip19 } from 'nostr-tools';
@@ -26,6 +26,32 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
     const [newRelayUrl, setNewRelayUrl] = useState('');
     const [isRelayLoading, setIsRelayLoading] = useState(false);
     const [relayError, setRelayError] = useState<string | null>(null);
+
+    // Hidden Items state (unified structure for hidden listings and owners)
+    interface HiddenItem {
+        id: string;
+        name: string;
+        type: 'listing' | 'owner';
+    }
+    const [hiddenItems, setHiddenItems] = useState<HiddenItem[]>([]);
+    const [showHideList, setShowHideList] = useState(false);
+
+    useEffect(() => {
+        if (isOpen) {
+            try {
+                const saved = localStorage.getItem('parlens-hidden-items');
+                if (saved) {
+                    setHiddenItems(JSON.parse(saved));
+                }
+            } catch (e) { }
+        }
+    }, [isOpen]);
+
+    const unhideItem = (id: string) => {
+        const next = hiddenItems.filter(h => h.id !== id);
+        setHiddenItems(next);
+        localStorage.setItem('parlens-hidden-items', JSON.stringify(next));
+    };
 
     // Notify parent when open state changes
     useEffect(() => {
@@ -527,6 +553,54 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                             )}
 
 
+                            {/* Hide List Section */}
+                            <div className="space-y-4">
+                                <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-white/20 ml-2">Hide List</h4>
+                                <div className="space-y-0.5 rounded-[2rem] overflow-hidden bg-zinc-50 dark:bg-white/[0.03] border border-black/5 dark:border-white/5">
+                                    <button
+                                        onClick={() => setShowHideList(!showHideList)}
+                                        className="w-full p-5 flex items-center justify-between transition-colors"
+                                        style={{ WebkitTapHighlightColor: 'transparent' }}
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <div className="p-2.5 rounded-xl bg-amber-500/10 dark:bg-amber-500/20 text-amber-500"><EyeOff size={20} /></div>
+                                            <span className="font-semibold text-sm text-zinc-700 dark:text-white">Manage List ({hiddenItems.length})</span>
+                                        </div>
+                                        <span className="text-xs text-zinc-400 dark:text-white/40">{showHideList ? 'Hide' : 'Show'}</span>
+                                    </button>
+
+                                    {showHideList && (
+                                        <>
+                                            <div className="h-[1px] bg-black/5 dark:bg-white/5 mx-4" />
+                                            <div className="p-4 space-y-2">
+                                                {hiddenItems.length === 0 ? (
+                                                    <p className="text-sm text-zinc-400 dark:text-white/40 text-center py-2">No hidden items</p>
+                                                ) : (
+                                                    hiddenItems.map(item => (
+                                                        <div key={item.id} className="flex items-center justify-between p-3 rounded-xl bg-white dark:bg-white/5 border border-black/5 dark:border-white/10">
+                                                            <div className="flex items-center gap-2 min-w-0">
+                                                                <span className="shrink-0">{item.type === 'listing' ? '📄' : '👤'}</span>
+                                                                <span className="text-sm text-zinc-600 dark:text-white/70 truncate">{item.name}</span>
+                                                                <span className="shrink-0 text-[10px] uppercase px-1.5 py-0.5 rounded-full bg-zinc-100 dark:bg-white/10 text-zinc-400">{item.type}</span>
+                                                            </div>
+                                                            <button
+                                                                onClick={() => unhideItem(item.id)}
+                                                                className="p-2 text-zinc-400 hover:text-green-500 transition-colors shrink-0"
+                                                                style={{ WebkitTapHighlightColor: 'transparent' }}
+                                                            >
+                                                                <Check size={16} />
+                                                            </button>
+                                                        </div>
+                                                    ))
+                                                )}
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+                                <p className="text-xs text-zinc-400 dark:text-white/30 text-center">
+                                    ℹ️ Listings you hide can be managed here
+                                </p>
+                            </div>
 
                             <div className="space-y-4">
                                 <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-white/20 ml-2">Parking History</h4>

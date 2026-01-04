@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from './contexts/AuthContext';
 import { LandingPage } from './pages/LandingPage';
+import { QRScanPage } from './pages/QRScanPage';
 import { Shield, UserPlus, Key, ChevronDown, ChevronRight } from 'lucide-react';
 import { nip19 } from 'nostr-tools';
 
@@ -345,6 +346,8 @@ const Login: React.FC = () => {
 
 const App: React.FC = () => {
   const { pubkey } = useAuth();
+  const [currentPage, setCurrentPage] = useState<'home' | 'scan'>('home');
+  const [pendingScanCode, setPendingScanCode] = useState<string | null>(null);
 
   // Global visibility change handler for iOS PWA background suspension
   React.useEffect(() => {
@@ -387,7 +390,27 @@ const App: React.FC = () => {
     return <Login />;
   }
 
-  return <LandingPage />;
+  // QR Scan Page
+  if (currentPage === 'scan') {
+    return (
+      <QRScanPage
+        onCancel={() => setCurrentPage('home')}
+        onScan={(code) => {
+          setPendingScanCode(code);
+          setCurrentPage('home');
+        }}
+      />
+    );
+  }
+
+  // Landing Page (Home)
+  return (
+    <LandingPage
+      onRequestScan={() => setCurrentPage('scan')}
+      initialScannedCode={pendingScanCode}
+      onScannedCodeConsumed={() => setPendingScanCode(null)}
+    />
+  );
 };
 
 export default App;

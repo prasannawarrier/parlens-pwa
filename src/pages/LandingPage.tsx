@@ -19,7 +19,6 @@ import { useWakeLock } from '../hooks/useWakeLock';
 import { ListedParkingPage } from './ListedParkingPage';
 import { useAuth } from '../contexts/AuthContext';
 import { KINDS, DEFAULT_RELAYS } from '../lib/nostr';
-import { Html5Qrcode } from 'html5-qrcode';
 import { QRCodeSVG } from 'qrcode.react';
 
 // Free vector tile styles - using simpler styles that match better
@@ -51,149 +50,6 @@ const SpotMarkerContent = memo(({ price, emoji, currency, isHistory = false }: {
         </div>
     );
 });
-
-// QR Scanner Overlay Component with real camera - Fixed stability
-const QRScannerOverlay = ({ onClose, onScan }: { onClose: () => void; onScan: (code: string) => void }) => {
-    const scannerRef = useRef<Html5Qrcode | null>(null);
-    const [error, setError] = useState<string | null>(null);
-    const [isStarting, setIsStarting] = useState(true);
-    const hasScannedRef = useRef(false);
-    const onScanRef = useRef(onScan);
-    const onCloseRef = useRef(onClose);
-
-    // Keep refs updated without causing re-renders
-    useEffect(() => {
-        onScanRef.current = onScan;
-        onCloseRef.current = onClose;
-    }, [onScan, onClose]);
-
-    useEffect(() => {
-        let isMounted = true;
-        let scanner: Html5Qrcode | null = null;
-
-        const startScanner = async () => {
-            try {
-                // Create scanner instance
-                scanner = new Html5Qrcode('qr-reader', { verbose: false });
-                scannerRef.current = scanner;
-
-                // Get camera dimensions for square viewfinder
-                const viewfinderSize = Math.min(window.innerWidth - 64, 300);
-
-                await scanner.start(
-                    { facingMode: 'environment' },
-                    {
-                        fps: 5, // Lower FPS to reduce CPU usage
-                        qrbox: { width: viewfinderSize, height: viewfinderSize },
-                        aspectRatio: 1 // Square aspect ratio
-                    },
-                    (decodedText) => {
-                        // Prevent multiple scans
-                        if (hasScannedRef.current) return;
-                        hasScannedRef.current = true;
-
-                        // Stop scanner before callback
-                        if (scanner) {
-                            scanner.stop().catch(() => { });
-                        }
-
-                        onScanRef.current(decodedText);
-                        onCloseRef.current();
-                    },
-                    () => {
-                        // Ignore scan errors (no QR in frame)
-                    }
-                );
-
-                if (isMounted) setIsStarting(false);
-            } catch (err: any) {
-                console.error('[Parlens] Camera error:', err);
-                if (isMounted) {
-                    setError(err.message || 'Failed to access camera');
-                    setIsStarting(false);
-                }
-            }
-        };
-
-        // Small delay to ensure DOM is ready
-        const timeoutId = setTimeout(startScanner, 100);
-
-        return () => {
-            isMounted = false;
-            clearTimeout(timeoutId);
-
-            // Cleanup scanner
-            if (scannerRef.current) {
-                scannerRef.current.stop().catch(() => { });
-                scannerRef.current = null;
-            }
-        };
-    }, []); // Empty dependency array - only run once
-
-    const handleManualEntry = () => {
-        const code = prompt('Enter QR code manually:');
-        if (code) {
-            hasScannedRef.current = true;
-            if (scannerRef.current) {
-                scannerRef.current.stop().catch(() => { });
-            }
-            onScanRef.current(code);
-            onCloseRef.current();
-        }
-    };
-
-    const handleClose = () => {
-        if (scannerRef.current) {
-            scannerRef.current.stop().catch(() => { });
-        }
-        onCloseRef.current();
-    };
-
-    return (
-        <div className="fixed inset-0 z-[3000] bg-black flex flex-col items-center justify-center">
-            <button
-                onClick={handleClose}
-                className="absolute top-6 right-6 p-3 rounded-full bg-white/10 text-white z-10 active:scale-95 transition-transform"
-            >
-                <X size={24} />
-            </button>
-
-            <div className="text-center space-y-6 px-8 w-full max-w-sm">
-                {isStarting && (
-                    <div className="text-white/60 text-sm animate-pulse">Starting camera...</div>
-                )}
-
-                {error ? (
-                    <div className="space-y-4">
-                        <p className="text-red-400 text-sm">{error}</p>
-                        <button
-                            onClick={handleManualEntry}
-                            className="px-6 py-3 bg-white/10 border border-white/20 text-white rounded-full text-sm font-medium active:scale-95 transition-transform"
-                        >
-                            Enter Code Manually
-                        </button>
-                    </div>
-                ) : (
-                    <>
-                        <div
-                            id="qr-reader"
-                            className="w-full aspect-square rounded-3xl overflow-hidden bg-zinc-900"
-                            style={{ minHeight: '300px' }}
-                        />
-                        <p className="text-white/60 text-sm">Point your camera at the parking spot QR code</p>
-                        <button
-                            onClick={handleManualEntry}
-                            className="px-6 py-3 bg-white/10 text-white rounded-full text-sm font-medium active:scale-95 transition-transform"
-                        >
-                            Enter Code Manually
-                        </button>
-                    </>
-                )}
-            </div>
-        </div>
-    );
-};
-
 
 
 // User Location Marker Component
@@ -393,7 +249,13 @@ const VehicleToggle = memo(({
 VehicleToggle.displayName = 'VehicleToggle';
 
 // Main Landing Page Component
-export const LandingPage: React.FC = () => {
+interface LandingPageProps {
+    onRequestScan?: () => void;
+    initialScannedCode?: string | null;
+    onScannedCodeConsumed?: () => void;
+}
+
+export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initialScannedCode, onScannedCodeConsumed }) => {
     const { pubkey, signEvent, pool } = useAuth();
     const mapRef = useRef<MapRef>(null);
     const [location, setLocation] = useState<[number, number] | null>(null);
@@ -409,7 +271,6 @@ export const LandingPage: React.FC = () => {
     const [pendingAutoMode, setPendingAutoMode] = useState(false); // Immediate visual feedback for button
     const [showHelp, setShowHelp] = useState(false);
     const [showListedParking, setShowListedParking] = useState(false);
-    const [showQRScanner, setShowQRScanner] = useState(false);
     // Currency state - removed (logic in FAB)
     const [vehicleType, setVehicleType] = useState<'bicycle' | 'motorcycle' | 'car'>(() => {
         const saved = localStorage.getItem('parlens_vehicle_type');
@@ -436,10 +297,18 @@ export const LandingPage: React.FC = () => {
     });
     const [showListedDetails, setShowListedDetails] = useState(false);
 
+    // Handle scanned code passed from QRScanPage via App.tsx
+    useEffect(() => {
+        if (initialScannedCode) {
+            console.log('[LandingPage] Processing scanned code from QRScanPage:', initialScannedCode);
+            handleScannedCode(initialScannedCode);
+            onScannedCodeConsumed?.();
+        }
+    }, [initialScannedCode, onScannedCodeConsumed]);
+
     // QR Code Handler for Listed Parking - Session Toggle with Temp Keys
     const handleScannedCode = useCallback(async (code: string) => {
         console.log('[Parlens] Processing scanned code:', code);
-        setShowQRScanner(false);
 
         try {
             // Dynamic import for temp key generation
@@ -1924,7 +1793,7 @@ export const LandingPage: React.FC = () => {
                                 e.originalEvent.stopPropagation();
                                 setShowListedDetails(true);
                             }}
-                            style={{ zIndex: 1800 }} // Above parked marker
+                            style={{ zIndex: 20 }} // Above parked marker
                         >
                             <div className="flex flex-col items-center -translate-y-8">
                                 {/* Bubble */}
@@ -2084,7 +1953,7 @@ export const LandingPage: React.FC = () => {
                 {/* QR Scan Button - Camera with Scan Viewfinder */}
                 {/* QR Scan Button - Camera with Scan Viewfinder */}
                 <button
-                    onClick={() => setShowQRScanner(true)}
+                    onClick={() => onRequestScan?.()}
                     onContextMenu={(e) => {
                         e.preventDefault();
                         const code = prompt("Enter Parking Code manually:");
@@ -2340,7 +2209,7 @@ export const LandingPage: React.FC = () => {
                         sessionStart={sessionStart}
                         setSessionStart={setSessionStart}
                         listedParkingSession={listedParkingSession}
-                        onQRScan={() => setShowQRScanner(true)}
+                        onQRScan={() => onRequestScan?.()}
                     />
                 )}
             </div>
@@ -2582,13 +2451,7 @@ export const LandingPage: React.FC = () => {
                 </div>
             )}
 
-            {/* QR Scanner Overlay */}
-            {showQRScanner && (
-                <QRScannerOverlay
-                    onClose={() => setShowQRScanner(false)}
-                    onScan={handleScannedCode}
-                />
-            )}
+
         </div >
     );
 };

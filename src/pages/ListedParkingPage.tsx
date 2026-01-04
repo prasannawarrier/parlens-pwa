@@ -4,7 +4,7 @@
  * Refined based on user feedback (Style, Form, Features)
  */
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { MapPin, Plus, Trash2, X, Check, Copy, Pencil, ChevronRight, LocateFixed, Users, ArrowLeft, Search, RotateCcw } from 'lucide-react';
+import { MapPin, Plus, Trash2, X, Check, Copy, Pencil, ChevronRight, LocateFixed, Users, ArrowLeft, Search, RotateCcw, EyeOff, Ban, MoreVertical } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { KINDS, DEFAULT_RELAYS } from '../lib/nostr';
 import { encodeGeohash, calculateDistance } from '../lib/geo';
@@ -64,6 +64,16 @@ export interface SpotStatus {
     created_at: number;
 }
 
+export interface ParkingSnapshot {
+    listing_id: string;
+    stats: {
+        car: { open: number; occupied: number; total: number; closed: number };
+        motorcycle: { open: number; occupied: number; total: number; closed: number };
+        bicycle: { open: number; occupied: number; total: number; closed: number };
+    };
+    last_updated: number;
+}
+
 interface ListedParkingPageProps {
     onClose: () => void;
     currentLocation?: [number, number] | null;
@@ -74,20 +84,40 @@ interface ListedParkingPageProps {
 
 type TabType = 'public' | 'private' | 'my';
 
+const calculateGroundUpStats = (spots: any[], statusMap: Map<string, string>, stats: any) => {
+    for (const spot of spots) {
+        const d = spot.tags.find((t: string[]) => t[0] === 'd')?.[1];
+        const type = spot.tags.find((t: string[]) => t[0] === 'type')?.[1] as 'car' | 'motorcycle' | 'bicycle' || 'car';
+
+        const spotTag = `${KINDS.PARKING_SPOT_LISTING}:${spot.pubkey}:${d}`;
+        const status = statusMap.get(spotTag) || 'open';
+
+        if (stats[type]) {
+            stats[type].total++;
+            if (status === 'occupied') stats[type].occupied++;
+            else if (status === 'closed') stats[type].closed++;
+            else stats[type].open++;
+        }
+    }
+};
+
 export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, currentLocation, countryCode, onPickLocation, pickedLocation }) => {
     const { pubkey, pool, signEvent } = useAuth();
     const [activeTab, setActiveTab] = useState<TabType>('public');
     const [selectedListing, setSelectedListing] = useState<ListedParkingMetadata | null>(null);
     const [showCreateForm, setShowCreateForm] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
+    const [statusLoading, setStatusLoading] = useState(true); // True until status data received from relays
     const [listings, setListings] = useState<ListedParkingMetadata[]>([]);
     const [spots, setSpots] = useState<ParkingSpotListing[]>([]);
     const [spotStatuses, setSpotStatuses] = useState<Map<string, SpotStatus>>(new Map());
+    const [spotToListingMap, setSpotToListingMap] = useState<Map<string, { listingId: string; type: 'car' | 'motorcycle' | 'bicycle' }>>(new Map()); // d-tag -> {listingId, type} for global sync
     const [selectedSpot, setSelectedSpot] = useState<ParkingSpotListing | null>(null);
     const [editingListing, setEditingListing] = useState<ListedParkingMetadata | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
     const [vehicleFilter, setVehicleFilter] = useState<'all' | 'car' | 'motorcycle' | 'bicycle'>('all');
     const [searchTerm, setSearchTerm] = useState('');
+    const [confirmedSearchTerm, setConfirmedSearchTerm] = useState(''); // Applied on search button click
     const [listingStats, setListingStats] = useState<Map<string, {
         car: { open: number; occupied: number; closed: number; total: number; rate: number };
         motorcycle: { open: number; occupied: number; closed: number; total: number; rate: number };
@@ -97,6 +127,59 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
     const [floorFilter, setFloorFilter] = useState<string>('all');
     const [statusFilter, setStatusFilter] = useState<'all' | 'open' | 'occupied' | 'closed'>('all');
     const [displayedCount, setDisplayedCount] = useState(10); // Pagination - show 10 at a time
+    const [showHideMenu, setShowHideMenu] = useState<string | null>(null); // Listing ID for dropdown
+
+    // Hidden items with human-readable names - unified structure
+    interface HiddenItem {
+        id: string;
+        name: string;
+        type: 'listing' | 'owner';
+    }
+    const [hiddenItems, setHiddenItems] = useState<HiddenItem[]>([]);
+
+    useEffect(() => {
+        try {
+            const saved = localStorage.getItem('parlens-hidden-items');
+            if (saved) {
+                setHiddenItems(JSON.parse(saved));
+            } else {
+                // Migrate old format if exists
+                const oldListings = JSON.parse(localStorage.getItem('parlens-hidden-listings') || '[]');
+                const oldPubkeys = JSON.parse(localStorage.getItem('parlens-blocked-pubkeys') || '[]');
+                const migrated: HiddenItem[] = [
+                    ...oldListings.map((id: string) => ({ id, name: 'Unknown Listing', type: 'listing' as const })),
+                    ...oldPubkeys.map((id: string) => ({ id, name: id.slice(0, 12) + '...', type: 'owner' as const }))
+                ];
+                if (migrated.length > 0) {
+                    setHiddenItems(migrated);
+                    localStorage.setItem('parlens-hidden-items', JSON.stringify(migrated));
+                    localStorage.removeItem('parlens-hidden-listings');
+                    localStorage.removeItem('parlens-blocked-pubkeys');
+                }
+            }
+        } catch (e) { }
+    }, []);
+
+    const hideListing = (id: string, name: string) => {
+        if (hiddenItems.some(h => h.id === id)) return; // Already hidden
+        const next = [...hiddenItems, { id, name, type: 'listing' as const }];
+        setHiddenItems(next);
+        localStorage.setItem('parlens-hidden-items', JSON.stringify(next));
+        setShowHideMenu(null);
+    };
+
+    const hideOwner = (pubkey: string, ownerName: string) => {
+        if (hiddenItems.some(h => h.id === pubkey)) return; // Already hidden
+        const next = [...hiddenItems, { id: pubkey, name: ownerName, type: 'owner' as const }];
+        setHiddenItems(next);
+        localStorage.setItem('parlens-hidden-items', JSON.stringify(next));
+        setShowHideMenu(null);
+    };
+
+    // Helper to check if listing or owner is hidden
+    const isHidden = (listingId: string, ownerPubkey?: string) => {
+        return hiddenItems.some(h => h.id === listingId || (ownerPubkey && h.id === ownerPubkey));
+    };
 
 
     // Fetch listings and their stats
@@ -177,7 +260,6 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             // Batched fetch for all listing coordinate tags
             const aTags = parsedListings.map(l => {
                 const tag = `${KINDS.LISTED_PARKING_METADATA}:${l.pubkey}:${l.d}`;
-                // console.log('[Parlens] Expected a-tag for listing:', l.listing_name, tag);
                 return tag;
             });
 
@@ -192,64 +274,108 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             });
             console.log(`[Parlens] Fetched ${allSpots.length} spots for ${parsedListings.length} listings. aTags queried:`, aTags.length);
 
-            // 3. Fetch Statuses for ALL spots
+            // 3. Fetch Statuses for ALL spots & Snapshots for Listings
             const spotATags = allSpots.map((s: any) => {
                 const d = s.tags.find((t: string[]) => t[0] === 'd')?.[1];
                 return `${KINDS.PARKING_SPOT_LISTING}:${s.pubkey}:${d}`;
             });
 
+            // Fetch Snapshots (Kind 11012) - One per listing
+            // const snapshotATags = parsedListings.map(l => `${KINDS.LISTED_PARKING_SNAPSHOT}:${l.pubkey}:${l.id}`);
+
             let allStatuses: any[] = [];
+            let allSnapshots: any[] = [];
+
             if (spotATags.length > 0) {
-                // Batch in chunks if necessary, but for now simplistic
-                allStatuses = await pool.querySync(DEFAULT_RELAYS, {
-                    kinds: [KINDS.LISTED_SPOT_LOG],
-                    '#a': spotATags
-                });
+                // Parallel fetch for Logs and Snapshots
+                const [statusEvents, snapshotEvents] = await Promise.all([
+                    pool.querySync(DEFAULT_RELAYS, { kinds: [KINDS.LISTED_SPOT_LOG], '#a': spotATags }),
+                    pool.querySync(DEFAULT_RELAYS, { kinds: [KINDS.LISTED_PARKING_SNAPSHOT], '#d': parsedListings.map(l => l.id) }) // Fetch by d-tag (listingId)
+                ]);
+                allStatuses = statusEvents;
+                allSnapshots = snapshotEvents;
             }
 
             // Map most recent status per spot
+            // FIX ISSUE #2: Populate global spotStatuses state immediately so List View has baseline data
             const statusMap = new Map<string, string>(); // spot_a_tag -> status
+            const initialSpotStatuses = new Map<string, SpotStatus>();
+
             // Sort by created_at desc to get latest
             allStatuses.sort((a, b) => b.created_at - a.created_at);
+
             allStatuses.forEach((ev: any) => {
                 const a = ev.tags.find((t: string[]) => t[0] === 'a')?.[1];
                 if (a && !statusMap.has(a)) {
-                    const s = ev.tags.find((t: string[]) => t[0] === 'status')?.[1];
-                    statusMap.set(a, s || 'open');
+                    const s = ev.tags.find((t: string[]) => t[0] === 'status')?.[1] || 'open';
+                    statusMap.set(a, s);
+
+                    const dTag = a.split(':').pop(); // extract d-tag from a-tag
+                    const spot = allSpots.find((sp: any) => sp.tags.find((t: string[]) => t[0] === 'd')?.[1] === dTag);
+
+                    if (dTag && spot) {
+                        initialSpotStatuses.set(dTag, {
+                            id: ev.id,
+                            pubkey: ev.pubkey,
+                            a: a,
+                            status: s as 'occupied' | 'open' | 'closed',
+                            updated_by: ev.tags.find((t: string[]) => t[0] === 'updated_by')?.[1] || '',
+                            authorizer: ev.tags.find((t: string[]) => t[0] === 'authorizer')?.[1] || '',
+                            created_at: ev.created_at
+                        });
+                    }
                 }
             });
 
-            // Compute Stats per Listing
+            // Set the global spot statuses immediately!
+            setSpotStatuses(initialSpotStatuses);
+
+            // Compute Stats (Prefer Snapshot -> Fallback to Ground-Up Calculation)
             const newStats = new Map();
+            const newSpotMapping = new Map<string, { listingId: string; type: 'car' | 'motorcycle' | 'bicycle' }>();
+
             for (const listing of parsedListings) {
                 const listingATag = `${KINDS.LISTED_PARKING_METADATA}:${listing.pubkey}:${listing.d}`;
                 const lSpots = allSpots.filter((s: any) => s.tags.find((t: string[]) => t[0] === 'a')?.[1] === listingATag);
 
+                // Initialize empty stats
                 const stats = {
                     car: { open: 0, occupied: 0, closed: 0, total: 0, rate: listing.rates?.car?.hourly || 0 },
                     motorcycle: { open: 0, occupied: 0, closed: 0, total: 0, rate: listing.rates?.motorcycle?.hourly || 0 },
                     bicycle: { open: 0, occupied: 0, closed: 0, total: 0, rate: listing.rates?.bicycle?.hourly || 0 }
                 };
 
+                // Store mapping for global sync
                 for (const spot of lSpots) {
                     const d = spot.tags.find((t: string[]) => t[0] === 'd')?.[1];
                     const type = spot.tags.find((t: string[]) => t[0] === 'type')?.[1] as 'car' | 'motorcycle' | 'bicycle' || 'car';
-                    // Check individual spot override rate
-                    // (Skipping individual spot rate logic for aggregate stats for now, using listing base rate)
-
-                    const spotTag = `${KINDS.PARKING_SPOT_LISTING}:${spot.pubkey}:${d}`;
-                    const status = statusMap.get(spotTag) || 'open';
-
-                    if (stats[type]) {
-                        stats[type].total++;
-                        if (status === 'occupied') stats[type].occupied++;
-                        else if (status === 'closed') stats[type].closed++;
-                        else stats[type].open++;
-                    }
+                    if (d) newSpotMapping.set(d, { listingId: listing.id, type });
                 }
-                newStats.set(listing.id, stats);
+
+                // Check for Snapshot first
+                const snapshot = allSnapshots.find((s: any) => s.tags.find((t: string[]) => t[0] === 'd')?.[1] === listing.id);
+
+                if (snapshot) {
+                    // Use Snapshot Data (Optimized)
+                    try {
+                        const snapContent = JSON.parse(snapshot.content);
+                        // console.log('[Parlens] Using Snapshot for listing:', listing.listing_name);
+                        newStats.set(listing.id, snapContent);
+                    } catch (e) {
+                        console.warn('Invalid snapshot content for', listing.listing_name, e);
+                        // Fallback to ground-up calculation if snapshot corrupt
+                        calculateGroundUpStats(lSpots, statusMap, stats);
+                        newStats.set(listing.id, stats);
+                    }
+                } else {
+                    // Fallback to Ground-Up Calculation (No Snapshot or Initial)
+                    // console.log('[Parlens] No Snapshot, calculating ground-up for:', listing.listing_name);
+                    calculateGroundUpStats(lSpots, statusMap, stats);
+                    newStats.set(listing.id, stats);
+                }
             }
             setListingStats(newStats);
+            setSpotToListingMap(newSpotMapping);
 
         } catch (error) {
             console.error('Error fetching listings:', error);
@@ -329,7 +455,17 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                     });
                 }
             });
-            setSpotStatuses(newStatuses);
+            setSpotStatuses((prev) => {
+                const merged = new Map(prev);
+                newStatuses.forEach((status, dTag) => {
+                    const existing = merged.get(dTag);
+                    // Only update if NEWER
+                    if (!existing || existing.created_at < status.created_at) {
+                        merged.set(dTag, status);
+                    }
+                });
+                return merged;
+            });
 
         } catch (error) { console.error('Error fetching spots:', error); }
     }, [pool]);
@@ -498,27 +634,95 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                 authorizer: event.tags.find((t: string[]) => t[0] === 'authorizer')?.[1] || '',
                                 created_at: event.created_at
                             });
+
+                            // Global listingStats update using spotToListingMap
+                            if (dTag) {
+                                const mapping = spotToListingMap.get(dTag);
+                                if (mapping) {
+                                    setListingStats(prevStats => {
+                                        const stats = prevStats.get(mapping.listingId);
+                                        if (!stats) return prevStats;
+
+                                        const newStats = new Map(prevStats);
+                                        const typeStats = { ...stats[mapping.type] };
+
+                                        // Get old status from newMap to decrement old count
+                                        const oldStatus = existingStatus?.status || 'open';
+                                        const newStatus = status as 'occupied' | 'open' | 'closed';
+
+                                        // Decrement old status count
+                                        if (oldStatus === 'occupied') typeStats.occupied = Math.max(0, typeStats.occupied - 1);
+                                        else if (oldStatus === 'closed') typeStats.closed = Math.max(0, typeStats.closed - 1);
+                                        else typeStats.open = Math.max(0, typeStats.open - 1);
+
+                                        // Increment new status count
+                                        if (newStatus === 'occupied') typeStats.occupied++;
+                                        else if (newStatus === 'closed') typeStats.closed++;
+                                        else typeStats.open++;
+
+                                        newStats.set(mapping.listingId, { ...stats, [mapping.type]: typeStats });
+                                        return newStats;
+                                    });
+                                }
+                            }
                         }
                         return newMap;
                     });
                 },
                 oneose() {
-                    console.log('[Parlens] Real-time subscription active');
+                    console.log('[Parlens] Real-time subscription active, status data received');
+                    setStatusLoading(false);
                 }
             }
         );
 
+        // Timeout fallback for statusLoading (3 seconds)
+        const loadingTimeout = setTimeout(() => {
+            setStatusLoading(false);
+        }, 3000);
+
         return () => {
             console.log('[Parlens] Closing real-time status subscription');
+            clearTimeout(loadingTimeout);
             sub.close();
         };
-    }, [pool, spots]); // FIXED: Depend on spots, not listings
+    }, [pool, spots, spotToListingMap]); // Added spotToListingMap dependency
 
     useEffect(() => {
         if (selectedListing) {
             fetchSpots(selectedListing);
         }
     }, [selectedListing, fetchSpots]);
+
+    // Sync listingStats when spotStatuses changes (for real-time updates)
+    useEffect(() => {
+        if (!selectedListing || spots.length === 0) return;
+
+        // Recalculate stats for the selected listing based on current spotStatuses
+        const stats = {
+            car: { open: 0, occupied: 0, closed: 0, total: 0, rate: selectedListing.rates?.car?.hourly || 0 },
+            motorcycle: { open: 0, occupied: 0, closed: 0, total: 0, rate: selectedListing.rates?.motorcycle?.hourly || 0 },
+            bicycle: { open: 0, occupied: 0, closed: 0, total: 0, rate: selectedListing.rates?.bicycle?.hourly || 0 }
+        };
+
+        for (const spot of spots) {
+            const type = spot.type || 'car';
+            const status = spotStatuses.get(spot.d)?.status || 'open';
+
+            if (stats[type]) {
+                stats[type].total++;
+                if (status === 'occupied') stats[type].occupied++;
+                else if (status === 'closed') stats[type].closed++;
+                else stats[type].open++;
+            }
+        }
+
+        setListingStats(prev => {
+            const newMap = new Map(prev);
+            newMap.set(selectedListing.id, stats);
+            return newMap;
+        });
+    }, [spotStatuses, selectedListing, spots]);
 
     const deleteListing = async (listing: ListedParkingMetadata) => {
         if (!pool || !pubkey || !signEvent) return;
@@ -565,9 +769,14 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
 
             if (!match) return false;
 
+            // Filter hidden/blocked (unless in My Listings)
+            if (activeTab !== 'my') {
+                if (isHidden(l.id, l.pubkey)) return false;
+            }
+
             // Search filtering with match scoring for sorting
-            if (searchTerm) {
-                const term = searchTerm.toLowerCase();
+            if (confirmedSearchTerm) {
+                const term = confirmedSearchTerm.toLowerCase();
                 const textMatch = l.listing_name.toLowerCase().includes(term) ||
                     l.local_area?.toLowerCase().includes(term) ||
                     l.city?.toLowerCase().includes(term) ||
@@ -583,8 +792,8 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
         // 3. Open Spots (desc)
         res.sort((a, b) => {
             // Search match priority: exact name match > partial match
-            if (searchTerm) {
-                const term = searchTerm.toLowerCase();
+            if (confirmedSearchTerm) {
+                const term = confirmedSearchTerm.toLowerCase();
                 const exactMatchA = a.listing_name.toLowerCase() === term;
                 const exactMatchB = b.listing_name.toLowerCase() === term;
                 if (exactMatchA && !exactMatchB) return -1;
@@ -663,24 +872,35 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
 
             {/* Header */}
             <div className="bg-white dark:bg-[#1c1c1e] border-b border-black/5 dark:border-white/10">
-                {/* Top Row - Title and Create Button */}
+                {/* Top Row - Title and Action Buttons */}
                 <div className="flex items-center justify-between px-4 py-3">
                     <div className="flex items-center gap-3">
-                        <button onClick={selectedListing ? () => setSelectedListing(null) : onClose} className="p-2 rounded-full bg-black/5 dark:bg-white/10 active:scale-95 transition-transform">
+                        <button onClick={selectedListing ? () => setSelectedListing(null) : onClose} className="p-2 rounded-full bg-black/5 dark:bg-white/10 active:scale-95 transition-transform" style={{ WebkitTapHighlightColor: 'transparent' }}>
                             <ChevronRight size={20} className="text-black/60 dark:text-white/60 rotate-180" />
                         </button>
                         <h1 className="text-xl font-bold bg-gradient-to-r from-blue-500 to-cyan-500 bg-clip-text text-transparent">
                             {selectedListing ? selectedListing.listing_name : 'Listed Parking'}
                         </h1>
                     </div>
-                    {!selectedListing && (
+                    <div className="flex items-center gap-2">
+                        {!selectedListing && (
+                            <button
+                                onClick={() => setShowCreateForm(true)}
+                                className="p-2 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-full shadow-lg shadow-blue-500/20 active:scale-95 transition-transform"
+                                style={{ WebkitTapHighlightColor: 'transparent' }}
+                            >
+                                <Plus size={20} />
+                            </button>
+                        )}
                         <button
-                            onClick={() => setShowCreateForm(true)}
+                            onClick={() => { fetchListings(); if (selectedListing) fetchSpots(selectedListing); }}
                             className="p-2 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-full shadow-lg shadow-blue-500/20 active:scale-95 transition-transform"
+                            style={{ WebkitTapHighlightColor: 'transparent' }}
+                            title="Refresh"
                         >
-                            <Plus size={20} />
+                            <RotateCcw size={20} />
                         </button>
-                    )}
+                    </div>
                 </div>
             </div>
 
@@ -688,26 +908,29 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             <div className="flex-1 flex flex-col overflow-hidden">
                 {selectedListing ? (
                     // Spot View
-                    <div className="flex-1 flex flex-col p-4 bg-zinc-50 dark:bg-black/50 overflow-hidden">
-                        {/* Dropdown Filters - Same size, full row */}
-                        <div className="flex gap-2 mb-4">
+                    // Spot View
+                    <div className="flex-1 flex flex-col p-4 bg-zinc-50 dark:bg-black/50 min-h-0">
+                        {/* Dropdown Filters - Flex for responsive single row */}
+                        <div className="flex gap-2 mb-4 shrink-0">
                             {/* Vehicle Type Filter */}
                             <select
                                 value={vehicleFilter}
                                 onChange={e => setVehicleFilter(e.target.value as any)}
-                                className="flex-1 px-3 py-2 bg-white dark:bg-zinc-800 border border-black/10 dark:border-white/20 rounded-xl text-sm font-medium text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2212%22%20height%3D%2212%22%20viewBox%3D%220%200%2012%2012%22%3E%3Cpath%20fill%3D%22%23888%22%20d%3D%22M2%204l4%204%204-4z%22%2F%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[right_0.5rem_center] pr-7"
+                                style={{ WebkitTapHighlightColor: 'transparent' }}
+                                className="flex-1 min-w-0 px-2 py-2 bg-white dark:bg-zinc-800 border border-black/10 dark:border-white/20 rounded-xl text-[11px] font-medium text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2212%22%20height%3D%2212%22%20viewBox%3D%220%200%2012%2012%22%3E%3Cpath%20fill%3D%22%23888%22%20d%3D%22M2%204l4%204%204-4z%22%2F%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[right_0.5rem_center] pr-6 truncate"
                             >
                                 <option value="all">All Types</option>
                                 <option value="car">🚗 Car</option>
-                                <option value="motorcycle">🏍️ Motorcycle</option>
-                                <option value="bicycle">🚲 Bicycle</option>
+                                <option value="motorcycle">🏍️ Moto</option>
+                                <option value="bicycle">🚲 Bike</option>
                             </select>
 
                             {/* Floor Filter */}
                             <select
                                 value={floorFilter}
                                 onChange={e => setFloorFilter(e.target.value)}
-                                className="flex-1 px-3 py-2 bg-white dark:bg-zinc-800 border border-black/10 dark:border-white/20 rounded-xl text-sm font-medium text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2212%22%20height%3D%2212%22%20viewBox%3D%220%200%2012%2012%22%3E%3Cpath%20fill%3D%22%23888%22%20d%3D%22M2%204l4%204%204-4z%22%2F%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[right_0.5rem_center] pr-7"
+                                style={{ WebkitTapHighlightColor: 'transparent' }}
+                                className="flex-1 min-w-0 px-2 py-2 bg-white dark:bg-zinc-800 border border-black/10 dark:border-white/20 rounded-xl text-[11px] font-medium text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2212%22%20height%3D%2212%22%20viewBox%3D%220%200%2012%2012%22%3E%3Cpath%20fill%3D%22%23888%22%20d%3D%22M2%204l4%204%204-4z%22%2F%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[right_0.5rem_center] pr-6 truncate"
                             >
                                 <option value="all">All Floors</option>
                                 {uniqueFloors.map(floor => (
@@ -719,7 +942,8 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                             <select
                                 value={statusFilter}
                                 onChange={e => setStatusFilter(e.target.value as any)}
-                                className="flex-1 px-3 py-2 bg-white dark:bg-zinc-800 border border-black/10 dark:border-white/20 rounded-xl text-sm font-medium text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2212%22%20height%3D%2212%22%20viewBox%3D%220%200%2012%2012%22%3E%3Cpath%20fill%3D%22%23888%22%20d%3D%22M2%204l4%204%204-4z%22%2F%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[right_0.5rem_center] pr-7"
+                                style={{ WebkitTapHighlightColor: 'transparent' }}
+                                className="flex-1 min-w-0 px-2 py-2 bg-white dark:bg-zinc-800 border border-black/10 dark:border-white/20 rounded-xl text-[11px] font-medium text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2212%22%20height%3D%2212%22%20viewBox%3D%220%200%2012%2012%22%3E%3Cpath%20fill%3D%22%23888%22%20d%3D%22M2%204l4%204%204-4z%22%2F%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[right_0.5rem_center] pr-6 truncate"
                             >
                                 <option value="all">All Status</option>
                                 <option value="open">🟢 Open</option>
@@ -728,7 +952,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                             </select>
                         </div>
 
-                        <div className="flex-1 overflow-y-auto">
+                        <div className="flex-1 overflow-y-auto min-h-0">
                             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                                 {filteredSpots.map(spot => {
                                     const status = spotStatuses.get(spot.d);
@@ -777,16 +1001,18 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                 <input
                                     value={searchTerm}
                                     onChange={e => setSearchTerm(e.target.value)}
+                                    onKeyDown={e => { if (e.key === 'Enter') setConfirmedSearchTerm(searchTerm); }}
                                     placeholder="Search listing name or location"
                                     className="w-full pl-10 pr-4 py-2.5 bg-zinc-100 dark:bg-white/10 rounded-xl text-sm font-medium text-zinc-900 dark:text-white border border-black/5 dark:border-white/10 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-all placeholder:text-zinc-400 dark:placeholder:text-white/40"
                                 />
                             </div>
                             <button
-                                onClick={() => fetchListings()}
-                                className="p-2.5 bg-zinc-100 dark:bg-white/10 border border-black/5 dark:border-white/10 rounded-xl active:scale-95 transition-all text-zinc-600 dark:text-white"
-                                title="Refresh Listings"
+                                onClick={() => setConfirmedSearchTerm(searchTerm)}
+                                className="p-2.5 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-xl shadow-lg shadow-blue-500/20 active:scale-95 transition-all"
+                                style={{ WebkitTapHighlightColor: 'transparent' }}
+                                title="Search"
                             >
-                                <RotateCcw size={20} />
+                                <Search size={20} />
                             </button>
                         </div>
 
@@ -819,16 +1045,8 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                             <div key={listing.id} className="group relative bg-white dark:bg-[#1c1c1e] rounded-2xl p-4 border border-black/5 dark:border-white/10 shadow-sm transition-all hover:shadow-md active:scale-[0.99] cursor-pointer" onClick={() => setSelectedListing(listing)}>
                                                 <div className="flex flex-col items-start mb-3">
                                                     <div className="flex items-center justify-between w-full gap-2 mb-1">
-                                                        <div className="flex items-center gap-2 min-w-0">
+                                                        <div className="min-w-0">
                                                             <h3 className="font-bold text-zinc-900 dark:text-white text-lg leading-tight truncate">{listing.listing_name}</h3>
-                                                            <span className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${listing.listing_type === 'public' ? 'bg-green-500/10 text-green-600' : 'bg-purple-500/10 text-purple-600'}`}>
-                                                                {listing.listing_type}
-                                                            </span>
-                                                            {isClosed && (
-                                                                <span className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-zinc-500/10 text-zinc-500 dark:text-zinc-400">
-                                                                    CLOSED
-                                                                </span>
-                                                            )}
                                                         </div>
                                                     </div>
 
@@ -839,25 +1057,67 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                                 e.stopPropagation();
                                                                 setShowAccessListModal(listing);
                                                             }}
-                                                            className="p-1.5 text-zinc-400 hover:text-blue-500 active:opacity-50 transition-colors"
+                                                            style={{ WebkitTapHighlightColor: 'transparent' }}
+                                                            className="p-1.5 text-zinc-400 hover:text-blue-500 transition-colors"
                                                         >
                                                             <Users size={18} />
                                                         </button>
-                                                        {activeTab === 'my' && (listing.owners.includes(pubkey!) || listing.managers.includes(pubkey!)) && (
+                                                        {activeTab === 'my' && (listing.owners.includes(pubkey!) || listing.managers.includes(pubkey!)) ? (
                                                             <>
-                                                                <button onClick={(e) => { e.stopPropagation(); setEditingListing(listing); setShowCreateForm(true); }} className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-white active:opacity-50 transition-colors">
+                                                                <button onClick={(e) => { e.stopPropagation(); setEditingListing(listing); setShowCreateForm(true); }} style={{ WebkitTapHighlightColor: 'transparent' }} className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-white transition-colors">
                                                                     <Pencil size={18} />
                                                                 </button>
-                                                                <button onClick={(e) => { e.stopPropagation(); deleteListing(listing); }} className="p-1.5 text-zinc-400 hover:text-red-500 active:opacity-50 transition-colors">
+                                                                <button onClick={(e) => { e.stopPropagation(); deleteListing(listing); }} style={{ WebkitTapHighlightColor: 'transparent' }} className="p-1.5 text-zinc-400 hover:text-red-500 transition-colors">
                                                                     <Trash2 size={18} />
                                                                 </button>
                                                             </>
+                                                        ) : (
+                                                            <div className="relative">
+                                                                <button
+                                                                    onClick={(e) => { e.stopPropagation(); setShowHideMenu(showHideMenu === listing.id ? null : listing.id); }}
+                                                                    style={{ WebkitTapHighlightColor: 'transparent' }}
+                                                                    className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-white transition-colors"
+                                                                >
+                                                                    <MoreVertical size={18} />
+                                                                </button>
+                                                                {showHideMenu === listing.id && (
+                                                                    <div className="absolute right-0 top-8 bg-white dark:bg-zinc-800 border border-black/10 dark:border-white/20 rounded-xl shadow-xl z-50 overflow-hidden min-w-[200px]">
+                                                                        <button
+                                                                            onClick={(e) => { e.stopPropagation(); hideListing(listing.id, listing.listing_name); }}
+                                                                            className="w-full px-4 py-3 text-left text-sm text-zinc-700 dark:text-white hover:bg-zinc-100 dark:hover:bg-zinc-700 flex items-center gap-2"
+                                                                        >
+                                                                            <EyeOff size={16} /> Hide this listing
+                                                                        </button>
+                                                                        {listing.pubkey && (
+                                                                            <button
+                                                                                onClick={(e) => { e.stopPropagation(); hideOwner(listing.pubkey!, listing.listing_name + ' (owner)'); }}
+                                                                                className="w-full px-4 py-3 text-left text-sm text-zinc-700 dark:text-white hover:bg-zinc-100 dark:hover:bg-zinc-700 flex items-center gap-2 border-t border-black/5 dark:border-white/10"
+                                                                            >
+                                                                                <Ban size={16} /> Hide all from this owner
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+                                                                )}
+                                                            </div>
                                                         )}
                                                     </div>
 
                                                     <p className="text-xs text-zinc-500 dark:text-white/40 flex items-center gap-1">
                                                         <MapPin size={12} /> {listing.location || 'No location'}
                                                     </p>
+
+                                                    {/* Tags - moved below location */}
+                                                    <div className="flex items-center gap-2 mt-1">
+                                                        <span className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] uppercase tracking-wider ${listing.listing_type === 'public' ? 'bg-green-500/10 text-green-600' : 'bg-purple-500/10 text-purple-600'}`}>
+                                                            {listing.listing_type}
+                                                        </span>
+                                                        {isClosed && (
+                                                            <span className="shrink-0 px-2 py-0.5 rounded-full text-[10px] uppercase tracking-wider bg-zinc-500/10 text-zinc-500 dark:text-zinc-400">
+                                                                CLOSED
+                                                            </span>
+                                                        )}
+                                                    </div>
+
                                                     {listing.description && (
                                                         <p className="text-xs text-zinc-500 dark:text-white/60 mt-1 line-clamp-2">
                                                             {listing.description}
@@ -884,7 +1144,9 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                         return (
                                                             <div key={v.type} className={`bg-zinc-50 dark:bg-white/10 rounded-xl p-2 text-center flex flex-col items-center justify-center min-h-[80px] ${isClosed ? 'opacity-50' : ''}`}>
                                                                 <div className="text-3xl mb-1">{v.icon}</div>
-                                                                {isAvailable ? (
+                                                                {statusLoading ? (
+                                                                    <div className="text-xl font-bold text-zinc-300 dark:text-white/20">...</div>
+                                                                ) : isAvailable ? (
                                                                     <div className="flex flex-col items-center w-full">
                                                                         <div className="font-bold text-sm flex items-center gap-1.5 mb-1.5">
                                                                             <span className="text-green-500">{v.data?.open || 0}</span>
@@ -923,26 +1185,6 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                                     : 'This will mark ALL spots as OPEN. Continue?';
                                                                 if (!confirm(confirmMsg)) return;
 
-                                                                // Optimistic UI update
-                                                                setListings(prev => prev.map(l =>
-                                                                    l.id === listing.id ? { ...l, status: newStatus as 'open' | 'closed' } : l
-                                                                ));
-
-                                                                // Optimistic Stats update
-                                                                const currentStats = listingStats.get(listing.id);
-                                                                if (currentStats) {
-                                                                    const updatedStats = { ...currentStats };
-                                                                    (['car', 'motorcycle', 'bicycle'] as const).forEach(vType => {
-                                                                        const total = updatedStats[vType].total;
-                                                                        if (newStatus === 'closed') {
-                                                                            updatedStats[vType] = { ...updatedStats[vType], open: 0, occupied: 0, closed: total };
-                                                                        } else {
-                                                                            updatedStats[vType] = { ...updatedStats[vType], open: total, occupied: 0, closed: 0 };
-                                                                        }
-                                                                    });
-                                                                    setListingStats(prev => new Map(prev).set(listing.id, updatedStats));
-                                                                }
-
                                                                 try {
                                                                     // Fetch all spots for this listing
                                                                     const aTag = `${KINDS.LISTED_PARKING_METADATA}:${listing.pubkey}:${listing.d}`;
@@ -951,10 +1193,26 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                                         '#a': [aTag]
                                                                     });
 
-                                                                    // Publish status log (Kind 1714) for each spot
+                                                                    // Calculate new Snapshot Stats immediately
+                                                                    const snapshotStats = {
+                                                                        car: { open: 0, occupied: 0, total: 0, closed: 0 },
+                                                                        motorcycle: { open: 0, occupied: 0, total: 0, closed: 0 },
+                                                                        bicycle: { open: 0, occupied: 0, total: 0, closed: 0 }
+                                                                    };
+
+                                                                    // Publish status log (Kind 1714) for each spot AND aggregate snapshot
                                                                     for (const spot of spotEvents) {
                                                                         const spotD = spot.tags.find((t: string[]) => t[0] === 'd')?.[1];
+                                                                        const type = spot.tags.find((t: string[]) => t[0] === 'type')?.[1] as 'car' | 'motorcycle' | 'bicycle' || 'car';
                                                                         const spotATag = `${KINDS.PARKING_SPOT_LISTING}:${spot.pubkey}:${spotD}`;
+
+                                                                        // Update stats
+                                                                        if (snapshotStats[type]) {
+                                                                            snapshotStats[type].total++;
+                                                                            if (newStatus === 'closed') snapshotStats[type].closed++;
+                                                                            else snapshotStats[type].open++;
+                                                                        }
+
                                                                         const statusEvent = {
                                                                             kind: KINDS.LISTED_SPOT_LOG,
                                                                             created_at: Math.floor(Date.now() / 1000),
@@ -970,22 +1228,29 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                                         await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signed));
                                                                     }
 
-                                                                    // Also update listing metadata status for display
+                                                                    // Publish Kind 11012 Snapshot
+                                                                    const snapshotEvent = {
+                                                                        kind: KINDS.LISTED_PARKING_SNAPSHOT,
+                                                                        created_at: Math.floor(Date.now() / 1000),
+                                                                        tags: [
+                                                                            ['d', listing.id],
+                                                                            ['client', 'parlens']
+                                                                        ],
+                                                                        content: JSON.stringify(snapshotStats)
+                                                                    };
+                                                                    await Promise.allSettled(pool.publish(DEFAULT_RELAYS, await signEvent(snapshotEvent)));
+                                                                    console.log('[Parlens] Published Snapshot for listing:', listing.id);
+
+                                                                    // Update listing metadata to REMOVE status tag (Ground-Up Source of Truth)
                                                                     const metaEvent = {
                                                                         ...listing.originalEvent,
                                                                         created_at: Math.floor(Date.now() / 1000),
-                                                                        tags: [
-                                                                            ...listing.originalEvent.tags.filter((t: string[]) => t[0] !== 'status'),
-                                                                            ['status', newStatus]
-                                                                        ]
+                                                                        tags: listing.originalEvent.tags.filter((t: string[]) => t[0] !== 'status')
                                                                     };
                                                                     const signedMeta = await signEvent(metaEvent);
                                                                     await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedMeta));
                                                                 } catch (e) {
-                                                                    // Revert optimistic update on error
-                                                                    setListings(prev => prev.map(l =>
-                                                                        l.id === listing.id ? { ...l, status: isClosed ? 'closed' : 'open' } : l
-                                                                    ));
+                                                                    console.error('Failed to update status:', e);
                                                                     alert('Failed to update status');
                                                                 }
                                                             }}
@@ -1039,8 +1304,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                         status={spotStatuses.get(selectedSpot.d)}
                         isManager={selectedListing.owners.includes(pubkey!) || selectedListing.managers.includes(pubkey!)}
                         onClose={() => setSelectedSpot(null)}
-                        onStatusChange={() => fetchSpots(selectedListing)}
-                        setSpotStatuses={setSpotStatuses}
+                        listingStats={listingStats}
                     />
                 )
             }
@@ -1381,7 +1645,11 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
                     <div className="space-y-6">
                         <div className="flex justify-between items-center">
                             <h3 className="font-bold dark:text-white">Floors & Spots</h3>
-                            <select className="p-2 bg-zinc-100 dark:bg-white/5 rounded-lg text-zinc-900 dark:text-white text-sm" value={formData.currency} onChange={e => setFormData({ ...formData, currency: e.target.value })}>
+                            <select
+                                className="pl-3 pr-8 py-2 bg-zinc-100 dark:bg-white/5 border border-black/5 dark:border-white/10 rounded-xl text-zinc-900 dark:text-white text-sm font-medium appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2212%22%20height%3D%2212%22%20viewBox%3D%220%200%2012%2012%22%3E%3Cpath%20fill%3D%22%23888%22%20d%3D%22M2%204l4%204%204-4z%22%2F%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[right_0.75rem_center]"
+                                value={formData.currency}
+                                onChange={e => setFormData({ ...formData, currency: e.target.value })}
+                            >
                                 <option value="USD">USD ($)</option><option value="EUR">EUR (€)</option><option value="GBP">GBP (£)</option><option value="INR">INR (₹)</option>
                             </select>
                         </div>
@@ -1389,16 +1657,35 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
                         {/* List Floors */}
                         <div className="space-y-3">
                             {floors.map((floor, idx) => (
-                                <div key={idx} className="p-3 bg-zinc-50 dark:bg-white/5 rounded-xl flex justify-between items-center">
-                                    <div>
-                                        <div className="font-bold dark:text-white">{floor.name}</div>
-                                        <div className="text-xs text-zinc-500">
+                                <div key={idx} className="p-3 bg-zinc-50 dark:bg-white/5 rounded-xl flex justify-between items-center group touch-none">
+                                    <div className="flex-1 min-w-0 mr-2" onClick={() => {
+                                        // Edit functionality: Remove from list and load into form
+                                        if (showNewFloorForm) {
+                                            alert("Please save or cancel current floor edit first");
+                                            return;
+                                        }
+                                        removeFloor(idx);
+                                        setNewFloor(floor);
+                                        setShowNewFloorForm(true);
+                                    }}>
+                                        <div className="font-bold dark:text-white truncate">{floor.name}</div>
+                                        <div className="text-xs text-zinc-500 truncate">
                                             {floor.counts.car > 0 && `🚗 ${floor.counts.car} `}
                                             {floor.counts.motorcycle > 0 && `🏍️ ${floor.counts.motorcycle} `}
                                             {floor.counts.bicycle > 0 && `🚲 ${floor.counts.bicycle} `}
                                         </div>
                                     </div>
-                                    <button onClick={() => removeFloor(idx)} className="p-2 text-red-500 bg-red-50 dark:bg-red-900/10 rounded-full"><Trash2 size={14} /></button>
+                                    <div className="flex items-center gap-1">
+                                        <button onClick={() => {
+                                            if (showNewFloorForm) { alert("Finish current floor first"); return; }
+                                            removeFloor(idx); setNewFloor(floor); setShowNewFloorForm(true);
+                                        }} className="p-2 text-zinc-400 hover:text-blue-500 transition-colors">
+                                            <Pencil size={18} />
+                                        </button>
+                                        <button onClick={() => removeFloor(idx)} style={{ WebkitTapHighlightColor: 'transparent' }} className="p-2 text-zinc-400 hover:text-red-500 transition-colors">
+                                            <Trash2 size={18} />
+                                        </button>
+                                    </div>
                                 </div>
                             ))}
                         </div>
@@ -1447,9 +1734,9 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
                         ) : (
                             <button
                                 onClick={() => setShowNewFloorForm(true)}
-                                className="w-full py-3 bg-zinc-100 dark:bg-white/5 border-2 border-dashed border-zinc-300 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-zinc-200 dark:hover:bg-white/10 transition-colors"
+                                className="w-full py-4 border-2 border-dashed border-zinc-200 dark:border-white/10 rounded-2xl text-zinc-400 font-bold hover:bg-zinc-50 dark:hover:bg-white/5 transition-colors"
                             >
-                                <Plus size={18} /> Add Another Floor
+                                + Add Floor
                             </button>
                         )}
 
@@ -1464,7 +1751,7 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
     );
 };
 
-const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isManager, onStatusChange, setSpotStatuses }) => {
+const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isManager, listingStats }) => {
     const { pubkey, signEvent, pool } = useAuth();
     // QR contains a-tag, authorizer (owner/manager pubkey), and auth token
     const spotATag = `${KINDS.PARKING_SPOT_LISTING}:${spot.pubkey}:${spot.d} `;
@@ -1544,11 +1831,13 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
             ['client', 'parlens']
         ];
 
-        // Add search metadata tags
-        if (spot.location) tags.push(['location', spot.location]);
-        if (spot.g) tags.push(['g', spot.g]);
+        // Add search metadata tags - use LISTING location/geohash for search discoverability
+        if (listing.location) tags.push(['location', listing.location]);
+        if (listing.g) tags.push(['g', listing.g]);
         // Add type tag for filtering
         if (spot.type) tags.push(['type', spot.type]);
+        // Add relay tags for discoverability
+        DEFAULT_RELAYS.forEach(relay => tags.push(['r', relay]));
 
         const ev = {
             kind: KINDS.LISTED_SPOT_LOG, created_at: Math.floor(Date.now() / 1000),
@@ -1560,24 +1849,48 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
         // Add to local logs
         setLogs(prev => [signed, ...prev]);
 
-        // Immediately update spotStatuses for instant UI feedback
-        if (setSpotStatuses) {
-            setSpotStatuses((prev: Map<string, SpotStatus>) => {
-                const newMap = new Map(prev);
-                newMap.set(spot.d, {
-                    id: signed.id,
-                    pubkey: signed.pubkey,
-                    a: spotATag,
-                    status: s,
-                    updated_by: pubkey || '',
-                    authorizer: '',
-                    created_at: signed.created_at
-                });
-                return newMap;
-            });
-        }
+        // Publish Kind 11012 Snapshot (Ground-Up Ground Truth)
+        // Client aggregates current state + this change
+        if (listingStats) {
+            const currentStats = listingStats.get(listing.id);
+            if (currentStats) {
+                // Determine old status
+                const oldStatus = status?.status || 'open';
 
-        onStatusChange();
+                // Clone stats to calculate new snapshot
+                const newStats = JSON.parse(JSON.stringify(currentStats)); // Deep clone
+                const typeStats = newStats[spot.type || 'car'];
+
+                if (typeStats) {
+                    // Decrement old
+                    if (oldStatus === 'occupied') typeStats.occupied = Math.max(0, typeStats.occupied - 1);
+                    else if (oldStatus === 'closed') typeStats.closed = Math.max(0, typeStats.closed - 1);
+                    else typeStats.open = Math.max(0, typeStats.open - 1);
+
+                    // Increment new
+                    if (s === 'occupied') typeStats.occupied++;
+                    else if (s === 'closed') typeStats.closed++;
+                    else typeStats.open++;
+
+                    // Publish Snapshot
+                    try {
+                        const snapshotEvent = {
+                            kind: KINDS.LISTED_PARKING_SNAPSHOT,
+                            created_at: Math.floor(Date.now() / 1000),
+                            tags: [
+                                ['d', listing.id],
+                                ['client', 'parlens']
+                            ],
+                            content: JSON.stringify(newStats)
+                        };
+                        await Promise.allSettled(pool.publish(DEFAULT_RELAYS, await signEvent(snapshotEvent)));
+                        console.log('[Parlens] Published updated Snapshot for spot:', spot.d);
+                    } catch (e) {
+                        console.error('Failed to publish snapshot:', e);
+                    }
+                }
+            }
+        }
     };
 
     const addQuickNote = async (targetLogId?: string, content?: string) => {
@@ -1642,7 +1955,7 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
         };
 
         await Promise.allSettled(pool.publish(DEFAULT_RELAYS, await signEvent(ev)));
-        onStatusChange();
+        // Refresh via parent - this is spot metadata edit, not status change
         setIsEditing(false);
     };
 
@@ -1660,7 +1973,7 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
                         <input className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl dark:text-white" value={editData.short_name} onChange={e => setEditData({ ...editData, short_name: e.target.value })} placeholder={`#${spot.spot_number} `} />
                         <label className="text-xs font-bold uppercase text-zinc-400">Type</label>
                         <select className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl dark:text-white" value={editData.type} onChange={e => setEditData({ ...editData, type: e.target.value as any })}>
-                            <option value="car">Car</option><option value="motorcycle">Motorcycle</option><option value="bicycle">Bicycle</option>
+                            <option value="car">🚗 Car</option><option value="motorcycle">🏍️ Motorcycle</option><option value="bicycle">🚲 Bicycle</option>
                         </select>
                     </div>
                     <div className="flex gap-2">
@@ -1801,8 +2114,17 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
                                 <div className="text-xs font-bold uppercase text-zinc-400 mb-1">Status</div>
                                 {/* Use LATEST log status if available, fallback to props */}
                                 {(() => {
-                                    const latestLogStatus = logs.length > 0 ? logs[0].tags.find((t: string[]) => t[0] === 'status')?.[1] : null;
-                                    const displayStatus = latestLogStatus || status?.status;
+                                    const latestLog = logs.length > 0 ? logs[0] : null;
+                                    const latestLogStatus = latestLog?.tags.find((t: string[]) => t[0] === 'status')?.[1];
+
+                                    let displayStatus;
+                                    // Robust timestamp comparison to handle race conditions
+                                    if (latestLog && status) {
+                                        // Use whichever is newer
+                                        displayStatus = latestLog.created_at >= status.created_at ? latestLogStatus : status.status;
+                                    } else {
+                                        displayStatus = latestLogStatus || status?.status;
+                                    }
 
                                     if (!displayStatus && logsLoading) {
                                         return <div className="text-lg font-bold text-zinc-400 animate-pulse">...</div>;
@@ -1819,48 +2141,50 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
                             </div>
                         </div>
 
-                        {/* Latest Note Display & Quick Add (Main View) */}
-                        <div className="p-4 bg-zinc-50 dark:bg-white/5 rounded-2xl text-left space-y-2">
-                            <div className="text-xs font-bold uppercase text-zinc-400 mb-1">Latest Note</div>
-                            {(() => {
-                                // Find latest note across all logs
-                                let latestNote: any = null;
-                                let latestNoteTime = 0;
-                                notes.forEach((noteList: any[]) => {
-                                    noteList.forEach((n: any) => {
-                                        if (n.created_at > latestNoteTime) {
-                                            latestNote = n;
-                                            latestNoteTime = n.created_at;
-                                        }
+                        {/* Latest Note Display & Quick Add (Main View) - Only for Managers/Owners */}
+                        {isManager && (
+                            <div className="p-4 bg-zinc-50 dark:bg-white/5 rounded-2xl text-left space-y-2">
+                                <div className="text-xs font-bold uppercase text-zinc-400 mb-1">Latest Note</div>
+                                {(() => {
+                                    // Find latest note across all logs
+                                    let latestNote: any = null;
+                                    let latestNoteTime = 0;
+                                    notes.forEach((noteList: any[]) => {
+                                        noteList.forEach((n: any) => {
+                                            if (n.created_at > latestNoteTime) {
+                                                latestNote = n;
+                                                latestNoteTime = n.created_at;
+                                            }
+                                        });
                                     });
-                                });
 
-                                return latestNote ? (
-                                    <div className="text-sm dark:text-white italic">"{latestNote.content}" <span className="text-xs text-zinc-400 not-italic">- {new Date(latestNote.created_at * 1000).toLocaleDateString()}</span></div>
-                                ) : (
-                                    <div className="text-sm text-zinc-400 italic">No notes added yet</div>
-                                );
-                            })()}
+                                    return latestNote ? (
+                                        <div className="text-sm dark:text-white italic">"{latestNote.content}" <span className="text-xs text-zinc-400 not-italic">- {new Date(latestNote.created_at * 1000).toLocaleDateString()}</span></div>
+                                    ) : (
+                                        <div className="text-sm text-zinc-400 italic">No notes added yet</div>
+                                    );
+                                })()}
 
-                            <div className="flex gap-2 pt-2">
-                                <input
-                                    value={quickNote}
-                                    onChange={e => setQuickNote(e.target.value)}
-                                    placeholder="Add a note"
-                                    className="flex-1 p-2.5 bg-white dark:bg-white/10 rounded-xl text-sm text-zinc-900 dark:text-white border border-black/5 dark:border-white/10 focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder:text-zinc-400"
-                                    onKeyDown={(e) => {
-                                        if (e.key === 'Enter') addQuickNote();
-                                    }}
-                                />
-                                <button
-                                    onClick={() => addQuickNote()}
-                                    disabled={!quickNote.trim()}
-                                    className="p-2.5 bg-[#007AFF] text-white rounded-xl disabled:opacity-50"
-                                >
-                                    <Plus size={20} />
-                                </button>
+                                <div className="flex gap-2 pt-2">
+                                    <input
+                                        value={quickNote}
+                                        onChange={e => setQuickNote(e.target.value)}
+                                        placeholder="Add a note"
+                                        className="flex-1 p-2.5 bg-white dark:bg-white/10 rounded-xl text-sm text-zinc-900 dark:text-white border border-black/5 dark:border-white/10 focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder:text-zinc-400"
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter') addQuickNote();
+                                        }}
+                                    />
+                                    <button
+                                        onClick={() => addQuickNote()}
+                                        disabled={!quickNote.trim()}
+                                        className="p-2.5 bg-[#007AFF] text-white rounded-xl disabled:opacity-50"
+                                    >
+                                        <Plus size={20} />
+                                    </button>
+                                </div>
                             </div>
-                        </div>
+                        )}
 
                         {isManager && (
                             <div className="space-y-4 pt-2">
@@ -1880,7 +2204,7 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
 
                                 {/* Edit/Delete Buttons */}
                                 <div className="flex gap-3 pt-2 border-t border-black/5 dark:border-white/5">
-                                    <button onClick={() => setIsEditing(true)} className="flex-1 py-3 bg-zinc-100 dark:bg-white/10 border border-zinc-200 dark:border-white/10 text-zinc-600 dark:text-zinc-300 font-bold text-sm flex items-center justify-center gap-2 rounded-xl active:scale-95 transition-transform">
+                                    <button onClick={() => setIsEditing(true)} style={{ WebkitTapHighlightColor: 'transparent' }} className="flex-1 py-3 bg-zinc-100 dark:bg-white/10 border border-zinc-200 dark:border-white/10 text-zinc-600 dark:text-zinc-300 font-bold text-sm flex items-center justify-center gap-2 rounded-xl transition-transform active:scale-95">
                                         <Pencil size={16} /> Edit
                                     </button>
                                     <button onClick={async () => {
@@ -1911,8 +2235,8 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
                                             console.log(`[Parlens] Updated total_spots to ${newTotalSpots} after spot deletion`);
                                         }
 
-                                        onStatusChange(); onClose();
-                                    }} className="flex-1 py-3 text-red-500 font-bold text-sm flex items-center justify-center gap-2 rounded-xl active:scale-95 transition-transform">
+                                        onClose(); // Just close - parent will refresh if needed
+                                    }} style={{ WebkitTapHighlightColor: 'transparent' }} className="flex-1 py-3 bg-zinc-100 dark:bg-white/10 border border-zinc-200 dark:border-white/10 text-red-500 font-bold text-sm flex items-center justify-center gap-2 rounded-xl transition-transform active:scale-95">
                                         <Trash2 size={16} /> Delete
                                     </button>
                                 </div>

@@ -166,18 +166,45 @@ export const FAB: React.FC<FABProps> = ({
             // 1. Immediate fetch of existing spots
             const initialFetch = async () => {
                 try {
-                    const events = await pool.querySync(
+                    // Fetch ephemeral open spot broadcasts (Kind 31714) - time-limited
+                    const broadcastEvents = await pool.querySync(
                         DEFAULT_RELAYS,
                         {
-                            kinds: [KINDS.OPEN_SPOT_BROADCAST, KINDS.LISTED_SPOT_LOG],
+                            kinds: [KINDS.OPEN_SPOT_BROADCAST],
                             '#g': Array.from(sessionGeohashes),
-                            since: now - 600 // Past 10 mins
+                            since: now - 600 // Past 10 mins for broadcasts
                         } as any
                     );
 
-                    for (const event of events) {
+                    // Fetch listed spot status (Kind 1714) - NO time limit, latest status is always current
+                    const listedEvents = await pool.querySync(
+                        DEFAULT_RELAYS,
+                        {
+                            kinds: [KINDS.LISTED_SPOT_LOG],
+                            '#g': Array.from(sessionGeohashes),
+                            limit: 500 // Get enough to cover area
+                        } as any
+                    );
+
+                    // Process broadcast events
+                    for (const event of broadcastEvents) {
                         processSpotEvent(event);
                     }
+
+                    // Process listed events - only keep latest per spot (a-tag)
+                    const latestBySpot = new Map<string, any>();
+                    for (const event of listedEvents) {
+                        const aTag = event.tags.find((t: string[]) => t[0] === 'a')?.[1];
+                        if (!aTag) continue;
+                        const existing = latestBySpot.get(aTag);
+                        if (!existing || existing.created_at < event.created_at) {
+                            latestBySpot.set(aTag, event);
+                        }
+                    }
+                    for (const event of latestBySpot.values()) {
+                        processSpotEvent(event);
+                    }
+
                     // Update state after initial fetch
                     if (spotsMapRef.current.size > 0) {
                         setOpenSpots(Array.from(spotsMapRef.current.values()));
@@ -188,14 +215,14 @@ export const FAB: React.FC<FABProps> = ({
             };
             initialFetch();
 
-            // 2. Subscribe to NEW spots in real-time
+            // 2. Subscribe to NEW spots in real-time (from now onwards only)
             const sub = pool.subscribeMany(
                 DEFAULT_RELAYS,
                 [
                     {
                         kinds: [KINDS.OPEN_SPOT_BROADCAST, KINDS.LISTED_SPOT_LOG],
                         '#g': Array.from(sessionGeohashes),
-                        since: now - 600
+                        since: now  // Only NEW events from this point on
                     }
                 ] as any,
                 {
