@@ -472,7 +472,11 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                 return merged;
             });
 
-        } catch (error) { console.error('Error fetching spots:', error); }
+        } catch (error) {
+            console.error('Error fetching spots:', error);
+        } finally {
+            setStatusLoading(false);
+        }
     }, [pool]);
 
     useEffect(() => {
@@ -944,12 +948,16 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                             </button>
                         )}
                         <button
-                            onClick={() => { fetchListings(); if (selectedListing) fetchSpots(selectedListing); }}
+                            onClick={() => {
+                                setStatusLoading(true);
+                                fetchListings();
+                                if (selectedListing) fetchSpots(selectedListing);
+                            }}
                             className="p-2 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-full shadow-lg shadow-blue-500/20 active:scale-95 transition-transform"
                             style={{ WebkitTapHighlightColor: 'transparent' }}
                             title="Refresh"
                         >
-                            <RotateCcw size={20} />
+                            <RotateCcw size={20} className={statusLoading ? 'animate-spin' : ''} />
                         </button>
                     </div>
                 </div>
