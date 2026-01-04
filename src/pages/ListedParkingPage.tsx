@@ -281,21 +281,12 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                 return `${KINDS.PARKING_SPOT_LISTING}:${s.pubkey}:${d}`;
             });
 
-            // Fetch Snapshots (Kind 11012) - One per listing
-            // Build listing a-tags for Kind 1147 query
-            const listingATags = parsedListings.map(l => `${KINDS.LISTED_PARKING_METADATA}:${l.pubkey}:${l.d}`);
-
+            // Fetch spot status logs (Kind 1714) for ground-up calculation
             let allStatuses: any[] = [];
-            let allStatusLogs: any[] = []; // Kind 1147 listing status logs
 
             if (spotATags.length > 0) {
-                // Parallel fetch for Spot Logs (1714) and Listing Status Logs (1147)
-                const [statusEvents, statusLogEvents] = await Promise.all([
-                    pool.querySync(DEFAULT_RELAYS, { kinds: [KINDS.LISTED_SPOT_LOG], '#a': spotATags }),
-                    pool.querySync(DEFAULT_RELAYS, { kinds: [KINDS.LISTING_STATUS_LOG], '#a': listingATags })
-                ]);
-                allStatuses = statusEvents;
-                allStatusLogs = statusLogEvents;
+                // Fetch Spot Status Logs (Kind 1714)
+                allStatuses = await pool.querySync(DEFAULT_RELAYS, { kinds: [KINDS.LISTED_SPOT_LOG], '#a': spotATags });
             }
 
             // Map most recent status per spot
@@ -354,30 +345,11 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                     if (d) newSpotMapping.set(d, { listingId: listing.id, type });
                 }
 
-                // Check for Listing Status Log (Kind 1147) - find latest by a-tag
-                const statusLogsForListing = allStatusLogs
-                    .filter((s: any) => s.tags.find((t: string[]) => t[0] === 'a')?.[1] === listingATag)
-                    .sort((a: any, b: any) => b.created_at - a.created_at);
-                const latestStatusLog = statusLogsForListing[0];
-
-                if (latestStatusLog) {
-                    // Use Status Log Data (Optimized)
-                    try {
-                        const logContent = JSON.parse(latestStatusLog.content);
-                        console.log('[Parlens] Using Status Log for listing:', listing.listing_name);
-                        newStats.set(listing.d, logContent);
-                    } catch (e) {
-                        console.warn('Invalid status log content for', listing.listing_name, e);
-                        // Fallback to ground-up calculation if log corrupt
-                        calculateGroundUpStats(lSpots, statusMap, stats);
-                        newStats.set(listing.d, stats);
-                    }
-                } else {
-                    // Fallback to Ground-Up Calculation (No Status Log or Initial)
-                    console.log('[Parlens] No Status Log, calculating ground-up for:', listing.listing_name);
-                    calculateGroundUpStats(lSpots, statusMap, stats);
-                    newStats.set(listing.d, stats);
-                }
+                // Always use Ground-Up Calculation from Kind 1714 logs (spotStatuses)
+                // This ensures list view and multi-spot view use the same data source
+                console.log('[Parlens] Calculating ground-up stats for:', listing.listing_name);
+                calculateGroundUpStats(lSpots, statusMap, stats);
+                newStats.set(listing.d, stats);
             }
             setListingStats(newStats);
             setSpotToListingMap(newSpotMapping);
@@ -957,7 +929,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                             style={{ WebkitTapHighlightColor: 'transparent' }}
                             title="Refresh"
                         >
-                            <RotateCcw size={20} className={statusLoading ? 'animate-spin' : ''} />
+                            <RotateCcw size={20} />
                         </button>
                     </div>
                 </div>
@@ -1012,30 +984,39 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                         </div>
 
                         <div className="flex-1 overflow-y-auto min-h-0">
-                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                                {filteredSpots.map(spot => {
-                                    const status = spotStatuses.get(spot.d);
-                                    const statusColor = status?.status === 'occupied' ? 'bg-red-500/10 border-red-500/20 text-red-600 dark:text-red-400' :
-                                        status?.status === 'closed' ? 'bg-zinc-500/10 border-zinc-500/20 text-zinc-600 dark:text-zinc-400' :
-                                            'bg-green-500/10 border-green-500/20 text-green-600 dark:text-green-400';
-                                    return (
-                                        <button
-                                            key={spot.id}
-                                            onClick={() => setSelectedSpot(spot)}
-                                            className={`p-3 rounded-2xl border ${statusColor} text-center active:scale-[0.98] transition-transform`}
-                                        >
-                                            <div className="text-3xl mb-1">
-                                                {spot.type === 'car' ? '🚗' : spot.type === 'motorcycle' ? '🏍️' : '🚲'}
-                                            </div>
-                                            <p className="font-bold text-sm text-zinc-900 dark:text-white">
-                                                {spot.short_name || `#${spot.spot_number}`}
-                                            </p>
-                                            {spot.floor && <p className="text-xs opacity-60">{spot.floor}</p>}
-                                            <p className="mt-1 text-[10px] font-bold uppercase tracking-wider opacity-80">{status?.status || 'Open'}</p>
-                                        </button>
-                                    );
-                                })}
-                            </div>
+                            {statusLoading ? (
+                                <div className="flex-1 flex items-center justify-center py-20">
+                                    <div className="text-center">
+                                        <div className="animate-spin w-8 h-8 border-4 border-blue-500/20 border-t-blue-500 rounded-full mx-auto mb-4"></div>
+                                        <p className="text-zinc-500 dark:text-white/50">Loading...</p>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                                    {filteredSpots.map(spot => {
+                                        const status = spotStatuses.get(spot.d);
+                                        const statusColor = status?.status === 'occupied' ? 'bg-red-500/10 border-red-500/20 text-red-600 dark:text-red-400' :
+                                            status?.status === 'closed' ? 'bg-zinc-500/10 border-zinc-500/20 text-zinc-600 dark:text-zinc-400' :
+                                                'bg-green-500/10 border-green-500/20 text-green-600 dark:text-green-400';
+                                        return (
+                                            <button
+                                                key={spot.id}
+                                                onClick={() => setSelectedSpot(spot)}
+                                                className={`p-3 rounded-2xl border ${statusColor} text-center active:scale-[0.98] transition-transform`}
+                                            >
+                                                <div className="text-3xl mb-1">
+                                                    {spot.type === 'car' ? '🚗' : spot.type === 'motorcycle' ? '🏍️' : '🚲'}
+                                                </div>
+                                                <p className="font-bold text-sm text-zinc-900 dark:text-white">
+                                                    {spot.short_name || `#${spot.spot_number}`}
+                                                </p>
+                                                {spot.floor && <p className="text-xs opacity-60">{spot.floor}</p>}
+                                                <p className="mt-1 text-[10px] font-bold uppercase tracking-wider opacity-80">{status?.status || 'Open'}</p>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            )}
                         </div>
                     </div>
                 ) : (
