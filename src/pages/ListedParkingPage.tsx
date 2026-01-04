@@ -291,7 +291,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                 // Parallel fetch for Logs and Snapshots
                 const [statusEvents, snapshotEvents] = await Promise.all([
                     pool.querySync(DEFAULT_RELAYS, { kinds: [KINDS.LISTED_SPOT_LOG], '#a': spotATags }),
-                    pool.querySync(DEFAULT_RELAYS, { kinds: [KINDS.LISTED_PARKING_SNAPSHOT], '#d': parsedListings.map(l => l.id) }) // Fetch by d-tag (listingId)
+                    pool.querySync(DEFAULT_RELAYS, { kinds: [KINDS.LISTED_PARKING_SNAPSHOT], '#d': parsedListings.map(l => l.d) }) // Fetch by d-tag value (listing identifier)
                 ]);
                 allStatuses = statusEvents;
                 allSnapshots = snapshotEvents;
@@ -353,26 +353,26 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                     if (d) newSpotMapping.set(d, { listingId: listing.id, type });
                 }
 
-                // Check for Snapshot first
-                const snapshot = allSnapshots.find((s: any) => s.tags.find((t: string[]) => t[0] === 'd')?.[1] === listing.id);
+                // Check for Snapshot first (match by listing's d-tag identifier)
+                const snapshot = allSnapshots.find((s: any) => s.tags.find((t: string[]) => t[0] === 'd')?.[1] === listing.d);
 
                 if (snapshot) {
                     // Use Snapshot Data (Optimized)
                     try {
                         const snapContent = JSON.parse(snapshot.content);
                         // console.log('[Parlens] Using Snapshot for listing:', listing.listing_name);
-                        newStats.set(listing.id, snapContent);
+                        newStats.set(listing.d, snapContent);
                     } catch (e) {
                         console.warn('Invalid snapshot content for', listing.listing_name, e);
                         // Fallback to ground-up calculation if snapshot corrupt
                         calculateGroundUpStats(lSpots, statusMap, stats);
-                        newStats.set(listing.id, stats);
+                        newStats.set(listing.d, stats);
                     }
                 } else {
                     // Fallback to Ground-Up Calculation (No Snapshot or Initial)
                     // console.log('[Parlens] No Snapshot, calculating ground-up for:', listing.listing_name);
                     calculateGroundUpStats(lSpots, statusMap, stats);
-                    newStats.set(listing.id, stats);
+                    newStats.set(listing.d, stats);
                 }
             }
             setListingStats(newStats);
@@ -763,7 +763,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
 
         setListingStats(prev => {
             const newMap = new Map(prev);
-            newMap.set(selectedListing.id, stats);
+            newMap.set(selectedListing.d, stats);
             return newMap;
         });
     }, [spotStatuses, selectedListing, spots]);
@@ -857,8 +857,8 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             }
 
             // Open Spots (for selected filter or total)
-            const statsA = listingStats.get(a.id);
-            const statsB = listingStats.get(b.id);
+            const statsA = listingStats.get(a.d);
+            const statsB = listingStats.get(b.d);
 
             const getOpen = (stats: any) => {
                 if (!stats) return 0;
@@ -1075,7 +1075,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                             ) : (
                                 <>
                                     {paginatedListings.map(listing => {
-                                        const stats = listingStats.get(listing.id);
+                                        const stats = listingStats.get(listing.d);
                                         const isClosed = listing.status === 'closed';
 
                                         // Override stats if closed
@@ -1277,7 +1277,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                                         kind: KINDS.LISTED_PARKING_SNAPSHOT,
                                                                         created_at: Math.floor(Date.now() / 1000),
                                                                         tags: [
-                                                                            ['d', listing.id],
+                                                                            ['d', listing.d],
                                                                             ['g', listing.g],
                                                                             ['client', 'parlens']
                                                                         ],
@@ -1350,6 +1350,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                         isManager={selectedListing.owners.includes(pubkey!) || selectedListing.managers.includes(pubkey!)}
                         onClose={() => setSelectedSpot(null)}
                         listingStats={listingStats}
+                        setListingStats={setListingStats}
                     />
                 )
             }
@@ -1796,7 +1797,7 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
     );
 };
 
-const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isManager, listingStats }) => {
+const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isManager, listingStats, setListingStats }) => {
     const { pubkey, signEvent, pool } = useAuth();
     // QR contains a-tag, authorizer (owner/manager pubkey), and auth token
     const spotATag = `${KINDS.PARKING_SPOT_LISTING}:${spot.pubkey}:${spot.d} `;
@@ -1897,7 +1898,7 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
         // Publish Kind 11012 Snapshot (Ground-Up Ground Truth)
         // Client aggregates current state + this change
         if (listingStats) {
-            const currentStats = listingStats.get(listing.id);
+            const currentStats = listingStats.get(listing.d);
             if (currentStats) {
                 // Determine old status
                 const oldStatus = status?.status || 'open';
@@ -1923,7 +1924,7 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
                             kind: KINDS.LISTED_PARKING_SNAPSHOT,
                             created_at: Math.floor(Date.now() / 1000),
                             tags: [
-                                ['d', listing.id],
+                                ['d', listing.d],
                                 ['g', listing.g],
                                 ['client', 'parlens']
                             ],
@@ -1931,6 +1932,13 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
                         };
                         await Promise.allSettled(pool.publish(DEFAULT_RELAYS, await signEvent(snapshotEvent)));
                         console.log('[Parlens] Published updated Snapshot for spot:', spot.d);
+
+                        // Immediately update local state for instant UI feedback
+                        setListingStats((prev: Map<string, any>) => {
+                            const updated = new Map(prev);
+                            updated.set(listing.d, newStats);
+                            return updated;
+                        });
                     } catch (e) {
                         console.error('Failed to publish snapshot:', e);
                     }
