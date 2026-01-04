@@ -293,9 +293,11 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             console.log(`[Parlens] Fetched ${allSpots.length} spots for ${parsedListings.length} listings. aTags queried:`, aTags.length);
 
             // 3. Fetch Statuses for ALL spots & Snapshots for Listings
-            const spotATags = allSpots.map((s: any) => {
+            // Use flatMap to query both 'clean' and 'legacy spaced' tags to catch all history
+            const spotATags = allSpots.flatMap((s: any) => {
                 const d = s.tags.find((t: string[]) => t[0] === 'd')?.[1];
-                return `${KINDS.PARKING_SPOT_LISTING}:${s.pubkey}:${d}`;
+                const clean = `${KINDS.PARKING_SPOT_LISTING}:${s.pubkey}:${d}`;
+                return [clean, clean + ' '];
             });
 
             // Fetch spot status logs (Kind 1714) for ground-up calculation
@@ -446,7 +448,11 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             }
 
             // Fetch statuses for these specific spots
-            const spotATags = parsedSpots.map(s => `${KINDS.PARKING_SPOT_LISTING}:${s.pubkey}:${s.d}`);
+            // Query both clean and legacy spaced tags
+            const spotATags = parsedSpots.flatMap(s => {
+                const clean = `${KINDS.PARKING_SPOT_LISTING}:${s.pubkey}:${s.d}`;
+                return [clean, clean + ' '];
+            });
             const statusEvents = await pool.querySync(DEFAULT_RELAYS, {
                 kinds: [KINDS.LISTED_SPOT_LOG],
                 '#a': spotATags,
