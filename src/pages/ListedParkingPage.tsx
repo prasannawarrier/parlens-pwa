@@ -4,7 +4,7 @@
  * Refined based on user feedback (Style, Form, Features)
  */
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { MapPin, Plus, Trash2, X, Check, Copy, Pencil, ChevronRight, LocateFixed, Users, ArrowLeft, Search, RotateCw, EyeOff, Ban, MoreVertical } from 'lucide-react';
+import { MapPin, Plus, Trash2, X, Check, Copy, Pencil, ChevronRight, LocateFixed, Users, ArrowLeft, Search, RotateCw, EyeOff, Ban, MoreVertical, Star } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { KINDS, DEFAULT_RELAYS } from '../lib/nostr';
 import { encodeGeohash, calculateDistance } from '../lib/geo';
@@ -115,6 +115,23 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
     const [isTogglingStatus, setIsTogglingStatus] = useState(false);
     const [displayedCount, setDisplayedCount] = useState(10); // Pagination - show 10 at a time
     const [showHideMenu, setShowHideMenu] = useState<string | null>(null); // Listing ID for dropdown
+    const [savedListings, setSavedListings] = useState<Set<string>>(() => {
+        try {
+            const saved = localStorage.getItem('parlens-saved-listings');
+            return saved ? new Set(JSON.parse(saved)) : new Set();
+        } catch { return new Set(); }
+    });
+    const [showSavedOnly, setShowSavedOnly] = useState(false);
+
+    const toggleSaved = (listingId: string) => {
+        setSavedListings(prev => {
+            const next = new Set(prev);
+            if (next.has(listingId)) next.delete(listingId);
+            else next.add(listingId);
+            localStorage.setItem('parlens-saved-listings', JSON.stringify(Array.from(next)));
+            return next;
+        });
+    };
 
     // Hidden items with human-readable names - unified structure
     interface HiddenItem {
@@ -888,6 +905,9 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
 
     const filteredListings = useMemo(() => {
         let res = listings.filter(l => {
+            // Saved Filter
+            if (showSavedOnly && !savedListings.has(l.id)) return false;
+
             // Tab filtering
             let match = false;
             if (activeTab === 'public') match = l.listing_type === 'public';
@@ -1182,7 +1202,15 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                         </div>
 
                         {/* Status Legend */}
-                        <div className="flex items-center gap-4 text-[10px] font-bold uppercase tracking-wider text-zinc-500 justify-start px-4 py-2">
+                        <div className="flex items-center gap-4 text-[10px] font-bold uppercase tracking-wider text-zinc-500 justify-start px-4 py-2 overflow-x-auto">
+                            <button
+                                onClick={() => setShowSavedOnly(!showSavedOnly)}
+                                className={`flex items-center gap-1 px-2 py-1 rounded-full border transition-colors ${showSavedOnly ? 'bg-yellow-500/10 border-yellow-500/20 text-yellow-600 dark:text-yellow-400' : 'bg-transparent border-transparent hover:bg-black/5 dark:hover:bg-white/5'}`}
+                            >
+                                <Star size={12} className={showSavedOnly ? 'fill-yellow-500 stroke-yellow-500' : ''} />
+                                {showSavedOnly ? 'Saved' : 'All'}
+                            </button>
+                            <div className="h-4 w-px bg-black/10 dark:bg-white/10 mx-2"></div>
                             <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-green-500"></div>Open</div>
                             <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-red-500"></div>Occupied</div>
                             <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-zinc-400"></div>Closed</div>
@@ -1221,12 +1249,22 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                 <div className="flex flex-col items-start mb-3">
                                                     <div className="flex items-center justify-between w-full gap-2 mb-1">
                                                         <div className="min-w-0">
-                                                            <h3 className="font-bold text-zinc-900 dark:text-white text-lg leading-tight truncate">{listing.listing_name}</h3>
+                                                            <h3 className="font-bold text-zinc-900 dark:text-white text-base leading-tight truncate">{listing.listing_name}</h3>
                                                         </div>
                                                     </div>
 
                                                     {/* Access List Button */}
                                                     <div className="absolute top-4 right-4 flex gap-1">
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                toggleSaved(listing.id);
+                                                            }}
+                                                            className="p-2 rounded-full bg-black/5 dark:bg-white/10 active:scale-95 transition-transform"
+                                                            style={{ WebkitTapHighlightColor: 'transparent' }}
+                                                        >
+                                                            <Star size={16} className={`dark:text-white/60 ${savedListings.has(listing.id) ? 'fill-yellow-500 stroke-yellow-500 text-yellow-500 dark:text-yellow-500' : 'text-black/60'}`} />
+                                                        </button>
                                                         <button
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
