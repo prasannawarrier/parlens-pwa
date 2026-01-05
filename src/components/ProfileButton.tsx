@@ -598,7 +598,7 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                                     )}
                                 </div>
                                 <p className="text-xs text-zinc-400 dark:text-white/30 text-left ml-2">
-                                    Hidden items are stored locally on your device.
+                                    🚫 Items you hide in the listed parking page can be managed here.
                                 </p>
                             </div>
 

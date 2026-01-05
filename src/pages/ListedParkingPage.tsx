@@ -969,7 +969,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                             style={{ WebkitTapHighlightColor: 'transparent' }}
                             title="Refresh"
                         >
-                            <RotateCcw size={20} className={statusLoading ? 'animate-spin' : ''} />
+                            <RotateCcw size={20} className={statusLoading ? 'animate-spin' : ''} style={statusLoading ? { animationDirection: 'reverse' } : undefined} />
                         </button>
                     </div>
                 </div>
@@ -1093,7 +1093,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                         setIsLoading(false);
                                     }, 500);
                                 }}
-                                className="p-2.5 bg-zinc-100 dark:bg-white/10 rounded-xl border border-black/5 dark:border-white/10 text-zinc-400 hover:text-zinc-600 dark:text-white/40 dark:hover:text-white transition-colors"
+                                className="p-2.5 bg-zinc-100 dark:bg-white/10 rounded-xl border border-black/5 dark:border-white/10 text-zinc-400 active:scale-95 transition-transform"
                                 style={{ WebkitTapHighlightColor: 'transparent' }}
                                 title="Search"
                             >
@@ -1210,9 +1210,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                         )}
                                                     </div>
 
-                                                    <p className="text-xs text-zinc-500 dark:text-white/40 flex items-center gap-1">
-                                                        <MapPin size={12} /> {listing.location || 'No location'}
-                                                    </p>
+
 
                                                     {/* Tags - moved below location */}
                                                     <div className="flex items-center gap-2 mt-1 flex-wrap">
