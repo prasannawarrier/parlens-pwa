@@ -1202,18 +1202,19 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                         </div>
 
                         {/* Status Legend */}
-                        <div className="flex items-center gap-4 text-[10px] font-bold uppercase tracking-wider text-zinc-500 justify-start px-4 py-2 overflow-x-auto">
+                        <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-zinc-500 px-4 py-2 overflow-x-auto">
+                            <div className="flex items-center gap-4">
+                                <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-green-500"></div>Open</div>
+                                <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-red-500"></div>Occupied</div>
+                                <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-zinc-400"></div>Closed</div>
+                            </div>
                             <button
                                 onClick={() => setShowSavedOnly(!showSavedOnly)}
                                 className={`flex items-center gap-1 px-2 py-1 rounded-full border transition-colors ${showSavedOnly ? 'bg-yellow-500/10 border-yellow-500/20 text-yellow-600 dark:text-yellow-400' : 'bg-transparent border-transparent hover:bg-black/5 dark:hover:bg-white/5'}`}
                             >
                                 <Star size={12} className={showSavedOnly ? 'fill-yellow-500 stroke-yellow-500' : ''} />
-                                {showSavedOnly ? 'Saved' : 'All'}
+                                {showSavedOnly ? 'Saved' : 'Saved'}
                             </button>
-                            <div className="h-4 w-px bg-black/10 dark:bg-white/10 mx-2"></div>
-                            <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-green-500"></div>Open</div>
-                            <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-red-500"></div>Occupied</div>
-                            <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-zinc-400"></div>Closed</div>
                         </div>
 
                         <div className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -1249,7 +1250,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                 <div className="flex flex-col items-start mb-3">
                                                     <div className="flex items-center justify-between w-full gap-2 mb-1">
                                                         <div className="min-w-0">
-                                                            <h3 className="font-bold text-zinc-900 dark:text-white text-base leading-tight truncate">{listing.listing_name}</h3>
+                                                            <h3 className="font-bold text-zinc-900 dark:text-white text-sm leading-tight truncate">{listing.listing_name}</h3>
                                                         </div>
                                                     </div>
 
@@ -1263,7 +1264,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                             className="p-2 rounded-full bg-black/5 dark:bg-white/10 active:scale-95 transition-transform"
                                                             style={{ WebkitTapHighlightColor: 'transparent' }}
                                                         >
-                                                            <Star size={16} className={`dark:text-white/60 ${savedListings.has(listing.id) ? 'fill-yellow-500 stroke-yellow-500 text-yellow-500 dark:text-yellow-500' : 'text-black/60'}`} />
+                                                            <Star size={16} className={`dark:text-white/60 ${savedListings.has(listing.id) ? 'stroke-yellow-500 text-yellow-500 dark:text-yellow-500' : 'text-black/60'}`} />
                                                         </button>
                                                         <button
                                                             onClick={(e) => {
