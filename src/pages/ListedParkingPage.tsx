@@ -275,6 +275,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
 
             if (dTagsToFetch.length === 0 && legacyListingATags.length === 0) {
                 setIsLoading(false);
+                setStatusLoading(false);
                 return;
             }
 
