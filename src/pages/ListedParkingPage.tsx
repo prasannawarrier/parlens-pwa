@@ -1163,7 +1163,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                         const displayStats = stats;
 
                                         return (
-                                            <div key={listing.id} className="group relative bg-white dark:bg-[#1c1c1e] rounded-2xl p-4 border border-black/5 dark:border-white/10 shadow-sm transition-all hover:shadow-md active:scale-[0.99] cursor-pointer" onClick={() => setSelectedListing(listing)}>
+                                            <div key={listing.id} className={`group relative bg-white dark:bg-[#1c1c1e] rounded-2xl p-4 border border-black/5 dark:border-white/10 shadow-sm transition-all hover:shadow-md active:scale-[0.99] cursor-pointer ${showHideMenu === listing.id ? 'z-50' : ''}`} onClick={() => setSelectedListing(listing)}>
                                                 <div className="flex flex-col items-start mb-3">
                                                     <div className="flex items-center justify-between w-full gap-2 mb-1">
                                                         <div className="min-w-0">
@@ -1203,8 +1203,17 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                                 </button>
                                                                 {showHideMenu === listing.id && (
                                                                     <>
+                                                                        <style>{`
+                                                                            @keyframes menuFadeIn {
+                                                                                from { opacity: 0; transform: scale(0.95); }
+                                                                                to { opacity: 1; transform: scale(1); }
+                                                                            }
+                                                                        `}</style>
                                                                         <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); setShowHideMenu(null); }} />
-                                                                        <div className="absolute right-0 top-8 bg-white dark:bg-zinc-800 border border-black/10 dark:border-white/20 rounded-xl shadow-xl z-50 overflow-hidden min-w-[200px]">
+                                                                        <div
+                                                                            className="absolute right-0 top-8 bg-white dark:bg-zinc-800 border border-black/10 dark:border-white/20 rounded-xl shadow-xl z-50 overflow-hidden min-w-[200px]"
+                                                                            style={{ animation: 'menuFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards', transformOrigin: 'top right' }}
+                                                                        >
                                                                             {listing.website && (
                                                                                 <a
                                                                                     href={listing.website.startsWith('http') ? listing.website : `https://${listing.website}`}
@@ -1226,7 +1235,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                                                     onClick={(e) => { e.stopPropagation(); hideOwner(listing.pubkey!, listing.listing_name + ' (owner)'); }}
                                                                                     className="w-full px-4 py-3 text-left text-sm text-zinc-700 dark:text-white hover:bg-zinc-100 dark:hover:bg-zinc-700 flex items-center gap-2 border-t border-black/5 dark:border-white/10"
                                                                                 >
-                                                                                    <Ban size={16} /> Hide all from this owner
+                                                                                    <Ban size={16} /> Hide all from owner
                                                                                 </button>
                                                                             )}
                                                                         </div>
