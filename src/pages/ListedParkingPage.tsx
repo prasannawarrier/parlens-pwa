@@ -155,6 +155,14 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
         setShowHideMenu(null);
     };
 
+    // Global click listener to close menu (replacing backdrop)
+    useEffect(() => {
+        if (!showHideMenu) return;
+        const handleClick = () => setShowHideMenu(null);
+        window.addEventListener('click', handleClick);
+        return () => window.removeEventListener('click', handleClick);
+    }, [showHideMenu]);
+
     const hideOwner = (pubkey: string, ownerName: string) => {
         if (hiddenItems.some(h => h.id === pubkey)) return; // Already hidden
         const next = [...hiddenItems, { id: pubkey, name: ownerName, type: 'owner' as const }];
@@ -250,30 +258,60 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             setListings(parsedListings);
 
             // 2. Fetch Spots for ALL listings to compute stats
-            // Batched fetch for all listing coordinate tags
-            const aTags = parsedListings.map(l => {
-                const tag = `${KINDS.LISTED_PARKING_METADATA}:${l.pubkey}:${l.d}`;
-                return tag;
+            // Batched fetch using predictive d-tags (aligns with detail view)
+            const dTagsToFetch: string[] = [];
+            const legacyListingATags: string[] = [];
+
+            parsedListings.forEach(l => {
+                if (l.total_spots && l.total_spots > 0) {
+                    for (let i = 1; i <= l.total_spots; i++) {
+                        dTagsToFetch.push(`${l.d}-spot-${i}`);
+                    }
+                } else {
+                    // Fallback for listings without total_spots (legacy)
+                    legacyListingATags.push(`${KINDS.LISTED_PARKING_METADATA}:${l.pubkey}:${l.d}`);
+                }
             });
 
-            if (aTags.length === 0) {
+            if (dTagsToFetch.length === 0 && legacyListingATags.length === 0) {
                 setIsLoading(false);
                 return;
             }
 
-            // Batch the 'a' tags query to avoid relay limits
-            const BATCH_SIZE = 50;
+            const BATCH_SIZE = 10;
             let allSpots: any[] = [];
 
-            for (let i = 0; i < aTags.length; i += BATCH_SIZE) {
-                const batch = aTags.slice(i, i + BATCH_SIZE);
+            // Batch Fetch d-tags
+            for (let i = 0; i < dTagsToFetch.length; i += BATCH_SIZE) {
+                const batch = dTagsToFetch.slice(i, i + BATCH_SIZE);
+                const batchSpots = await pool.querySync(DEFAULT_RELAYS, {
+                    kinds: [KINDS.PARKING_SPOT_LISTING],
+                    '#d': batch
+                });
+                allSpots = [...allSpots, ...batchSpots];
+            }
+
+            // Batch Fetch legacy a-tags
+            for (let i = 0; i < legacyListingATags.length; i += BATCH_SIZE) {
+                const batch = legacyListingATags.slice(i, i + BATCH_SIZE);
                 const batchSpots = await pool.querySync(DEFAULT_RELAYS, {
                     kinds: [KINDS.PARKING_SPOT_LISTING],
                     '#a': batch
                 });
                 allSpots = [...allSpots, ...batchSpots];
             }
-            console.log(`[Parlens] Fetched ${allSpots.length} spots for ${parsedListings.length} listings. aTags queried:`, aTags.length);
+
+            // Deduplicate
+            const uniqueSpotsMap = new Map();
+            allSpots.forEach(s => {
+                const d = s.tags.find((t: any) => t[0] === 'd')?.[1];
+                if (d && (!uniqueSpotsMap.has(d) || uniqueSpotsMap.get(d).created_at < s.created_at)) {
+                    uniqueSpotsMap.set(d, s);
+                }
+            });
+            allSpots = Array.from(uniqueSpotsMap.values());
+
+            console.log(`[Parlens] Fetched ${allSpots.length} spots for ${parsedListings.length} listings. Batched.`);
 
             // Fetch Statuses for ALL spots - Batched
             const spotATags = allSpots.map((s: any) =>
@@ -1209,10 +1247,10 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                                                 to { opacity: 1; transform: scale(1); }
                                                                             }
                                                                         `}</style>
-                                                                        <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); setShowHideMenu(null); }} />
                                                                         <div
                                                                             className="absolute right-0 top-8 bg-white dark:bg-zinc-800 border border-black/10 dark:border-white/20 rounded-xl shadow-xl z-50 overflow-hidden min-w-[200px]"
                                                                             style={{ animation: 'menuFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards', transformOrigin: 'top right' }}
+                                                                            onClick={(e) => e.stopPropagation()}
                                                                         >
                                                                             {listing.website && (
                                                                                 <a
