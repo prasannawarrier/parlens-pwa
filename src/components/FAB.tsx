@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Search, MapPin, ArrowRight, ChevronUp, ChevronDown } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { KINDS, DEFAULT_RELAYS } from '../lib/nostr';
-import { encodeGeohash, getGeohashNeighbors, geohashToBounds } from '../lib/geo';
+import { encodeGeohash, getGeohashNeighbors } from '../lib/geo';
 import { encryptParkingLog } from '../lib/encryption';
 import { getCurrencyFromLocation, getCurrencySymbol, getLocalCurrency } from '../lib/currency';
 import { generateSecretKey, finalizeEvent } from 'nostr-tools/pure';
@@ -133,35 +133,27 @@ export const FAB: React.FC<FABProps> = ({
                         price = priceTag ? parseFloat(priceTag[1]) : 0;
                         spotCurrency = currencyTag ? currencyTag[1] : 'USD';
                         spotType = typeTag ? typeTag[1] : 'car';
-                    } else if (event.kind === KINDS.LISTING_STATUS_LOG) {
-                        // Handle Listing Status Log (Kind 1147)
-                        // 1. Get location from 'g' tag (Geohash)
-                        const gTag = event.tags.find((t: string[]) => t[0] === 'g');
-                        if (!gTag) return;
-
-                        // Decode geohash to get center
-                        const bounds = geohashToBounds(gTag[1]);
-                        lat = (bounds.sw[0] + bounds.ne[0]) / 2;
-                        lon = (bounds.sw[1] + bounds.ne[1]) / 2;
-
-                        // 2. Parse content for stats and rates
-                        let contentData: any = {};
-                        try {
-                            contentData = JSON.parse(event.content);
-                        } catch { return; }
-
-                        // 3. Check availability for selected vehicle type
-                        // contentData structure: { car: { open, rate, ... }, ... }
-                        const typeStats = contentData[vehicleType];
-                        if (!typeStats || typeStats.open <= 0) return; // No open spots for this type
-
-                        // 4. Set details
-                        price = typeStats.rate || 0;
-                        spotCount = typeStats.open;
-                        spotCurrency = 'USD'; // Default or from content if added later
-                        spotType = vehicleType; // Match requested type
                     } else if (event.kind === KINDS.LISTED_SPOT_LOG) {
-                        return;
+                        // Handle Listed Spot Status Log (Kind 1714)
+                        // Only show spots with status 'open'
+                        const statusTag = event.tags.find((t: string[]) => t[0] === 'status');
+                        if (statusTag?.[1] !== 'open') return;
+
+                        // The location tag should already be extracted above
+                        // If no location tag, skip this event
+                        if (!locTag) return;
+
+                        // Extract type and rate from tags
+                        const typeTag = event.tags.find((t: string[]) => t[0] === 'type');
+                        const rateTag = event.tags.find((t: string[]) => t[0] === 'hourly_rate');
+                        const currencyTag = event.tags.find((t: string[]) => t[0] === 'currency');
+
+                        spotType = typeTag?.[1] || 'car';
+                        price = rateTag ? parseFloat(rateTag[1]) : 0;
+                        spotCurrency = currencyTag?.[1] || 'USD';
+
+                        // Filter by vehicle type if specified
+                        if (spotType !== vehicleType) return;
                     }
 
                     const spot = {
@@ -195,11 +187,11 @@ export const FAB: React.FC<FABProps> = ({
                         } as any
                     );
 
-                    // Fetch listed spot status logs (Kind 1147) - Regular, one or more per listing
-                    const listedEvents = await pool.querySync(
+                    // Fetch individual spot status logs (Kind 1714) - for listed parking spots
+                    const spotStatusEvents = await pool.querySync(
                         DEFAULT_RELAYS,
                         {
-                            kinds: [KINDS.LISTING_STATUS_LOG],
+                            kinds: [KINDS.LISTED_SPOT_LOG],
                             '#g': Array.from(sessionGeohashes),
                         } as any
                     );
@@ -209,9 +201,9 @@ export const FAB: React.FC<FABProps> = ({
                         processSpotEvent(event);
                     }
 
-                    // Process listed events - only keep latest per spot (a-tag)
+                    // Process spot status events - only keep latest per spot (a-tag)
                     const latestBySpot = new Map<string, any>();
-                    for (const event of listedEvents) {
+                    for (const event of spotStatusEvents) {
                         const aTag = event.tags.find((t: string[]) => t[0] === 'a')?.[1];
                         if (!aTag) continue;
                         const existing = latestBySpot.get(aTag);
@@ -238,7 +230,7 @@ export const FAB: React.FC<FABProps> = ({
                 DEFAULT_RELAYS,
                 [
                     {
-                        kinds: [KINDS.OPEN_SPOT_BROADCAST, KINDS.LISTING_STATUS_LOG],
+                        kinds: [KINDS.OPEN_SPOT_BROADCAST, KINDS.LISTED_SPOT_LOG],
                         '#g': Array.from(sessionGeohashes),
                         since: now  // Only NEW events from this point on
                     }

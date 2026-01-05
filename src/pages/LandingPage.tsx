@@ -319,7 +319,18 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             const { generateSecretKey, finalizeEvent, getPublicKey } = await import('nostr-tools/pure');
 
             // Try to parse as JSON auth data
-            let authData: { a: string; authorizer: string; auth: string; listingName?: string; spotNumber?: string; shortName?: string; listingLocation?: [number, number] };
+            let authData: {
+                a: string;
+                authorizer: string;
+                auth: string;
+                listingName?: string;
+                spotNumber?: string;
+                shortName?: string;
+                listingLocation?: [number, number];
+                spotType?: string;
+                hourlyRate?: number;
+                currency?: string;
+            };
             try {
                 authData = JSON.parse(code);
             } catch {
@@ -390,12 +401,22 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                     tags.push(['g', g]);
                 } catch { }
             }
+            // Add type, rate, and currency for map display
+            if (authData.spotType) tags.push(['type', authData.spotType]);
+            if (authData.hourlyRate !== undefined) {
+                tags.push(['hourly_rate', String(authData.hourlyRate)]);
+                tags.push(['currency', authData.currency || 'USD']);
+            }
 
             const statusEventTemplate = {
                 kind: KINDS.LISTED_SPOT_LOG,
                 created_at: Math.floor(Date.now() / 1000),
                 tags: tags as string[][],
-                content: ''
+                content: JSON.stringify({
+                    hourly_rate: authData.hourlyRate || 0,
+                    currency: authData.currency || 'USD',
+                    type: authData.spotType || 'car'
+                })
             };
 
             // Sign with temp key
@@ -433,7 +454,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             const signedLog = await signEvent(logEvent);
             await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedLog));
 
-            // Store session with all details
+            // Store session with all details (including rate info for session end)
             const sessionData = {
                 spotATag: authData.a,
                 dTag,
@@ -443,7 +464,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                 listingName: authData.listingName || '',
                 spotNumber: authData.spotNumber || '',
                 shortName: authData.shortName || '',
-                listingLocation: listingLocation || undefined
+                listingLocation: listingLocation || undefined,
+                spotType: authData.spotType || 'car',
+                hourlyRate: authData.hourlyRate || 0,
+                currency: authData.currency || 'USD'
             };
             localStorage.setItem(sessionKey, JSON.stringify(sessionData));
             setListedParkingSession(sessionData);
@@ -487,12 +511,23 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                     tags.push(['g', g]);
                 } catch { }
             }
+            // Add type, rate, and currency for map display (when spot becomes open)
+            const spotType = authData.spotType || session.spotType || 'car';
+            const hourlyRate = authData.hourlyRate ?? session.hourlyRate ?? 0;
+            const currency = authData.currency || session.currency || 'USD';
+            tags.push(['type', spotType]);
+            tags.push(['hourly_rate', String(hourlyRate)]);
+            tags.push(['currency', currency]);
 
             const statusEventTemplate = {
                 kind: KINDS.LISTED_SPOT_LOG,
                 created_at: Math.floor(Date.now() / 1000),
                 tags: tags as string[][],
-                content: ''
+                content: JSON.stringify({
+                    hourly_rate: hourlyRate,
+                    currency: currency,
+                    type: spotType
+                })
             };
 
             const signedStatus = finalizeEvent(statusEventTemplate, tempPrivkey);
@@ -1891,7 +1926,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                     {status === 'search' && (
                         <div className="bg-white dark:bg-zinc-800 shadow-lg rounded-full px-4 py-2 flex items-center gap-2 border border-black/5 dark:border-white/10 animate-in fade-in zoom-in slide-in-from-top-4 pointer-events-auto">
                             <div className="animate-spin w-4 h-4 border-2 border-blue-500/30 border-t-blue-500 rounded-full" />
-                            <span className="text-sm font-medium text-zinc-900 dark:text-white">Searching for spots...</span>
+                            <span className="text-sm font-medium text-zinc-900 dark:text-white whitespace-nowrap">Searching for spots...</span>
                         </div>
                     )}
                     {status === 'parked' && (
@@ -1927,7 +1962,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                     <div className="absolute top-4 right-4 z-[1000] animate-in fade-in zoom-in slide-in-from-left-4 duration-300 pointer-events-auto">
                         <button
                             onClick={() => setRouteModalOpen(true)}
-                            className="h-12 w-12 flex items-center justify-center rounded-[1.5rem] bg-white/80 dark:bg-zinc-800/80 backdrop-blur-md text-zinc-600 dark:text-white/70 active:scale-95 transition-all shadow-lg border border-black/5 dark:border-white/10 hover:text-blue-500 dark:hover:text-blue-400"
+                            className="h-12 w-12 flex items-center justify-center rounded-[1.5rem] bg-white/80 dark:bg-zinc-800/80 backdrop-blur-md text-zinc-600 dark:text-white/70 active:scale-95 transition-all shadow-lg border border-black/5 dark:border-white/10"
                             title="Create Route"
                         >
                             <Route size={20} />

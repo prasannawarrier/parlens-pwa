@@ -1459,6 +1459,10 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                                             }
                                                                         }
 
+                                                                        // Get rate for this spot type
+                                                                        const spotRate = listing.rates?.[type]?.hourly || currentStats?.[type]?.rate || 0;
+                                                                        const spotCurrency = listing.rates?.[type]?.currency || 'USD';
+
                                                                         const statusEvent = {
                                                                             kind: KINDS.LISTED_SPOT_LOG,
                                                                             created_at: Math.floor(Date.now() / 1000),
@@ -1466,9 +1470,17 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                                                 ['a', spotATag],
                                                                                 ['status', newStatus],
                                                                                 ['updated_by', pubkey],
+                                                                                ['g', listing.g],
+                                                                                ['location', listing.location],
+                                                                                ['type', type],
+                                                                                ['hourly_rate', String(spotRate)],
+                                                                                ['currency', spotCurrency],
                                                                                 ['client', 'parlens']
                                                                             ],
-                                                                            content: ''
+                                                                            content: JSON.stringify({
+                                                                                hourly_rate: spotRate,
+                                                                                currency: spotCurrency
+                                                                            })
                                                                         };
                                                                         const signed = await signEvent(statusEvent);
                                                                         return pool.publish(DEFAULT_RELAYS, signed);
@@ -2028,13 +2040,23 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
 
 const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isManager, listingStats, setListingStats, setSpotStatuses, onSpotUpdate, ...props }) => {
     const { pubkey, signEvent, pool } = useAuth();
-    // QR contains a-tag, authorizer (owner/manager pubkey), and auth token
+    // QR contains a-tag, authorizer (owner/manager pubkey), auth token, and metadata for Kind 1714 publishing
     const spotATag = `${KINDS.PARKING_SPOT_LISTING}:${spot.pubkey}:${spot.d}`;
     // For static QR, auth token is fixed; for dynamic, it would regenerate
+    // Include spot metadata for search discovery when user scans QR
+    const listingLocation = listing.location ? listing.location.split(',').map((n: string) => parseFloat(n.trim())) : undefined;
     const qrAuthData = JSON.stringify({
         a: spotATag,
         authorizer: listing.owners?.[0] || pubkey,
-        auth: `static - ${spot.d}` // Static token based on spot d-tag
+        auth: `static - ${spot.d}`, // Static token based on spot d-tag
+        // Metadata for Kind 1714 tags
+        listingName: listing.listing_name,
+        spotNumber: spot.spot_number,
+        shortName: spot.short_name,
+        listingLocation: listingLocation,
+        spotType: spot.type || 'car',
+        hourlyRate: spot.rates?.hourly || listing.rates?.[spot.type]?.hourly || 0,
+        currency: spot.rates?.currency || listing.rates?.[spot.type]?.currency || 'USD'
     });
     const [copied, setCopied] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
@@ -2117,6 +2139,9 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
             if (listing.g) tags.push(['g', listing.g]);
             // Add type tag for filtering
             if (spot.type) tags.push(['type', spot.type]);
+            // Add rate tags for map display
+            tags.push(['hourly_rate', String(spot.rates?.hourly || 0)]);
+            tags.push(['currency', spot.rates?.currency || 'USD']);
             // Add relay tags for discoverability
             DEFAULT_RELAYS.forEach(relay => tags.push(['r', relay]));
 
