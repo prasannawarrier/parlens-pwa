@@ -85,33 +85,7 @@ interface ListedParkingPageProps {
 
 type TabType = 'public' | 'private' | 'my';
 
-const calculateGroundUpStats = (spots: any[], statusMap: Map<string, string>, stats: any) => {
-    let defaultsCount = 0;
-    for (const spot of spots) {
-        const d = spot.tags.find((t: string[]) => t[0] === 'd')?.[1];
-        let type = spot.tags.find((t: string[]) => t[0] === 'type')?.[1]?.toLowerCase() as 'car' | 'motorcycle' | 'bicycle' || 'car';
 
-        // Normalize type just in case
-        if (!['car', 'motorcycle', 'bicycle'].includes(type)) type = 'car';
-
-        const spotTag = `${KINDS.PARKING_SPOT_LISTING}:${spot.pubkey}:${d}`;
-        const status = statusMap.get(spotTag);
-
-        if (!status) defaultsCount++;
-
-        const finalStatus = status || 'open';
-
-        if (stats[type]) {
-            stats[type].total++;
-            if (finalStatus === 'occupied') stats[type].occupied++;
-            else if (finalStatus === 'closed') stats[type].closed++;
-            else stats[type].open++;
-        }
-    }
-    if (defaultsCount > 0) {
-        console.log(`[Parlens] ${defaultsCount}/${spots.length} spots defaulted to 'open' (no status log found)`);
-    }
-};
 
 export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, currentLocation, countryCode, onPickLocation, pickedLocation }) => {
     const { pubkey, pool, signEvent } = useAuth();
@@ -202,7 +176,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
 
         if (!silent) {
             setIsLoading(true);
-            setStatusLoading(true);
+            setStatusLoading(true); // Keep spinner on for initial load
         }
 
         try {
@@ -217,18 +191,13 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             rawEvents.forEach((ev: any) => {
                 const d = ev.tags.find((t: string[]) => t[0] === 'd')?.[1];
                 if (!d) return;
-
-                // Filter out test events
-                if (ev.content === 'Parlens Relay Check' || d.startsWith('test-relay-check-')) return;
-
                 const key = `${ev.pubkey}:${d}`;
                 if (!uniqueEventsMap.has(key) || uniqueEventsMap.get(key).created_at < ev.created_at) {
                     uniqueEventsMap.set(key, ev);
                 }
             });
-            const events = Array.from(uniqueEventsMap.values());
 
-            const parsedListings: ListedParkingMetadata[] = events.map((event: any) => {
+            const parsedListings: ListedParkingMetadata[] = Array.from(uniqueEventsMap.values()).map((event: any) => {
                 const getTagValue = (name: string) => event.tags.find((t: string[]) => t[0] === name)?.[1] || '';
                 const getTagValues = (name: string) => event.tags.filter((t: string[]) => t[0] === name).map((t: string[]) => t[1]);
 
@@ -254,8 +223,8 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                     g: getTagValue('g'),
                     floors: getTagValue('floors'),
                     floor_plan: floorPlan,
+                    total_spots: parseInt(getTagValue('total_spots') || '0'),
                     rates,
-                    total_spots: parseInt(getTagValue('total_spots')) || undefined,
                     listing_type: (getTagValue('listing_type') as 'public' | 'private') || 'public',
                     qr_type: (getTagValue('qr_type') as 'static' | 'dynamic') || 'static',
                     status: (getTagValue('status') as 'open' | 'closed') || 'open',
@@ -266,11 +235,11 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                     local_area: getTagValue('local_area'),
                     city: getTagValue('city'),
                     zipcode: getTagValue('zipcode'),
-                    website: getTagValue('r') || event.content, // Fallback to content for compatibility or if used there
+                    website: getTagValue('r') || event.content,
                     created_at: event.created_at,
                     originalEvent: event
                 };
-            });
+            }).sort((a: any, b: any) => b.created_at - a.created_at);
 
             setListings(parsedListings);
 
@@ -292,111 +261,60 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             });
             console.log(`[Parlens] Fetched ${allSpots.length} spots for ${parsedListings.length} listings. aTags queried:`, aTags.length);
 
-            // 3. Fetch Statuses for ALL spots & Snapshots for Listings
-            // Use flatMap to query both 'clean' and 'legacy spaced' tags to catch all history
-            const spotATags = allSpots.flatMap((s: any) => {
-                const d = s.tags.find((t: string[]) => t[0] === 'd')?.[1];
-                const clean = `${KINDS.PARKING_SPOT_LISTING}:${s.pubkey}:${d}`;
-                return [clean, clean + ' '];
+            // Fetch Statuses for ALL spots
+            const spotEvents = await pool.querySync(DEFAULT_RELAYS, {
+                kinds: [KINDS.LISTED_SPOT_LOG],
+                '#a': allSpots.map((s: any) => `${KINDS.PARKING_SPOT_LISTING}:${s.pubkey}:${s.tags.find((t: any) => t[0] === 'd')?.[1]}`)
             });
 
-            // Fetch spot status logs (Kind 1714) for ground-up calculation
-            let allStatuses: any[] = [];
-
-            if (spotATags.length > 0) {
-                // Fetch Spot Status Logs (Kind 1714) - Batch to avoid relay limits
-                console.log('[Parlens] Fetching Kind 1714 logs for', spotATags.length, 'spot a-tags (batched)');
-
-                const chunkSize = 10;
-                const chunks = [];
-                for (let i = 0; i < spotATags.length; i += chunkSize) {
-                    chunks.push(spotATags.slice(i, i + chunkSize));
-                }
-
-                try {
-                    const chunkResults = await Promise.all(
-                        chunks.map(chunk => pool.querySync(DEFAULT_RELAYS, { kinds: [KINDS.LISTED_SPOT_LOG], '#a': chunk }))
-                    );
-                    allStatuses = chunkResults.flat();
-                    console.log('[Parlens] Fetched', allStatuses.length, 'Kind 1714 status log events (total from batches)');
-                } catch (e) {
-                    console.error('[Parlens] Error fetching batched status logs:', e);
-                }
-            }
-
-            // Map most recent status per spot
-            // FIX ISSUE #2: Populate global spotStatuses state immediately so List View has baseline data
-            const statusMap = new Map<string, string>(); // spot_a_tag -> status
-            const initialSpotStatuses = new Map<string, SpotStatus>();
-
-            // Sort by created_at desc to get latest
-            allStatuses.sort((a, b) => b.created_at - a.created_at);
-
-            allStatuses.forEach((ev: any) => {
-                const a = ev.tags.find((t: string[]) => t[0] === 'a')?.[1];
-                if (a && !statusMap.has(a)) {
-                    const s = ev.tags.find((t: string[]) => t[0] === 'status')?.[1] || 'open';
-                    statusMap.set(a, s);
-
-                    const dTag = a.split(':').pop(); // extract d-tag from a-tag
-                    const spot = allSpots.find((sp: any) => sp.tags.find((t: string[]) => t[0] === 'd')?.[1] === dTag);
-
-                    if (dTag && spot) {
-                        initialSpotStatuses.set(dTag, {
-                            id: ev.id,
-                            pubkey: ev.pubkey,
-                            a: a,
-                            status: s as 'occupied' | 'open' | 'closed',
-                            updated_by: ev.tags.find((t: string[]) => t[0] === 'updated_by')?.[1] || '',
-                            authorizer: ev.tags.find((t: string[]) => t[0] === 'authorizer')?.[1] || '',
-                            created_at: ev.created_at
-                        });
-                    }
-                }
-            });
-
-            // Log status distribution
-            const statusCounts = { open: 0, occupied: 0, closed: 0 };
-            initialSpotStatuses.forEach((s) => {
-                if (s.status === 'open') statusCounts.open++;
-                else if (s.status === 'occupied') statusCounts.occupied++;
-                else if (s.status === 'closed') statusCounts.closed++;
-            });
-            console.log('[Parlens] Extracted statuses from Kind 1714 logs:', statusCounts, 'for', initialSpotStatuses.size, 'spots');
-
-            // Set the global spot statuses immediately!
-            setSpotStatuses(initialSpotStatuses);
-
-            // Compute Stats (Prefer Snapshot -> Fallback to Ground-Up Calculation)
+            // Map stats
             const newStats = new Map();
-            const newSpotMapping = new Map<string, { listingId: string; type: 'car' | 'motorcycle' | 'bicycle' }>();
+            const newSpotMapping = new Map();
 
-            for (const listing of parsedListings) {
+            // Create map of latest status per spot
+            const latestStatusMap = new Map();
+            spotEvents.forEach((e: any) => {
+                const a = e.tags.find((t: any) => t[0] === 'a')?.[1];
+                if (!latestStatusMap.has(a) || latestStatusMap.get(a).created_at < e.created_at) {
+                    latestStatusMap.set(a, e);
+                }
+            });
+
+            // Aggregate
+            parsedListings.forEach((listing: ListedParkingMetadata) => {
                 const listingATag = `${KINDS.LISTED_PARKING_METADATA}:${listing.pubkey}:${listing.d}`;
-                const lSpots = allSpots.filter((s: any) => s.tags.find((t: string[]) => t[0] === 'a')?.[1] === listingATag);
 
-                // Initialize empty stats
+                const listingSpots = allSpots.filter((s: any) => {
+                    const a = s.tags.find((t: any) => t[0] === 'a')?.[1];
+                    return a === listingATag;
+                });
+
                 const stats = {
                     car: { open: 0, occupied: 0, closed: 0, total: 0, rate: listing.rates?.car?.hourly || 0 },
                     motorcycle: { open: 0, occupied: 0, closed: 0, total: 0, rate: listing.rates?.motorcycle?.hourly || 0 },
                     bicycle: { open: 0, occupied: 0, closed: 0, total: 0, rate: listing.rates?.bicycle?.hourly || 0 }
                 };
 
-                // Store mapping for global sync
-                for (const spot of lSpots) {
-                    const d = spot.tags.find((t: string[]) => t[0] === 'd')?.[1];
-                    const type = spot.tags.find((t: string[]) => t[0] === 'type')?.[1] as 'car' | 'motorcycle' | 'bicycle' || 'car';
-                    if (d) newSpotMapping.set(d, { listingId: listing.id, type });
-                }
+                listingSpots.forEach((spot: any) => {
+                    const d = spot.tags.find((t: any) => t[0] === 'd')?.[1];
+                    const type = (spot.tags.find((t: any) => t[0] === 'type')?.[1] as 'car' | 'motorcycle' | 'bicycle') || 'car';
+                    const spotATag = `${KINDS.PARKING_SPOT_LISTING}:${spot.pubkey}:${d}`;
 
-                // Always use Ground-Up Calculation from Kind 1714 logs (spotStatuses)
-                // This ensures list view and multi-spot view use the same data source
-                console.log('[Parlens] Calculating ground-up stats for:', listing.listing_name, 'with', lSpots.length, 'spots');
-                calculateGroundUpStats(lSpots, statusMap, stats);
-                console.log('[Parlens] Ground-up stats for', listing.listing_name, ':', stats.car.total, 'spots,', stats.car.open, 'open,', stats.car.occupied, 'occupied,', stats.car.closed, 'closed');
+                    if (d) newSpotMapping.set(d, { listingId: listing.d, type });
+
+                    const statusEvent = latestStatusMap.get(spotATag);
+                    const status = statusEvent?.tags.find((t: any) => t[0] === 'status')?.[1] || 'open';
+
+                    if (stats[type]) {
+                        stats[type].total++;
+                        if (status === 'occupied') stats[type].occupied++;
+                        else if (status === 'closed') stats[type].closed++;
+                        else stats[type].open++;
+                    }
+                });
                 newStats.set(listing.d, stats);
-            }
-            console.log('[Parlens] Setting listingStats with', newStats.size, 'listings');
+            });
+
             setListingStats(newStats);
             setSpotToListingMap(newSpotMapping);
 
@@ -404,7 +322,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             console.error('Error fetching listings:', error);
         } finally {
             setIsLoading(false);
-            setStatusLoading(false); // Also stop status loading after fetch completes
+            // setStatusLoading(false); // REMOVE to allow spots to finish loading visually
         }
     }, [pool]);
 
@@ -1030,17 +948,28 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                         )}
                         <button
                             onClick={async () => {
+                                if (statusLoading) return; // Debounce
                                 console.log('[Parlens] Refreshing data and connections...');
                                 setStatusLoading(true);
-                                // Triggering these queries will implicitly wake up/reconnect sockets by demanding fresh data from relays
-                                await fetchListings();
-                                if (selectedListing) await fetchSpots(selectedListing);
+
+                                // Yield to UI to paint spinner
+                                setTimeout(async () => {
+                                    // Parallelize fetches:
+                                    // 1. fetchListings(true) -> Silent mode, updates list/metadata but doesn't touch loading states
+                                    // 2. fetchSpots -> Updates detail view spots
+                                    const promises = [fetchListings(true)];
+                                    if (selectedListing) {
+                                        promises.push(fetchSpots(selectedListing));
+                                    }
+
+                                    await Promise.all(promises);
+                                }, 50);
                             }}
-                            className="p-2 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-full shadow-lg shadow-blue-500/20 active:scale-95 transition-transform"
+                            className={`p-2 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-full shadow-lg shadow-blue-500/20 active:scale-95 transition-transform ${statusLoading ? 'opacity-70 cursor-not-allowed' : ''}`}
                             style={{ WebkitTapHighlightColor: 'transparent' }}
                             title="Refresh"
                         >
-                            <RotateCcw size={20} />
+                            <RotateCcw size={20} className={statusLoading ? 'animate-spin' : ''} />
                         </button>
                     </div>
                 </div>
@@ -1063,8 +992,8 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                             >
                                 <option value="all">All Types</option>
                                 <option value="car">🚗 Car</option>
-                                <option value="motorcycle">🏍️ Moto</option>
-                                <option value="bicycle">🚲 Bike</option>
+                                <option value="motorcycle">🏍️ Motorcycle</option>
+                                <option value="bicycle">🚲 Bicycle</option>
                             </select>
 
                             {/* Floor Filter */}
@@ -1156,8 +1085,15 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                 />
                             </div>
                             <button
-                                onClick={() => setConfirmedSearchTerm(searchTerm)}
-                                className="p-2.5 text-zinc-400 hover:text-zinc-600 dark:text-white/40 dark:hover:text-white transition-colors"
+                                onClick={() => {
+                                    setIsLoading(true);
+                                    // Simulated delay for search feedback
+                                    setTimeout(() => {
+                                        setConfirmedSearchTerm(searchTerm);
+                                        setIsLoading(false);
+                                    }, 500);
+                                }}
+                                className="p-2.5 bg-zinc-100 dark:bg-white/10 rounded-xl border border-black/5 dark:border-white/10 text-zinc-400 hover:text-zinc-600 dark:text-white/40 dark:hover:text-white transition-colors"
                                 style={{ WebkitTapHighlightColor: 'transparent' }}
                                 title="Search"
                             >
