@@ -4,7 +4,7 @@
  * Refined based on user feedback (Style, Form, Features)
  */
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { MapPin, Plus, Trash2, X, Check, Copy, Pencil, ChevronRight, LocateFixed, Users, ArrowLeft, Search, RotateCcw, EyeOff, Ban, MoreVertical } from 'lucide-react';
+import { MapPin, Plus, Trash2, X, Check, Copy, Pencil, ChevronRight, LocateFixed, Users, ArrowLeft, Search, RotateCw, EyeOff, Ban, MoreVertical } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { KINDS, DEFAULT_RELAYS } from '../lib/nostr';
 import { encodeGeohash, calculateDistance } from '../lib/geo';
@@ -402,7 +402,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             console.error('Error fetching listings:', error);
         } finally {
             setIsLoading(false);
-            // setStatusLoading(false); // REMOVE to allow spots to finish loading visually
+            setStatusLoading(false);
         }
     }, [pool]);
 
@@ -1049,7 +1049,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                             style={{ WebkitTapHighlightColor: 'transparent' }}
                             title="Refresh"
                         >
-                            <RotateCcw size={20} className={statusLoading ? 'animate-spin' : ''} style={statusLoading ? { animationDirection: 'reverse' } : undefined} />
+                            <RotateCw size={20} className={statusLoading ? 'animate-spin' : ''} />
                         </button>
                     </div>
                 </div>
