@@ -191,6 +191,10 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             rawEvents.forEach((ev: any) => {
                 const d = ev.tags.find((t: string[]) => t[0] === 'd')?.[1];
                 if (!d) return;
+
+                // Basic filter: Content should not be 'Deleted'
+                if (ev.content === 'Deleted') return;
+
                 const key = `${ev.pubkey}:${d}`;
                 if (!uniqueEventsMap.has(key) || uniqueEventsMap.get(key).created_at < ev.created_at) {
                     uniqueEventsMap.set(key, ev);
@@ -239,7 +243,9 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                     created_at: event.created_at,
                     originalEvent: event
                 };
-            }).sort((a: any, b: any) => b.created_at - a.created_at);
+            })
+                .filter(l => l.listing_name !== 'Unnamed' && l.listing_name.trim() !== '')
+                .sort((a: any, b: any) => b.created_at - a.created_at);
 
             setListings(parsedListings);
 
@@ -255,17 +261,37 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                 return;
             }
 
-            const allSpots = await pool.querySync(DEFAULT_RELAYS, {
-                kinds: [KINDS.PARKING_SPOT_LISTING],
-                '#a': aTags
-            });
+            // Batch the 'a' tags query to avoid relay limits
+            const BATCH_SIZE = 50;
+            let allSpots: any[] = [];
+
+            for (let i = 0; i < aTags.length; i += BATCH_SIZE) {
+                const batch = aTags.slice(i, i + BATCH_SIZE);
+                const batchSpots = await pool.querySync(DEFAULT_RELAYS, {
+                    kinds: [KINDS.PARKING_SPOT_LISTING],
+                    '#a': batch
+                });
+                allSpots = [...allSpots, ...batchSpots];
+            }
             console.log(`[Parlens] Fetched ${allSpots.length} spots for ${parsedListings.length} listings. aTags queried:`, aTags.length);
 
-            // Fetch Statuses for ALL spots
-            const spotEvents = await pool.querySync(DEFAULT_RELAYS, {
-                kinds: [KINDS.LISTED_SPOT_LOG],
-                '#a': allSpots.map((s: any) => `${KINDS.PARKING_SPOT_LISTING}:${s.pubkey}:${s.tags.find((t: any) => t[0] === 'd')?.[1]}`)
-            });
+            // Fetch Statuses for ALL spots - Batched
+            const spotATags = allSpots.map((s: any) =>
+                `${KINDS.PARKING_SPOT_LISTING}:${s.pubkey}:${s.tags.find((t: any) => t[0] === 'd')?.[1]}`
+            );
+
+            let spotEvents: any[] = [];
+
+            if (spotATags.length > 0) {
+                for (let i = 0; i < spotATags.length; i += BATCH_SIZE) {
+                    const batch = spotATags.slice(i, i + BATCH_SIZE);
+                    const batchStatuses = await pool.querySync(DEFAULT_RELAYS, {
+                        kinds: [KINDS.LISTED_SPOT_LOG],
+                        '#a': batch
+                    });
+                    spotEvents = [...spotEvents, ...batchStatuses];
+                }
+            }
 
             // Map stats
             const newStats = new Map();
