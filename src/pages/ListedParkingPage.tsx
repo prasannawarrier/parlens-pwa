@@ -348,10 +348,25 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             parsedListings.forEach((listing: ListedParkingMetadata) => {
                 const listingATag = `${KINDS.LISTED_PARKING_METADATA}:${listing.pubkey}:${listing.d}`;
 
-                const listingSpots = allSpots.filter((s: any) => {
-                    const a = s.tags.find((t: any) => t[0] === 'a')?.[1];
-                    return a === listingATag;
-                });
+                let listingSpots: any[] = [];
+                if (listing.total_spots && listing.total_spots > 0) {
+                    // Match via deterministic d-tags
+                    const expectedDTags = new Set<string>();
+                    for (let i = 1; i <= listing.total_spots; i++) {
+                        expectedDTags.add(`${listing.d}-spot-${i}`);
+                    }
+
+                    listingSpots = allSpots.filter((s: any) => {
+                        const d = s.tags.find((t: any) => t[0] === 'd')?.[1];
+                        return d && expectedDTags.has(d);
+                    });
+                } else {
+                    // Fallback check via 'a' tag
+                    listingSpots = allSpots.filter((s: any) => {
+                        const a = s.tags.find((t: any) => t[0] === 'a')?.[1];
+                        return a === listingATag;
+                    });
+                }
 
                 const stats = {
                     car: { open: 0, occupied: 0, closed: 0, total: 0, rate: listing.rates?.car?.hourly || 0 },
