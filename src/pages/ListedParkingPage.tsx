@@ -34,7 +34,7 @@ export interface ListedParkingMetadata {
     local_area?: string;
     city?: string;
     zipcode?: string;
-    description?: string;
+    website?: string;
     created_at?: number;
     originalEvent?: any;
 }
@@ -266,7 +266,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                     local_area: getTagValue('local_area'),
                     city: getTagValue('city'),
                     zipcode: getTagValue('zipcode'),
-                    description: event.content,
+                    website: getTagValue('r') || event.content, // Fallback to content for compatibility or if used there
                     created_at: event.created_at,
                     originalEvent: event
                 };
@@ -408,92 +408,71 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
         }
     }, [pool]);
 
-    // Fetch spots for detailed view (keep existing logic but update state)
+    // Fetch spots for detailed view with Batching and Progressive Loading
     const fetchSpots = useCallback(async (listing: ListedParkingMetadata) => {
         if (!pool) return;
 
+        // Clear existing spots explicitly on fresh fetch to avoid duplicates or stale data
+        setSpots([]);
+        setStatusLoading(true);
+
         try {
-            const aTag = `${KINDS.LISTED_PARKING_METADATA}:${listing.pubkey}:${listing.d}`;
-            const events = await pool.querySync(DEFAULT_RELAYS, {
-                kinds: [KINDS.PARKING_SPOT_LISTING],
-                '#a': [aTag],
-            });
+            const totalSpots = listing.total_spots || 0;
+            const batchSize = 10;
 
-            const parsedSpots: ParkingSpotListing[] = events.map((event: any) => {
-                const getTagValue = (name: string) => event.tags.find((t: string[]) => t[0] === name)?.[1] || '';
-                return {
-                    id: event.id,
-                    pubkey: event.pubkey,
-                    d: getTagValue('d'),
-                    a: getTagValue('a'),
-                    spot_number: getTagValue('spot_number'),
-                    floor: getTagValue('floor'),
-                    short_name: getTagValue('short_name'),
-                    type: (getTagValue('type') as 'bicycle' | 'motorcycle' | 'car') || 'car',
-                    location: getTagValue('location'),
-                    g: getTagValue('g'),
-                    content: event.content,
-                    rates: listing.rates?.[getTagValue('type') || 'car']
-                };
-            });
-
-            parsedSpots.sort((a, b) => parseInt(a.spot_number) - parseInt(b.spot_number));
-            setSpots(parsedSpots);
-
-            // Verify spot count matches expected total
-            if (listing.total_spots && parsedSpots.length !== listing.total_spots) {
-                console.warn(`[Parlens] Spot count mismatch for "${listing.listing_name}": expected ${listing.total_spots}, fetched ${parsedSpots.length}`);
-            } else if (listing.total_spots) {
-                console.log(`[Parlens] All spots verified for "${listing.listing_name}": ${parsedSpots.length}/${listing.total_spots}`);
+            // Generate expected d-tags based on sequential numbering
+            // Priority: Lowest numbers first
+            const allDTags: string[] = [];
+            if (totalSpots > 0) {
+                for (let i = 1; i <= totalSpots; i++) {
+                    allDTags.push(`${listing.d}-spot-${i}`);
+                }
+            } else {
+                // Fallback: If no total_spots, trying to fetch via 'a' tag (legacy/backup)
+                // But for "large listings" optimization, we prefer the d-tag batching.
+                // We'll do one 'a' tag fetch if total_spots is missing.
+                const aTag = `${KINDS.LISTED_PARKING_METADATA}:${listing.pubkey}:${listing.d}`;
+                const events = await pool.querySync(DEFAULT_RELAYS, {
+                    kinds: [KINDS.PARKING_SPOT_LISTING],
+                    '#a': [aTag],
+                });
+                // ... (Parsing logic from before would go here, but let's standardize on this flow)
+                // For now, if total_spots is 0, we might assume 0 spots or unknown.
+                // Let's assume the user has migrated to the new counter system.
+                console.warn('[Parlens] No total_spots found for batching. Falling back to single fetch.');
+                const parsed = parseSpotsFromEvents(events, listing);
+                setSpots(parsed);
+                fetchStatusesForSpots(parsed);
+                setStatusLoading(false);
+                return;
             }
 
-            // Fetch statuses for these specific spots
-            // Query both clean and legacy spaced tags
-            const spotATags = parsedSpots.flatMap(s => {
-                const clean = `${KINDS.PARKING_SPOT_LISTING}:${s.pubkey}:${s.d}`;
-                return [clean, clean + ' '];
-            });
-            const statusEvents = await pool.querySync(DEFAULT_RELAYS, {
-                kinds: [KINDS.LISTED_SPOT_LOG],
-                '#a': spotATags,
-            }); // Note: should fetch latest per a-tag ideally, but client-side filter works for small sets
+            // Batched Fetching
+            for (let i = 0; i < allDTags.length; i += batchSize) {
+                const batch = allDTags.slice(i, i + batchSize);
+                // console.log(`[Parlens] Fetching batch ${i / batchSize + 1}:`, batch);
 
-            // Group by 'a' tag to find latest
-            const latestStatus = new Map<string, any>();
-            statusEvents.forEach((ev: any) => {
-                const a = ev.tags.find((t: string[]) => t[0] === 'a')?.[1];
-                if (!latestStatus.has(a) || latestStatus.get(a).created_at < ev.created_at) {
-                    latestStatus.set(a, ev);
-                }
-            });
-
-            const newStatuses = new Map();
-            latestStatus.forEach((event, a) => {
-                const spot = parsedSpots.find(s => `${KINDS.PARKING_SPOT_LISTING}:${s.pubkey}:${s.d}` === a);
-                if (spot) {
-                    const getTagValue = (name: string) => event.tags.find((t: string[]) => t[0] === name)?.[1] || '';
-                    newStatuses.set(spot.d, {
-                        id: event.id,
-                        pubkey: event.pubkey,
-                        a: getTagValue('a'),
-                        status: (getTagValue('status') as 'occupied' | 'open' | 'closed') || 'open',
-                        updated_by: getTagValue('updated_by'),
-                        authorizer: getTagValue('authorizer'),
-                        created_at: event.created_at
-                    });
-                }
-            });
-            setSpotStatuses((prev) => {
-                const merged = new Map(prev);
-                newStatuses.forEach((status, dTag) => {
-                    const existing = merged.get(dTag);
-                    // Only update if NEWER
-                    if (!existing || existing.created_at < status.created_at) {
-                        merged.set(dTag, status);
-                    }
+                const events = await pool.querySync(DEFAULT_RELAYS, {
+                    kinds: [KINDS.PARKING_SPOT_LISTING],
+                    '#d': batch
                 });
-                return merged;
-            });
+
+                if (events.length > 0) {
+                    const parsedBatch = parseSpotsFromEvents(events, listing);
+                    // Append to state immediately (Progressive Loading)
+                    setSpots(prev => {
+                        const next = [...prev, ...parsedBatch];
+                        // Deduplicate just in case
+                        const unique = new Map(next.map(s => [s.d, s]));
+                        return Array.from(unique.values()).sort((a, b) => parseInt(a.spot_number) - parseInt(b.spot_number));
+                    });
+
+                    // Fetch statuses for this batch immediately
+                    await fetchStatusesForSpots(parsedBatch);
+                }
+            }
+
+            console.log(`[Parlens] All batches complete for ${listing.listing_name}`);
 
         } catch (error) {
             console.error('Error fetching spots:', error);
@@ -501,6 +480,78 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             setStatusLoading(false);
         }
     }, [pool]);
+
+    // Helper to parse spot events
+    const parseSpotsFromEvents = (events: any[], listing: ListedParkingMetadata): ParkingSpotListing[] => {
+        return events.map((event: any) => {
+            const getTagValue = (name: string) => event.tags.find((t: string[]) => t[0] === name)?.[1] || '';
+            return {
+                id: event.id,
+                pubkey: event.pubkey,
+                d: getTagValue('d'),
+                a: getTagValue('a'),
+                spot_number: getTagValue('spot_number'),
+                floor: getTagValue('floor'),
+                short_name: getTagValue('short_name'),
+                type: (getTagValue('type') as 'bicycle' | 'motorcycle' | 'car') || 'car',
+                location: getTagValue('location'),
+                g: getTagValue('g'),
+                content: event.content,
+                rates: listing.rates?.[getTagValue('type') || 'car']
+            };
+        });
+    };
+
+    // Helper to fetch statuses for specific spots
+    const fetchStatusesForSpots = async (spots: ParkingSpotListing[]) => {
+        if (!pool || spots.length === 0) return;
+
+        const spotATags = spots.flatMap(s => {
+            const clean = `${KINDS.PARKING_SPOT_LISTING}:${s.pubkey}:${s.d}`;
+            return [clean, clean + ' '];
+        });
+
+        const statusEvents = await pool.querySync(DEFAULT_RELAYS, {
+            kinds: [KINDS.LISTED_SPOT_LOG],
+            '#a': spotATags,
+        });
+
+        const latestStatus = new Map<string, any>();
+        statusEvents.forEach((ev: any) => {
+            const a = ev.tags.find((t: string[]) => t[0] === 'a')?.[1];
+            if (!latestStatus.has(a) || latestStatus.get(a).created_at < ev.created_at) {
+                latestStatus.set(a, ev);
+            }
+        });
+
+        const newStatuses = new Map();
+        latestStatus.forEach((event, a) => {
+            const spot = spots.find(s => `${KINDS.PARKING_SPOT_LISTING}:${s.pubkey}:${s.d}` === a);
+            if (spot) {
+                const getTagValue = (name: string) => event.tags.find((t: string[]) => t[0] === name)?.[1] || '';
+                newStatuses.set(spot.d, {
+                    id: event.id,
+                    pubkey: event.pubkey,
+                    a: getTagValue('a'),
+                    status: (getTagValue('status') as 'occupied' | 'open' | 'closed') || 'open',
+                    updated_by: getTagValue('updated_by'),
+                    authorizer: getTagValue('authorizer'),
+                    created_at: event.created_at
+                });
+            }
+        });
+
+        setSpotStatuses((prev) => {
+            const merged = new Map(prev);
+            newStatuses.forEach((status, dTag) => {
+                const existing = merged.get(dTag);
+                if (!existing || existing.created_at < status.created_at) {
+                    merged.set(dTag, status);
+                }
+            });
+            return merged;
+        });
+    };
 
     useEffect(() => {
         fetchListings();
@@ -567,7 +618,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                             local_area: getTagValue('local_area'),
                             city: getTagValue('city'),
                             zipcode: getTagValue('zipcode'),
-                            description: event.content,
+                            website: getTagValue('r') || event.content,
                             created_at: event.created_at,
                             originalEvent: event
                         };
@@ -978,10 +1029,12 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                             </button>
                         )}
                         <button
-                            onClick={() => {
+                            onClick={async () => {
+                                console.log('[Parlens] Refreshing data and connections...');
                                 setStatusLoading(true);
-                                fetchListings();
-                                if (selectedListing) fetchSpots(selectedListing);
+                                // Triggering these queries will implicitly wake up/reconnect sockets by demanding fresh data from relays
+                                await fetchListings();
+                                if (selectedListing) await fetchSpots(selectedListing);
                             }}
                             className="p-2 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-full shadow-lg shadow-blue-500/20 active:scale-95 transition-transform"
                             style={{ WebkitTapHighlightColor: 'transparent' }}
@@ -1042,38 +1095,38 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                         </div>
 
                         <div className="flex-1 overflow-y-auto min-h-0">
-                            {statusLoading ? (
-                                <div className="flex-1 flex items-center justify-center py-20">
-                                    <div className="text-center">
-                                        <div className="animate-spin w-8 h-8 border-4 border-blue-500/20 border-t-blue-500 rounded-full mx-auto"></div>
+                            {/* List of Spots - Progressive Loading */}
+                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                                {filteredSpots.map(spot => {
+                                    const status = spotStatuses.get(spot.d);
+                                    const statusColor = status?.status === 'occupied' ? 'bg-red-500/10 border-red-500/20 text-red-600 dark:text-red-400' :
+                                        status?.status === 'closed' ? 'bg-zinc-500/10 border-zinc-500/20 text-zinc-600 dark:text-zinc-400' :
+                                            'bg-green-500/10 border-green-500/20 text-green-600 dark:text-green-400';
+                                    return (
+                                        <button
+                                            key={spot.id}
+                                            onClick={() => setSelectedSpot(spot)}
+                                            className={`p-3 rounded-2xl border ${statusColor} text-center active:scale-[0.98] transition-transform relative`}
+                                        >
+                                            <div className="text-3xl mb-1">
+                                                {spot.type === 'car' ? '🚗' : spot.type === 'motorcycle' ? '🏍️' : '🚲'}
+                                            </div>
+                                            <p className="font-bold text-sm text-zinc-900 dark:text-white">
+                                                {spot.short_name || `#${spot.spot_number}`}
+                                            </p>
+                                            {spot.floor && <p className="text-xs opacity-60">{spot.floor}</p>}
+                                            <p className="mt-1 text-[10px] font-bold uppercase tracking-wider opacity-80">{status?.status || 'Open'}</p>
+                                        </button>
+                                    );
+                                })}
+
+                                {/* Bottom Spinner - Shows when more spots are loading */}
+                                {statusLoading && (
+                                    <div className="flex items-center justify-center p-6 bg-zinc-50 dark:bg-white/5 rounded-2xl border-2 border-dashed border-zinc-200 dark:border-white/10 min-h-[100px]">
+                                        <div className="animate-spin w-8 h-8 border-4 border-blue-500/20 border-t-blue-500 rounded-full"></div>
                                     </div>
-                                </div>
-                            ) : (
-                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                                    {filteredSpots.map(spot => {
-                                        const status = spotStatuses.get(spot.d);
-                                        const statusColor = status?.status === 'occupied' ? 'bg-red-500/10 border-red-500/20 text-red-600 dark:text-red-400' :
-                                            status?.status === 'closed' ? 'bg-zinc-500/10 border-zinc-500/20 text-zinc-600 dark:text-zinc-400' :
-                                                'bg-green-500/10 border-green-500/20 text-green-600 dark:text-green-400';
-                                        return (
-                                            <button
-                                                key={spot.id}
-                                                onClick={() => setSelectedSpot(spot)}
-                                                className={`p-3 rounded-2xl border ${statusColor} text-center active:scale-[0.98] transition-transform relative`}
-                                            >
-                                                <div className="text-3xl mb-1">
-                                                    {spot.type === 'car' ? '🚗' : spot.type === 'motorcycle' ? '🏍️' : '🚲'}
-                                                </div>
-                                                <p className="font-bold text-sm text-zinc-900 dark:text-white">
-                                                    {spot.short_name || `#${spot.spot_number}`}
-                                                </p>
-                                                {spot.floor && <p className="text-xs opacity-60">{spot.floor}</p>}
-                                                <p className="mt-1 text-[10px] font-bold uppercase tracking-wider opacity-80">{status?.status || 'Open'}</p>
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-                            )}
+                                )}
+                            </div>
                         </div>
                     </div>
                 ) : (
@@ -1094,22 +1147,21 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                         {/* Search Bar Below Tabs */}
                         <div className="flex items-center gap-2 px-4 py-3 bg-white dark:bg-[#1c1c1e] border-b border-black/5 dark:border-white/10">
                             <div className="relative flex-1">
-                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={16} />
                                 <input
                                     value={searchTerm}
                                     onChange={e => setSearchTerm(e.target.value)}
                                     onKeyDown={e => { if (e.key === 'Enter') setConfirmedSearchTerm(searchTerm); }}
                                     placeholder="Search listing name or location"
-                                    className="w-full pl-10 pr-4 py-2.5 bg-zinc-100 dark:bg-white/10 rounded-xl text-sm font-medium text-zinc-900 dark:text-white border border-black/5 dark:border-white/10 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-all placeholder:text-zinc-400 dark:placeholder:text-white/40"
+                                    className="w-full px-4 py-2.5 bg-zinc-100 dark:bg-white/10 rounded-xl text-sm font-medium text-zinc-900 dark:text-white border border-black/5 dark:border-white/10 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-all placeholder:text-zinc-400 dark:placeholder:text-white/40"
                                 />
                             </div>
                             <button
                                 onClick={() => setConfirmedSearchTerm(searchTerm)}
-                                className="p-2.5 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-xl shadow-lg shadow-blue-500/20 active:scale-95 transition-all"
+                                className="p-2.5 text-zinc-400 hover:text-zinc-600 dark:text-white/40 dark:hover:text-white transition-colors"
                                 style={{ WebkitTapHighlightColor: 'transparent' }}
                                 title="Search"
                             >
-                                <Search size={20} />
+                                <Search size={22} />
                             </button>
                         </div>
 
@@ -1165,16 +1217,16 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                                 setShowAccessListModal(listing);
                                                             }}
                                                             style={{ WebkitTapHighlightColor: 'transparent' }}
-                                                            className="p-1.5 text-zinc-400 hover:text-blue-500 transition-colors"
+                                                            className="p-1.5 text-zinc-400"
                                                         >
                                                             <Users size={18} />
                                                         </button>
                                                         {activeTab === 'my' && (listing.owners.includes(pubkey!) || listing.managers.includes(pubkey!)) ? (
                                                             <>
-                                                                <button onClick={(e) => { e.stopPropagation(); setEditingListing(listing); setShowCreateForm(true); }} style={{ WebkitTapHighlightColor: 'transparent' }} className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-white transition-colors">
+                                                                <button onClick={(e) => { e.stopPropagation(); setEditingListing(listing); setShowCreateForm(true); }} style={{ WebkitTapHighlightColor: 'transparent' }} className="p-1.5 text-zinc-400">
                                                                     <Pencil size={18} />
                                                                 </button>
-                                                                <button onClick={(e) => { e.stopPropagation(); deleteListing(listing); }} style={{ WebkitTapHighlightColor: 'transparent' }} className="p-1.5 text-zinc-400 hover:text-red-500 transition-colors">
+                                                                <button onClick={(e) => { e.stopPropagation(); deleteListing(listing); }} style={{ WebkitTapHighlightColor: 'transparent' }} className="p-1.5 text-zinc-400">
                                                                     <Trash2 size={18} />
                                                                 </button>
                                                             </>
@@ -1183,27 +1235,40 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                                 <button
                                                                     onClick={(e) => { e.stopPropagation(); setShowHideMenu(showHideMenu === listing.id ? null : listing.id); }}
                                                                     style={{ WebkitTapHighlightColor: 'transparent' }}
-                                                                    className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-white transition-colors"
+                                                                    className="p-1.5 text-zinc-400"
                                                                 >
                                                                     <MoreVertical size={18} />
                                                                 </button>
                                                                 {showHideMenu === listing.id && (
-                                                                    <div className="absolute right-0 top-8 bg-white dark:bg-zinc-800 border border-black/10 dark:border-white/20 rounded-xl shadow-xl z-50 overflow-hidden min-w-[200px]">
-                                                                        <button
-                                                                            onClick={(e) => { e.stopPropagation(); hideListing(listing.id, listing.listing_name); }}
-                                                                            className="w-full px-4 py-3 text-left text-sm text-zinc-700 dark:text-white hover:bg-zinc-100 dark:hover:bg-zinc-700 flex items-center gap-2"
-                                                                        >
-                                                                            <EyeOff size={16} /> Hide this listing
-                                                                        </button>
-                                                                        {listing.pubkey && (
+                                                                    <>
+                                                                        <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); setShowHideMenu(null); }} />
+                                                                        <div className="absolute right-0 top-8 bg-white dark:bg-zinc-800 border border-black/10 dark:border-white/20 rounded-xl shadow-xl z-50 overflow-hidden min-w-[200px]">
+                                                                            {listing.website && (
+                                                                                <a
+                                                                                    href={listing.website.startsWith('http') ? listing.website : `https://${listing.website}`}
+                                                                                    target="_blank" rel="noopener noreferrer"
+                                                                                    onClick={(e) => { e.stopPropagation(); setShowHideMenu(null); }}
+                                                                                    className="w-full px-4 py-3 text-left text-sm text-zinc-700 dark:text-white hover:bg-zinc-100 dark:hover:bg-zinc-700 flex items-center gap-2 border-b border-black/5 dark:border-white/10"
+                                                                                >
+                                                                                    <div className="w-4 h-4 flex items-center justify-center">🌐</div> Visit Website
+                                                                                </a>
+                                                                            )}
                                                                             <button
-                                                                                onClick={(e) => { e.stopPropagation(); hideOwner(listing.pubkey!, listing.listing_name + ' (owner)'); }}
-                                                                                className="w-full px-4 py-3 text-left text-sm text-zinc-700 dark:text-white hover:bg-zinc-100 dark:hover:bg-zinc-700 flex items-center gap-2 border-t border-black/5 dark:border-white/10"
+                                                                                onClick={(e) => { e.stopPropagation(); hideListing(listing.id, listing.listing_name); }}
+                                                                                className="w-full px-4 py-3 text-left text-sm text-zinc-700 dark:text-white hover:bg-zinc-100 dark:hover:bg-zinc-700 flex items-center gap-2"
                                                                             >
-                                                                                <Ban size={16} /> Hide all from this owner
+                                                                                <EyeOff size={16} /> Hide this listing
                                                                             </button>
-                                                                        )}
-                                                                    </div>
+                                                                            {listing.pubkey && (
+                                                                                <button
+                                                                                    onClick={(e) => { e.stopPropagation(); hideOwner(listing.pubkey!, listing.listing_name + ' (owner)'); }}
+                                                                                    className="w-full px-4 py-3 text-left text-sm text-zinc-700 dark:text-white hover:bg-zinc-100 dark:hover:bg-zinc-700 flex items-center gap-2 border-t border-black/5 dark:border-white/10"
+                                                                                >
+                                                                                    <Ban size={16} /> Hide all from this owner
+                                                                                </button>
+                                                                            )}
+                                                                        </div>
+                                                                    </>
                                                                 )}
                                                             </div>
                                                         )}
@@ -1214,7 +1279,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                     </p>
 
                                                     {/* Tags - moved below location */}
-                                                    <div className="flex items-center gap-2 mt-1">
+                                                    <div className="flex items-center gap-2 mt-1 flex-wrap">
                                                         <span className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] uppercase tracking-wider ${listing.listing_type === 'public' ? 'bg-green-500/10 text-green-600' : 'bg-purple-500/10 text-purple-600'}`}>
                                                             {listing.listing_type}
                                                         </span>
@@ -1223,13 +1288,12 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                                 CLOSED
                                                             </span>
                                                         )}
+                                                        {(listing.local_area || listing.city) && (
+                                                            <span className="shrink-0 px-2 py-0.5 rounded-full text-[10px] uppercase tracking-wider bg-blue-500/10 text-blue-500">
+                                                                {listing.local_area || listing.city}
+                                                            </span>
+                                                        )}
                                                     </div>
-
-                                                    {listing.description && (
-                                                        <p className="text-xs text-zinc-500 dark:text-white/60 mt-1 line-clamp-2">
-                                                            {listing.description}
-                                                        </p>
-                                                    )}
                                                 </div>
 
                                                 <div className="grid grid-cols-3 gap-2">
@@ -1475,7 +1539,7 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
 
     const [formData, setFormData] = useState({
         listing_name: editing?.listing_name || '',
-        description: editing?.description || '',
+        website: editing?.website || '',
         location: editing?.location || '',
         local_area: editing?.local_area || '',
         city: editing?.city || '',
@@ -1611,7 +1675,7 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
             created_at: Math.floor(Date.now() / 1000),
             tags: [
                 ['d', listingId],
-                ['listing_name', formData.listing_name],
+                ['listing_name', formData.listing_name.slice(0, 25)],
                 ['location', formData.location],
                 ['g', geohash],
                 ['local_area', formData.local_area || ''],
@@ -1625,12 +1689,13 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
                 ['listing_type', formData.listing_type],
                 ['qr_type', formData.qr_type],
                 ['client', 'parlens'],
+                ...(formData.website ? [['r', formData.website]] : []),
                 ...parseList(formData.owners).map(p => ['p', p, 'admin']),
                 ...parseList(formData.managers).map(p => ['p', p, 'write']),
                 ...parseList(formData.members).map(p => ['p', p, 'read']),
                 ...parseList(formData.relays).map(r => ['relay', r])
             ],
-            content: formData.description
+            content: ''
         };
 
         if (!metadata.tags.find(t => t[0] === 'p' && t[1] === pubkey && t[2] === 'admin')) {
@@ -1696,12 +1761,22 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
                 {step === 1 ? (
                     <div className="space-y-4">
                         <div className="space-y-1">
-                            <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Listing Name</label>
-                            <input className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400" value={formData.listing_name} onChange={e => setFormData({ ...formData, listing_name: e.target.value })} />
+                            <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Listing Name (25 chars max)</label>
+                            <input
+                                className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400"
+                                value={formData.listing_name}
+                                maxLength={25}
+                                onChange={e => setFormData({ ...formData, listing_name: e.target.value })}
+                            />
                         </div>
                         <div className="space-y-1">
-                            <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Description</label>
-                            <textarea className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400" rows={3} value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })} />
+                            <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Business Website</label>
+                            <input
+                                className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400"
+                                placeholder="https://example.com"
+                                value={formData.website}
+                                onChange={e => setFormData({ ...formData, website: e.target.value })}
+                            />
                         </div>
 
                         <div className="space-y-1">
@@ -1820,7 +1895,7 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
                                         }} className="p-2 text-zinc-400 hover:text-blue-500 transition-colors">
                                             <Pencil size={18} />
                                         </button>
-                                        <button onClick={() => removeFloor(idx)} style={{ WebkitTapHighlightColor: 'transparent' }} className="p-2 text-zinc-400 hover:text-red-500 transition-colors">
+                                        <button onClick={() => removeFloor(idx)} style={{ WebkitTapHighlightColor: 'transparent' }} className="p-2 text-zinc-400">
                                             <Trash2 size={18} />
                                         </button>
                                     </div>

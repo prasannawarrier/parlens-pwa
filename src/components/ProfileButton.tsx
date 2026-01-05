@@ -598,7 +598,7 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                                     )}
                                 </div>
                                 <p className="text-xs text-zinc-400 dark:text-white/30 text-center">
-                                    ℹ️ Listings you hide can be managed here
+                                    🚫Items you hide in the listed parking page can be managed here.
                                 </p>
                             </div>
 
