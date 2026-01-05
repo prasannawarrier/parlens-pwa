@@ -1463,6 +1463,10 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                                         const spotRate = listing.rates?.[type]?.hourly || currentStats?.[type]?.rate || 0;
                                                                         const spotCurrency = listing.rates?.[type]?.currency || 'USD';
 
+                                                                        // Compute 5-char geohash for search compatibility
+                                                                        const [lat, lon] = listing.location.split(',').map((s: string) => parseFloat(s.trim()));
+                                                                        const searchableGeohash = encodeGeohash(lat, lon, 5);
+
                                                                         const statusEvent = {
                                                                             kind: KINDS.LISTED_SPOT_LOG,
                                                                             created_at: Math.floor(Date.now() / 1000),
@@ -1470,7 +1474,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                                                 ['a', spotATag],
                                                                                 ['status', newStatus],
                                                                                 ['updated_by', pubkey],
-                                                                                ['g', listing.g],
+                                                                                ['g', searchableGeohash],
                                                                                 ['location', listing.location],
                                                                                 ['type', type],
                                                                                 ['hourly_rate', String(spotRate)],
@@ -1804,6 +1808,35 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
                                 content: `${formData.listing_name} #${globalNum}`
                             };
                             await Promise.allSettled(pool.publish(DEFAULT_RELAYS, await signEvent(spot)));
+
+                            // Publish initial Kind 1714 status (open)
+                            try {
+                                const spotATagForLog = `${KINDS.PARKING_SPOT_LISTING}:${pubkey}:${spotId}`;
+                                const [lat, lon] = formData.location.split(',').map((s: string) => parseFloat(s.trim()));
+                                const searchableGeohash = encodeGeohash(lat, lon, 5); // 5-char for search compatibility
+                                const spotRate = displayRates[type]?.hourly || 0;
+                                const spotCurrency = displayRates[type]?.currency || 'USD';
+
+                                const initialStatus = {
+                                    kind: KINDS.LISTED_SPOT_LOG,
+                                    created_at: Math.floor(Date.now() / 1000),
+                                    tags: [
+                                        ['a', spotATagForLog],
+                                        ['status', 'open'],
+                                        ['updated_by', pubkey],
+                                        ['g', searchableGeohash],
+                                        ['location', formData.location],
+                                        ['type', type],
+                                        ['hourly_rate', String(spotRate)],
+                                        ['currency', spotCurrency],
+                                        ['client', 'parlens']
+                                    ],
+                                    content: JSON.stringify({ hourly_rate: spotRate, currency: spotCurrency })
+                                };
+                                await Promise.allSettled(pool.publish(DEFAULT_RELAYS, await signEvent(initialStatus)));
+                            } catch (e) {
+                                console.warn('[Parlens] Failed to publish initial status for spot:', spotId, e);
+                            }
                             globalNum++;
                         }
                     }
@@ -2134,9 +2167,13 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
                 ['client', 'parlens']
             ];
 
-            // Add search metadata tags - use LISTING location/geohash for search discoverability
-            if (listing.location) tags.push(['location', listing.location]);
-            if (listing.g) tags.push(['g', listing.g]);
+            // Add search metadata tags - use 5-char geohash for search compatibility
+            if (listing.location) {
+                tags.push(['location', listing.location]);
+                const [lat, lon] = listing.location.split(',').map(Number);
+                const searchableGeohash = encodeGeohash(lat, lon, 5);
+                tags.push(['g', searchableGeohash]);
+            }
             // Add type tag for filtering
             if (spot.type) tags.push(['type', spot.type]);
             // Add rate tags for map display

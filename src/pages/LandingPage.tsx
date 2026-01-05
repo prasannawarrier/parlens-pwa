@@ -397,7 +397,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             if (loc) {
                 tags.push(['location', `${loc[0]},${loc[1]}`]);
                 try {
-                    const g = Geohash.encode(loc[0], loc[1], 9);
+                    const g = Geohash.encode(loc[0], loc[1], 5); // 5-char for search compatibility
                     tags.push(['g', g]);
                 } catch { }
             }
@@ -507,7 +507,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             if (loc) {
                 tags.push(['location', `${loc[0]},${loc[1]}`]);
                 try {
-                    const g = Geohash.encode(loc[0], loc[1], 9);
+                    const g = Geohash.encode(loc[0], loc[1], 5); // 5-char for search compatibility
                     tags.push(['g', g]);
                 } catch { }
             }
