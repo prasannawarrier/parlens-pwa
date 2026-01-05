@@ -3,7 +3,7 @@
  * Replaces Leaflet for native vector map rotation and smooth zoom
  */
 import React, { useState, useEffect, useRef, useCallback, memo, useMemo } from 'react';
-import { MapPin, Locate, X, ChevronDown, Check, Trash, Pencil, QrCode, ArrowUp, ArrowRight, ArrowLeft, ChevronUp, Copy, ScanLine } from 'lucide-react';
+import { MapPin, Locate, X, ChevronDown, Check, Trash, Pencil, QrCode, ArrowUp, ArrowRight, ArrowLeft, ChevronUp, Copy, ScanLine, Route } from 'lucide-react';
 import Map, { Marker, Source, Layer, type MapRef } from 'react-map-gl/maplibre';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
@@ -198,7 +198,7 @@ const VehicleToggle = memo(({
     const emojis = { bicycle: '🚲', motorcycle: '🏍️', car: '🚗' };
 
     return (
-        <div className="flex flex-col rounded-[2rem] bg-white/80 dark:bg-white/10 backdrop-blur-md border border-black/5 dark:border-white/10 shadow-lg mb-2 overflow-hidden transition-all duration-300">
+        <div className="flex flex-col rounded-[2rem] bg-white/80 dark:bg-white/10 backdrop-blur-md border border-black/5 dark:border-white/10 shadow-lg overflow-hidden transition-all duration-300">
             {isExpanded ? (
                 // Expanded: show all vehicle options
                 <div className="flex flex-col gap-1 p-1">
@@ -305,6 +305,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             onScannedCodeConsumed?.();
         }
     }, [initialScannedCode, onScannedCodeConsumed]);
+
+    // State for Route Creation Modal and Bubble
+    const [routeModalOpen, setRouteModalOpen] = useState(false);
+    const [isRouteBubbleMinimized, setIsRouteBubbleMinimized] = useState(false);
 
     // QR Code Handler for Listed Parking - Session Toggle with Temp Keys
     const handleScannedCode = useCallback(async (code: string) => {
@@ -1231,6 +1235,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
 
 
 
+    // Auto-minimize route bubble when a route is active (created or loaded from saved)
+    useEffect(() => {
+        if (routeCoords || alternateRouteCoords) {
+            setIsRouteBubbleMinimized(true);
+        }
+    }, [routeCoords, alternateRouteCoords]);
+
     return (
         <div className="fixed inset-0 overflow-hidden bg-gray-50 dark:bg-black transition-colors duration-300">
             {/* Loading Overlay - Covers everything until ready */}
@@ -1261,23 +1272,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             )}
 
 
-            {/* Active Session Indicator (Parked Mode) - Green Pill Top Center */}
-            {status === 'parked' && (
-                <div className="absolute top-6 left-1/2 -translate-x-1/2 z-[1000] h-12 px-6 bg-[#34C759] rounded-full shadow-lg flex items-center gap-3 animate-in slide-in-from-top-4 pointer-events-none">
-                    <div className="text-xl">
-                        {vehicleType === 'bicycle' ? '🚲' : vehicleType === 'motorcycle' ? '🏍️' : '🚗'}
-                    </div>
-                    <span className="font-bold text-white whitespace-nowrap">Session Active</span>
-                </div>
-            )}
 
-            {/* Searching Bubble (Search Mode) - White Pill with Orange Dot */}
-            {status === 'search' && (
-                <div className="absolute top-6 left-1/2 -translate-x-1/2 z-[1000] h-12 px-6 bg-white dark:bg-zinc-800 rounded-full shadow-lg flex items-center gap-3 animate-in slide-in-from-top-4 pointer-events-none">
-                    <div className="w-2.5 h-2.5 rounded-full bg-[#FF9500] animate-pulse" />
-                    <span className="font-bold text-zinc-900 dark:text-white whitespace-nowrap">Searching for spots</span>
-                </div>
-            )}
 
             {/* STATIC USER MARKER (Auto Mode Only) - Eliminates Vibration & Shaking */}
             {orientationMode === 'auto' && location && (
@@ -1500,6 +1495,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
 
                     {/* Open Spots Markers */}
                     {status === 'search' && clusteredOpenSpots.map(item => {
+                        // eslint-disable-next-line
                         const isClusterItem = isCluster(item);
                         return (
                             <Marker
@@ -1890,6 +1886,55 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                     )}
                 </Map>
 
+                {/* Status Bubbles Container */}
+                <div className={`absolute top-4 left-1/2 -translate-x-1/2 z-[1000] flex items-center gap-2 transition-all duration-300 pointer-events-none ${status !== 'idle' ? 'opacity-100' : ''}`}>
+                    {status === 'search' && (
+                        <div className="bg-white dark:bg-zinc-800 shadow-lg rounded-full px-4 py-2 flex items-center gap-2 border border-black/5 dark:border-white/10 animate-in fade-in zoom-in slide-in-from-top-4 pointer-events-auto">
+                            <div className="animate-spin w-4 h-4 border-2 border-blue-500/30 border-t-blue-500 rounded-full" />
+                            <span className="text-sm font-medium text-zinc-900 dark:text-white">Searching for spots...</span>
+                        </div>
+                    )}
+                    {status === 'parked' && (
+                        <div className="bg-white dark:bg-zinc-800 shadow-lg rounded-full px-4 py-2 flex items-center gap-2 border border-black/5 dark:border-white/10 animate-in fade-in zoom-in slide-in-from-top-4 pointer-events-auto">
+                            <div className="w-4 h-4 rounded-full bg-green-500 shadow-md" />
+                            <span className="text-sm font-medium text-zinc-900 dark:text-white">Session Active</span>
+                        </div>
+                    )}
+
+                    {/* Create Route Bubble - IDLE state */}
+                    {status === 'idle' && !isRouteBubbleMinimized && !dropPinMode && (
+                        <div className="bg-white dark:bg-zinc-800 shadow-lg rounded-full px-4 py-2 flex items-center gap-2 border border-black/5 dark:border-white/10 animate-in fade-in zoom-in slide-in-from-top-4 pointer-events-auto">
+                            <button
+                                onClick={() => setRouteModalOpen(true)}
+                                className="flex items-center gap-2 hover:opacity-80 transition-opacity"
+                            >
+                                <div className="w-4 h-4 rounded-full bg-gradient-to-tr from-blue-500 to-cyan-500 shadow-sm" />
+                                <span className="text-sm font-medium text-zinc-900 dark:text-white whitespace-nowrap">Create Route</span>
+                            </button>
+                            <div className="w-px h-4 bg-zinc-200 dark:bg-white/10" />
+                            <button
+                                onClick={() => setIsRouteBubbleMinimized(true)}
+                                className="text-zinc-400 hover:text-zinc-600 dark:text-white/40 dark:hover:text-white/80 transition-colors active:scale-95"
+                            >
+                                <X size={14} />
+                            </button>
+                        </div>
+                    )}
+                </div>
+
+                {/* Minimized Route Button - Top Right */}
+                {status === 'idle' && isRouteBubbleMinimized && !dropPinMode && (
+                    <div className="absolute top-4 right-4 z-[1000] animate-in fade-in zoom-in slide-in-from-left-4 duration-300 pointer-events-auto">
+                        <button
+                            onClick={() => setRouteModalOpen(true)}
+                            className="h-12 w-12 flex items-center justify-center rounded-[1.5rem] bg-white/80 dark:bg-zinc-800/80 backdrop-blur-md text-zinc-600 dark:text-white/70 active:scale-95 transition-all shadow-lg border border-black/5 dark:border-white/10 hover:text-blue-500 dark:hover:text-blue-400"
+                            title="Create Route"
+                        >
+                            <Route size={20} />
+                        </button>
+                    </div>
+                )}
+
                 {/* Drop Pin Mode UI Overlays */}
                 {dropPinMode && (
                     <>
@@ -2172,21 +2217,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                     )}
                 </button>
 
-                {/* Route Button and Search - Hidden (not unmounted) in Drop Pin Mode */}
-                <div className={dropPinMode ? 'hidden' : 'block'}>
-                    <RouteButton
-                        vehicleType={vehicleType}
-                        onRouteChange={handleRouteChange}
-                        currentLocation={location}
-                        onDropPinModeChange={setDropPinMode}
-                        pendingWaypoints={pendingWaypoints}
-                        onDropPinConsumed={() => setPendingWaypoints(null)}
-                        onOpenChange={setRouteButtonOpen} // Track open state
-                        onWaypointsChange={setListWaypoints} // Sync waypoints
-                        onRequestOrientationPermission={requestOrientationPermission} // iOS compass permission
-                    />
-                </div>
-
                 {/* Profile Button - Hidden in Drop Pin Mode */}
                 {!dropPinMode && (
                     <div className="relative z-[1010]">
@@ -2213,6 +2243,26 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                         onQRScan={() => onRequestScan?.()}
                     />
                 )}
+            </div>
+
+            {/* Route Button Component (Moved out of visual stack to prevent spacing gaps) */}
+            <div className={dropPinMode ? 'hidden' : 'block'}>
+                <RouteButton
+                    vehicleType={vehicleType}
+                    onRouteChange={handleRouteChange}
+                    currentLocation={location}
+                    onDropPinModeChange={setDropPinMode}
+                    pendingWaypoints={pendingWaypoints}
+                    onDropPinConsumed={() => setPendingWaypoints(null)}
+                    onOpenChange={setRouteButtonOpen} // Track open state
+                    onWaypointsChange={setListWaypoints} // Sync waypoints
+                    onRequestOrientationPermission={requestOrientationPermission} // iOS compass permission
+                    // Controlled props for new UI
+                    isOpen={routeModalOpen}
+                    onClose={() => setRouteModalOpen(false)}
+                    hideTrigger={true}
+                    onRouteCreated={() => setIsRouteBubbleMinimized(true)}
+                />
             </div>
 
 

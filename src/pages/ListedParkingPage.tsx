@@ -1217,7 +1217,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                             </button>
                         </div>
 
-                        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                        <div className="flex-1 overflow-y-auto pt-2 px-4 pb-4 space-y-3">
                             {isLoading ? (
                                 <div className="flex justify-center p-8"><div className="w-8 h-8 rounded-full border-4 border-blue-500/20 border-t-blue-500 animate-spin" /></div>
                             ) : filteredListings.length === 0 ? (
@@ -1246,112 +1246,112 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                         const displayStats = stats;
 
                                         return (
-                                            <div key={listing.id} className={`group relative bg-white dark:bg-[#1c1c1e] rounded-2xl p-4 border border-black/5 dark:border-white/10 shadow-sm transition-all hover:shadow-md active:scale-[0.99] cursor-pointer ${showHideMenu === listing.id ? 'z-50' : ''}`} onClick={() => setSelectedListing(listing)}>
-                                                <div className="flex flex-col items-start mb-3">
-                                                    <div className="flex items-center justify-between w-full gap-2 mb-1">
-                                                        <div className="min-w-0">
+                                            <div key={listing.id} className={`group relative bg-white dark:bg-[#1c1c1e] rounded-2xl p-2.5 border border-black/5 dark:border-white/10 shadow-sm transition-all hover:shadow-md active:scale-[0.99] cursor-pointer ${showHideMenu === listing.id ? 'z-50' : ''}`} onClick={() => setSelectedListing(listing)}>
+                                                <div className="flex flex-col items-start gap-1 mb-2">
+                                                    <div className="flex items-center justify-between w-full gap-1.5">
+                                                        <div className="min-w-0 flex items-center h-full">
                                                             <h3 className="font-bold text-zinc-900 dark:text-white text-sm leading-tight truncate">{listing.listing_name}</h3>
                                                         </div>
-                                                    </div>
 
-                                                    {/* Access List Button */}
-                                                    <div className="absolute top-4 right-4 flex gap-1">
-                                                        <button
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                toggleSaved(listing.id);
-                                                            }}
-                                                            className="p-2 rounded-full active:scale-95 transition-transform"
-                                                            style={{ WebkitTapHighlightColor: 'transparent' }}
-                                                        >
-                                                            <Star size={16} className={`dark:text-white/60 ${savedListings.has(listing.id) ? 'fill-yellow-500 stroke-yellow-500 text-yellow-500 dark:text-yellow-500' : 'text-black/60'}`} />
-                                                        </button>
-                                                        <button
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                setShowAccessListModal(listing);
-                                                            }}
-                                                            style={{ WebkitTapHighlightColor: 'transparent' }}
-                                                            className="p-1.5 text-zinc-400"
-                                                        >
-                                                            <Users size={18} />
-                                                        </button>
-                                                        {activeTab === 'my' && (listing.owners.includes(pubkey!) || listing.managers.includes(pubkey!)) ? (
-                                                            <>
-                                                                <button onClick={(e) => { e.stopPropagation(); setEditingListing(listing); setShowCreateForm(true); }} style={{ WebkitTapHighlightColor: 'transparent' }} className="p-1.5 text-zinc-400">
-                                                                    <Pencil size={18} />
-                                                                </button>
-                                                                <button onClick={(e) => { e.stopPropagation(); deleteListing(listing); }} style={{ WebkitTapHighlightColor: 'transparent' }} className="p-1.5 text-zinc-400">
-                                                                    <Trash2 size={18} />
-                                                                </button>
-                                                            </>
-                                                        ) : (
-                                                            <div className="relative">
-                                                                <button
-                                                                    onClick={(e) => { e.stopPropagation(); setShowHideMenu(showHideMenu === listing.id ? null : listing.id); }}
-                                                                    style={{ WebkitTapHighlightColor: 'transparent' }}
-                                                                    className="p-1.5 text-zinc-400"
-                                                                >
-                                                                    <MoreVertical size={18} />
-                                                                </button>
-                                                                {showHideMenu === listing.id && (
-                                                                    <>
-                                                                        <style>{`
+                                                        {/* Access List Button */}
+                                                        <div className="flex items-center gap-1 h-full">
+                                                            <button
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    toggleSaved(listing.id);
+                                                                }}
+                                                                className="p-2 rounded-full active:scale-95 transition-transform flex items-center justify-center"
+                                                                style={{ WebkitTapHighlightColor: 'transparent' }}
+                                                            >
+                                                                <Star size={14} className={`dark:text-white/60 ${savedListings.has(listing.id) ? 'fill-yellow-500 stroke-yellow-500 text-yellow-500 dark:text-yellow-500' : 'text-black/60'}`} />
+                                                            </button>
+                                                            <button
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    setShowAccessListModal(listing);
+                                                                }}
+                                                                style={{ WebkitTapHighlightColor: 'transparent' }}
+                                                                className="p-1.5 text-zinc-400 flex items-center justify-center"
+                                                            >
+                                                                <Users size={14} />
+                                                            </button>
+                                                            {activeTab === 'my' && (listing.owners.includes(pubkey!) || listing.managers.includes(pubkey!)) ? (
+                                                                <>
+                                                                    <button onClick={(e) => { e.stopPropagation(); setEditingListing(listing); setShowCreateForm(true); }} style={{ WebkitTapHighlightColor: 'transparent' }} className="p-1.5 text-zinc-400 flex items-center justify-center">
+                                                                        <Pencil size={14} />
+                                                                    </button>
+                                                                    <button onClick={(e) => { e.stopPropagation(); deleteListing(listing); }} style={{ WebkitTapHighlightColor: 'transparent' }} className="p-1.5 text-zinc-400 flex items-center justify-center">
+                                                                        <Trash2 size={14} />
+                                                                    </button>
+                                                                </>
+                                                            ) : (
+                                                                <div className="relative flex items-center">
+                                                                    <button
+                                                                        onClick={(e) => { e.stopPropagation(); setShowHideMenu(showHideMenu === listing.id ? null : listing.id); }}
+                                                                        style={{ WebkitTapHighlightColor: 'transparent' }}
+                                                                        className="p-1.5 text-zinc-400 flex items-center justify-center"
+                                                                    >
+                                                                        <MoreVertical size={14} />
+                                                                    </button>
+                                                                    {showHideMenu === listing.id && (
+                                                                        <>
+                                                                            <style>{`
                                                                             @keyframes menuFadeIn {
                                                                                 from { opacity: 0; transform: scale(0.95); }
                                                                                 to { opacity: 1; transform: scale(1); }
                                                                             }
                                                                         `}</style>
-                                                                        <div
-                                                                            className="absolute right-0 top-8 bg-white dark:bg-zinc-800 border border-black/10 dark:border-white/20 rounded-xl shadow-xl z-50 overflow-hidden min-w-[200px]"
-                                                                            style={{ animation: 'menuFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards', transformOrigin: 'top right' }}
-                                                                            onClick={(e) => e.stopPropagation()}
-                                                                        >
-                                                                            {listing.website && (
-                                                                                <a
-                                                                                    href={listing.website.startsWith('http') ? listing.website : `https://${listing.website}`}
-                                                                                    target="_blank" rel="noopener noreferrer"
-                                                                                    onClick={(e) => { e.stopPropagation(); setShowHideMenu(null); }}
-                                                                                    className="w-full px-4 py-3 text-left text-sm text-zinc-700 dark:text-white hover:bg-zinc-100 dark:hover:bg-zinc-700 flex items-center gap-2 border-b border-black/5 dark:border-white/10"
-                                                                                >
-                                                                                    <div className="w-4 h-4 flex items-center justify-center">🌐</div> Visit Website
-                                                                                </a>
-                                                                            )}
-                                                                            <button
-                                                                                onClick={(e) => { e.stopPropagation(); hideListing(listing.id, listing.listing_name); }}
-                                                                                className="w-full px-4 py-3 text-left text-sm text-zinc-700 dark:text-white hover:bg-zinc-100 dark:hover:bg-zinc-700 flex items-center gap-2"
+                                                                            <div
+                                                                                className="absolute right-0 top-8 bg-white dark:bg-zinc-800 border border-black/10 dark:border-white/20 rounded-xl shadow-xl z-50 overflow-hidden min-w-[200px]"
+                                                                                style={{ animation: 'menuFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards', transformOrigin: 'top right' }}
+                                                                                onClick={(e) => e.stopPropagation()}
                                                                             >
-                                                                                <EyeOff size={16} /> Hide this listing
-                                                                            </button>
-                                                                            {listing.pubkey && (
+                                                                                {listing.website && (
+                                                                                    <a
+                                                                                        href={listing.website.startsWith('http') ? listing.website : `https://${listing.website}`}
+                                                                                        target="_blank" rel="noopener noreferrer"
+                                                                                        onClick={(e) => { e.stopPropagation(); setShowHideMenu(null); }}
+                                                                                        className="w-full px-4 py-3 text-left text-sm text-zinc-700 dark:text-white hover:bg-zinc-100 dark:hover:bg-zinc-700 flex items-center gap-2 border-b border-black/5 dark:border-white/10"
+                                                                                    >
+                                                                                        <div className="w-4 h-4 flex items-center justify-center">🌐</div> Visit Website
+                                                                                    </a>
+                                                                                )}
                                                                                 <button
-                                                                                    onClick={(e) => { e.stopPropagation(); hideOwner(listing.pubkey!, listing.listing_name + ' (owner)'); }}
-                                                                                    className="w-full px-4 py-3 text-left text-sm text-zinc-700 dark:text-white hover:bg-zinc-100 dark:hover:bg-zinc-700 flex items-center gap-2 border-t border-black/5 dark:border-white/10"
+                                                                                    onClick={(e) => { e.stopPropagation(); hideListing(listing.id, listing.listing_name); }}
+                                                                                    className="w-full px-4 py-3 text-left text-sm text-zinc-700 dark:text-white hover:bg-zinc-100 dark:hover:bg-zinc-700 flex items-center gap-2"
                                                                                 >
-                                                                                    <Ban size={16} /> Hide all from owner
+                                                                                    <EyeOff size={16} /> Hide this listing
                                                                                 </button>
-                                                                            )}
-                                                                        </div>
-                                                                    </>
-                                                                )}
-                                                            </div>
-                                                        )}
+                                                                                {listing.pubkey && (
+                                                                                    <button
+                                                                                        onClick={(e) => { e.stopPropagation(); hideOwner(listing.pubkey!, listing.listing_name + ' (owner)'); }}
+                                                                                        className="w-full px-4 py-3 text-left text-sm text-zinc-700 dark:text-white hover:bg-zinc-100 dark:hover:bg-zinc-700 flex items-center gap-2 border-t border-black/5 dark:border-white/10"
+                                                                                    >
+                                                                                        <Ban size={16} /> Hide all from owner
+                                                                                    </button>
+                                                                                )}
+                                                                            </div>
+                                                                        </>
+                                                                    )}
+                                                                </div>
+                                                            )}
+                                                        </div>
                                                     </div>
 
 
 
                                                     {/* Tags - moved below location */}
-                                                    <div className="flex items-center gap-2 mt-1 flex-wrap">
-                                                        <span className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] uppercase tracking-wider ${listing.listing_type === 'public' ? 'bg-green-500/10 text-green-600' : 'bg-purple-500/10 text-purple-600'}`}>
+                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                        <span className={`shrink-0 px-2 py-0.5 rounded-full text-[9px] uppercase tracking-wider ${listing.listing_type === 'public' ? 'bg-green-500/10 text-green-600' : 'bg-purple-500/10 text-purple-600'}`}>
                                                             {listing.listing_type}
                                                         </span>
                                                         {isClosed && (
-                                                            <span className="shrink-0 px-2 py-0.5 rounded-full text-[10px] uppercase tracking-wider bg-zinc-500/10 text-zinc-500 dark:text-zinc-400">
+                                                            <span className="shrink-0 px-2 py-0.5 rounded-full text-[9px] uppercase tracking-wider bg-zinc-500/10 text-zinc-500 dark:text-zinc-400">
                                                                 CLOSED
                                                             </span>
                                                         )}
                                                         {(listing.local_area || listing.city) && (
-                                                            <span className="shrink-0 px-2 py-0.5 rounded-full text-[10px] uppercase tracking-wider bg-blue-500/10 text-blue-500">
+                                                            <span className="shrink-0 px-2 py-0.5 rounded-full text-[9px] uppercase tracking-wider bg-blue-500/10 text-blue-500">
                                                                 {listing.local_area || listing.city}
                                                             </span>
                                                         )}

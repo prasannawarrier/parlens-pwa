@@ -30,6 +30,11 @@ interface RouteButtonProps {
     onOpenChange?: (isOpen: boolean) => void;
     onWaypointsChange?: (waypoints: Waypoint[]) => void;
     onRequestOrientationPermission?: () => void;
+    // Controlled state props
+    isOpen?: boolean;
+    onClose?: () => void;
+    hideTrigger?: boolean;
+    onRouteCreated?: () => void;
 }
 
 
@@ -165,9 +170,20 @@ const OnlineSearch: React.FC<{ query: string; onSelect: (result: NominatimResult
     );
 };
 
-export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteChange, currentLocation, onDropPinModeChange, pendingWaypoints, onDropPinConsumed, onOpenChange, onWaypointsChange, onRequestOrientationPermission }) => {
+export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteChange, currentLocation, onDropPinModeChange, pendingWaypoints, onDropPinConsumed, onOpenChange, onWaypointsChange, onRequestOrientationPermission, isOpen: controlledIsOpen, onClose, hideTrigger, onRouteCreated }) => {
     const { pool, pubkey, signEvent } = useAuth();
-    const [isOpen, setIsOpen] = useState(false);
+    const [internalIsOpen, setInternalIsOpen] = useState(false);
+
+    // Use controlled state if provided, otherwise internal
+    const isOpen = controlledIsOpen !== undefined ? controlledIsOpen : internalIsOpen;
+
+    // Helper to update state (and notify parent if needed)
+    const setIsOpen = (val: boolean) => {
+        setInternalIsOpen(val);
+        if (!val && onClose) {
+            onClose();
+        }
+    };
 
     // Notify parent on open change
     useEffect(() => {
@@ -410,6 +426,7 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
 
             // Close the route page (user can reopen to save if desired)
             setIsOpen(false);
+            onRouteCreated?.();
         } catch (error) {
             console.error('Route creation error:', error);
             // Fallback: Draw straight lines between waypoints
@@ -420,10 +437,12 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
             setShowOnMap(true);
             onRouteChange(straightLineCoords, null, waypoints.map(w => ({ lat: w.lat, lon: w.lon })), true);
             setIsOpen(false);
+            onRouteCreated?.();
         } finally {
             setIsCreatingRoute(false);
         }
     };
+
 
     const toggleShowOnMap = () => {
         const newValue = !showOnMap;
@@ -749,13 +768,15 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
 
     return (
         <>
-            <button
-                onClick={() => setIsOpen(true)}
-                className="h-12 w-12 flex items-center justify-center rounded-[1.5rem] bg-white/80 dark:bg-white/10 backdrop-blur-md text-zinc-600 dark:text-white/70 active:scale-95 transition-all shadow-lg border border-black/5 dark:border-white/10"
-                title="Create Route"
-            >
-                <Route size={20} />
-            </button>
+            {!hideTrigger && (
+                <button
+                    onClick={() => setIsOpen(true)}
+                    className="h-12 w-12 flex items-center justify-center rounded-[1.5rem] bg-white/80 dark:bg-white/10 backdrop-blur-md text-zinc-600 dark:text-white/70 active:scale-95 transition-all shadow-lg border border-black/5 dark:border-white/10"
+                    title="Create Route"
+                >
+                    <Route size={20} />
+                </button>
+            )}
 
             {isOpen && (
                 <div className="fixed inset-0 z-[2000] flex flex-col items-center justify-start bg-black/60 backdrop-blur-xl animate-in fade-in duration-300 pt-2 px-4 pb-4">
