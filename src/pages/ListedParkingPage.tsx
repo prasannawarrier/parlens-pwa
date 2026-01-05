@@ -1261,10 +1261,10 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                                 e.stopPropagation();
                                                                 toggleSaved(listing.id);
                                                             }}
-                                                            className="p-2 rounded-full bg-black/5 dark:bg-white/10 active:scale-95 transition-transform"
                                                             style={{ WebkitTapHighlightColor: 'transparent' }}
+                                                            className="p-1.5"
                                                         >
-                                                            <Star size={16} className={`dark:text-white/60 ${savedListings.has(listing.id) ? 'stroke-yellow-500 text-yellow-500 dark:text-yellow-500' : 'text-black/60'}`} />
+                                                            <Star size={18} className={`dark:text-white/60 ${savedListings.has(listing.id) ? 'fill-yellow-500 stroke-yellow-500 text-yellow-500 dark:text-yellow-500' : 'text-zinc-400'}`} />
                                                         </button>
                                                         <button
                                                             onClick={(e) => {
@@ -1405,122 +1405,123 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                 </div>
 
                                                 {/* Close All Toggle */}
-                                                {activeTab === 'my' && (listing.owners.includes(pubkey!) || listing.managers.includes(pubkey!)) && (
-                                                    <div className="mt-3 pt-3 border-t border-black/5 dark:border-white/5 flex items-center justify-between relative" onClick={(e) => e.stopPropagation()}>
-                                                        <span className={`text-sm font-semibold ${!isClosed ? 'text-green-600 dark:text-green-400' : 'text-zinc-500 dark:text-white/50'}`}>
-                                                            {!isClosed ? 'Listing Open' : 'Listing Closed'}
-                                                        </span>
-                                                        <button
-                                                            onClick={async () => {
-                                                                const newStatus = isClosed ? 'open' : 'closed';
-                                                                const confirmMsg = newStatus === 'closed'
-                                                                    ? 'This will mark ALL spots as CLOSED. Continue?'
-                                                                    : 'This will mark ALL spots as OPEN. Continue?';
-                                                                if (!confirm(confirmMsg)) return;
+                                                {
+                                                    activeTab === 'my' && (listing.owners.includes(pubkey!) || listing.managers.includes(pubkey!)) && (
+                                                        <div className="mt-3 pt-3 border-t border-black/5 dark:border-white/5 flex items-center justify-between relative" onClick={(e) => e.stopPropagation()}>
+                                                            <span className={`text-sm font-semibold ${!isClosed ? 'text-green-600 dark:text-green-400' : 'text-zinc-500 dark:text-white/50'}`}>
+                                                                {!isClosed ? 'Listing Open' : 'Listing Closed'}
+                                                            </span>
+                                                            <button
+                                                                onClick={async () => {
+                                                                    const newStatus = isClosed ? 'open' : 'closed';
+                                                                    const confirmMsg = newStatus === 'closed'
+                                                                        ? 'This will mark ALL spots as CLOSED. Continue?'
+                                                                        : 'This will mark ALL spots as OPEN. Continue?';
+                                                                    if (!confirm(confirmMsg)) return;
 
-                                                                setIsTogglingStatus(true);
-                                                                try {
-                                                                    // Fetch all spots for this listing
-                                                                    const aTag = `${KINDS.LISTED_PARKING_METADATA}:${listing.pubkey}:${listing.d}`;
-                                                                    const spotEvents = await pool.querySync(DEFAULT_RELAYS, {
-                                                                        kinds: [KINDS.PARKING_SPOT_LISTING],
-                                                                        '#a': [aTag]
-                                                                    });
+                                                                    setIsTogglingStatus(true);
+                                                                    try {
+                                                                        // Fetch all spots for this listing
+                                                                        const aTag = `${KINDS.LISTED_PARKING_METADATA}:${listing.pubkey}:${listing.d}`;
+                                                                        const spotEvents = await pool.querySync(DEFAULT_RELAYS, {
+                                                                            kinds: [KINDS.PARKING_SPOT_LISTING],
+                                                                            '#a': [aTag]
+                                                                        });
 
-                                                                    // Calculate new Snapshot Stats immediately
-                                                                    const snapshotStats = {
-                                                                        car: { open: 0, occupied: 0, total: 0, closed: 0, rate: 0 },
-                                                                        motorcycle: { open: 0, occupied: 0, total: 0, closed: 0, rate: 0 },
-                                                                        bicycle: { open: 0, occupied: 0, total: 0, closed: 0, rate: 0 }
-                                                                    };
+                                                                        // Calculate new Snapshot Stats immediately
+                                                                        const snapshotStats = {
+                                                                            car: { open: 0, occupied: 0, total: 0, closed: 0, rate: 0 },
+                                                                            motorcycle: { open: 0, occupied: 0, total: 0, closed: 0, rate: 0 },
+                                                                            bicycle: { open: 0, occupied: 0, total: 0, closed: 0, rate: 0 }
+                                                                        };
 
-                                                                    // Publish status log (Kind 1714) for each spot AND aggregate snapshot
-                                                                    // ... existing loop ... 
-                                                                    // Note: We need to preserve the rate from existing stats if possible, or recalculate
-                                                                    const currentStats = listingStats.get(listing.d);
+                                                                        // Publish status log (Kind 1714) for each spot AND aggregate snapshot
+                                                                        // ... existing loop ... 
+                                                                        // Note: We need to preserve the rate from existing stats if possible, or recalculate
+                                                                        const currentStats = listingStats.get(listing.d);
 
-                                                                    const promises = spotEvents.map(async (spot) => {
-                                                                        const spotD = spot.tags.find((t: string[]) => t[0] === 'd')?.[1];
-                                                                        let type = spot.tags.find((t: string[]) => t[0] === 'type')?.[1]?.toLowerCase() as 'car' | 'motorcycle' | 'bicycle' || 'car';
-                                                                        if (!['car', 'motorcycle', 'bicycle'].includes(type)) type = 'car';
+                                                                        const promises = spotEvents.map(async (spot) => {
+                                                                            const spotD = spot.tags.find((t: string[]) => t[0] === 'd')?.[1];
+                                                                            let type = spot.tags.find((t: string[]) => t[0] === 'type')?.[1]?.toLowerCase() as 'car' | 'motorcycle' | 'bicycle' || 'car';
+                                                                            if (!['car', 'motorcycle', 'bicycle'].includes(type)) type = 'car';
 
-                                                                        const spotATag = `${KINDS.PARKING_SPOT_LISTING}:${spot.pubkey}:${spotD}`;
+                                                                            const spotATag = `${KINDS.PARKING_SPOT_LISTING}:${spot.pubkey}:${spotD}`;
 
-                                                                        // Update stats
-                                                                        if (snapshotStats[type]) {
-                                                                            snapshotStats[type].total++;
-                                                                            if (newStatus === 'closed') snapshotStats[type].closed++;
-                                                                            else snapshotStats[type].open++;
+                                                                            // Update stats
+                                                                            if (snapshotStats[type]) {
+                                                                                snapshotStats[type].total++;
+                                                                                if (newStatus === 'closed') snapshotStats[type].closed++;
+                                                                                else snapshotStats[type].open++;
 
-                                                                            // Preserve or fetch rates? For snapshot, rate is average/min?
-                                                                            // Using currentStats rates to persist UI values 
-                                                                            if (currentStats && currentStats[type]) {
-                                                                                snapshotStats[type].rate = currentStats[type].rate;
+                                                                                // Preserve or fetch rates? For snapshot, rate is average/min?
+                                                                                // Using currentStats rates to persist UI values 
+                                                                                if (currentStats && currentStats[type]) {
+                                                                                    snapshotStats[type].rate = currentStats[type].rate;
+                                                                                }
                                                                             }
-                                                                        }
 
-                                                                        const statusEvent = {
-                                                                            kind: KINDS.LISTED_SPOT_LOG,
+                                                                            const statusEvent = {
+                                                                                kind: KINDS.LISTED_SPOT_LOG,
+                                                                                created_at: Math.floor(Date.now() / 1000),
+                                                                                tags: [
+                                                                                    ['a', spotATag],
+                                                                                    ['status', newStatus],
+                                                                                    ['updated_by', pubkey],
+                                                                                    ['client', 'parlens']
+                                                                                ],
+                                                                                content: ''
+                                                                            };
+                                                                            const signed = await signEvent(statusEvent);
+                                                                            return pool.publish(DEFAULT_RELAYS, signed);
+                                                                        });
+
+                                                                        await Promise.allSettled(promises);
+
+                                                                        // Publish Kind 1147 Listing Status Log
+                                                                        const listingATag = `${KINDS.LISTED_PARKING_METADATA}:${listing.pubkey}:${listing.d}`;
+                                                                        const statusLogEvent = {
+                                                                            kind: KINDS.LISTING_STATUS_LOG,
                                                                             created_at: Math.floor(Date.now() / 1000),
                                                                             tags: [
-                                                                                ['a', spotATag],
-                                                                                ['status', newStatus],
-                                                                                ['updated_by', pubkey],
+                                                                                ['a', listingATag],
+                                                                                ['g', listing.g],
                                                                                 ['client', 'parlens']
                                                                             ],
-                                                                            content: ''
+                                                                            content: JSON.stringify(snapshotStats)
                                                                         };
-                                                                        const signed = await signEvent(statusEvent);
-                                                                        return pool.publish(DEFAULT_RELAYS, signed);
-                                                                    });
+                                                                        await Promise.allSettled(pool.publish(DEFAULT_RELAYS, await signEvent(statusLogEvent)));
 
-                                                                    await Promise.allSettled(promises);
+                                                                        // Update listing metadata
+                                                                        const newTags = listing.originalEvent.tags.filter((t: string[]) => t[0] !== 'status');
+                                                                        newTags.push(['status', newStatus]);
 
-                                                                    // Publish Kind 1147 Listing Status Log
-                                                                    const listingATag = `${KINDS.LISTED_PARKING_METADATA}:${listing.pubkey}:${listing.d}`;
-                                                                    const statusLogEvent = {
-                                                                        kind: KINDS.LISTING_STATUS_LOG,
-                                                                        created_at: Math.floor(Date.now() / 1000),
-                                                                        tags: [
-                                                                            ['a', listingATag],
-                                                                            ['g', listing.g],
-                                                                            ['client', 'parlens']
-                                                                        ],
-                                                                        content: JSON.stringify(snapshotStats)
-                                                                    };
-                                                                    await Promise.allSettled(pool.publish(DEFAULT_RELAYS, await signEvent(statusLogEvent)));
+                                                                        const metaEvent = {
+                                                                            ...listing.originalEvent,
+                                                                            created_at: Math.floor(Date.now() / 1000),
+                                                                            tags: newTags
+                                                                        };
+                                                                        const signedMeta = await signEvent(metaEvent);
+                                                                        await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedMeta));
 
-                                                                    // Update listing metadata
-                                                                    const newTags = listing.originalEvent.tags.filter((t: string[]) => t[0] !== 'status');
-                                                                    newTags.push(['status', newStatus]);
+                                                                        // NO Local Updates (Relay Only)
 
-                                                                    const metaEvent = {
-                                                                        ...listing.originalEvent,
-                                                                        created_at: Math.floor(Date.now() / 1000),
-                                                                        tags: newTags
-                                                                    };
-                                                                    const signedMeta = await signEvent(metaEvent);
-                                                                    await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedMeta));
+                                                                        // Wait for propagation (1.5s) then Silent Refresh
+                                                                        await new Promise(resolve => setTimeout(resolve, 1500));
+                                                                        await fetchListings(true);
 
-                                                                    // NO Local Updates (Relay Only)
-
-                                                                    // Wait for propagation (1.5s) then Silent Refresh
-                                                                    await new Promise(resolve => setTimeout(resolve, 1500));
-                                                                    await fetchListings(true);
-
-                                                                } catch (e) {
-                                                                    console.error('Failed to update status:', e);
-                                                                    alert('Failed to update status');
-                                                                } finally {
-                                                                    setIsTogglingStatus(false);
-                                                                }
-                                                            }}
-                                                            className={`relative h-7 w-12 rounded-full transition-colors ${!isClosed ? 'bg-green-500' : 'bg-zinc-200 dark:bg-white/10'}`}
-                                                        >
-                                                            <span className={`block h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${!isClosed ? 'translate-x-[26px]' : 'translate-x-[4px]'}`} />
-                                                        </button>
-                                                    </div>
-                                                )
+                                                                    } catch (e) {
+                                                                        console.error('Failed to update status:', e);
+                                                                        alert('Failed to update status');
+                                                                    } finally {
+                                                                        setIsTogglingStatus(false);
+                                                                    }
+                                                                }}
+                                                                className={`relative h-7 w-12 rounded-full transition-colors ${!isClosed ? 'bg-green-500' : 'bg-zinc-200 dark:bg-white/10'}`}
+                                                            >
+                                                                <span className={`block h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${!isClosed ? 'translate-x-[26px]' : 'translate-x-[4px]'}`} />
+                                                            </button>
+                                                        </div>
+                                                    )
                                                 }
                                             </div>
                                         );
