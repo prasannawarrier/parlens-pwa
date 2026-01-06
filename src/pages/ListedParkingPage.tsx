@@ -3,7 +3,7 @@
  * Listed Parking Page - Fullscreen page for managing and discovering listed parking spots
  * Refined based on user feedback (Style, Form, Features)
  */
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { MapPin, Plus, Trash2, X, Check, Copy, Pencil, ChevronRight, LocateFixed, Users, ArrowLeft, Search, RotateCw, EyeOff, Ban, MoreVertical, Star } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { KINDS, DEFAULT_RELAYS } from '../lib/nostr';
@@ -123,6 +123,9 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
     });
     const [showSavedOnly, setShowSavedOnly] = useState(false);
 
+    // Captured location - set once on mount and updated only on explicit refresh
+    const capturedLocationRef = useRef<[number, number] | null>(null);
+
     const toggleSaved = (listingId: string) => {
         setSavedListings(prev => {
             const next = new Set(prev);
@@ -194,14 +197,14 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
     };
 
 
-    // Fetch listings and their stats
+    // Fetch listings and their stats - PROGRESSIVE LOADING
     const fetchListings = useCallback(async (arg?: boolean | unknown) => {
         if (!pool) return;
         const silent = typeof arg === 'boolean' ? arg : false;
 
         if (!silent) {
             setIsLoading(true);
-            setStatusLoading(true); // Keep spinner on for initial load
+            setStatusLoading(true);
         }
 
         try {
@@ -269,151 +272,125 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                     originalEvent: event
                 };
             })
-                .filter(l => l.listing_name !== 'Unnamed' && l.listing_name.trim() !== '')
-                .sort((a: any, b: any) => b.created_at - a.created_at);
+                .filter(l => l.listing_name !== 'Unnamed' && l.listing_name.trim() !== '');
 
-            setListings(parsedListings);
-
-            // 2. Fetch Spots for ALL listings to compute stats
-            // Batched fetch using predictive d-tags (aligns with detail view)
-            const dTagsToFetch: string[] = [];
-            const legacyListingATags: string[] = [];
-
-            parsedListings.forEach(l => {
-                if (l.total_spots && l.total_spots > 0) {
-                    for (let i = 1; i <= l.total_spots; i++) {
-                        dTagsToFetch.push(`${l.d}-spot-${i}`);
-                    }
-                } else {
-                    // Fallback for listings without total_spots (legacy)
-                    legacyListingATags.push(`${KINDS.LISTED_PARKING_METADATA}:${l.pubkey}:${l.d}`);
-                }
-            });
-
-            if (dTagsToFetch.length === 0 && legacyListingATags.length === 0) {
-                setIsLoading(false);
-                setStatusLoading(false);
-                return;
+            // Sort by distance if capturedLocation available, else by creation time
+            let sortedListings = parsedListings;
+            const sortLocation = capturedLocationRef.current;
+            if (sortLocation) {
+                sortedListings = parsedListings.sort((a, b) => {
+                    const locA = a.location?.split(',').map(Number);
+                    const locB = b.location?.split(',').map(Number);
+                    if (!locA || locA.length < 2) return 1;
+                    if (!locB || locB.length < 2) return -1;
+                    const distA = calculateDistance(sortLocation[0], sortLocation[1], locA[0], locA[1]);
+                    const distB = calculateDistance(sortLocation[0], sortLocation[1], locB[0], locB[1]);
+                    return distA - distB;
+                });
+            } else {
+                sortedListings = parsedListings.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
             }
 
+            setListings(sortedListings);
+            setIsLoading(false); // Immediately show cards
+
+            // 2. Progressive Stats Fetching - per listing batch
             const BATCH_SIZE = 10;
-            let allSpots: any[] = [];
 
-            // Batch Fetch d-tags
-            for (let i = 0; i < dTagsToFetch.length; i += BATCH_SIZE) {
-                const batch = dTagsToFetch.slice(i, i + BATCH_SIZE);
-                const batchSpots = await pool.querySync(DEFAULT_RELAYS, {
-                    kinds: [KINDS.PARKING_SPOT_LISTING],
-                    '#d': batch
-                });
-                allSpots = [...allSpots, ...batchSpots];
-            }
+            for (let i = 0; i < sortedListings.length; i += BATCH_SIZE) {
+                const batchListings = sortedListings.slice(i, i + BATCH_SIZE);
 
-            // Batch Fetch legacy a-tags
-            for (let i = 0; i < legacyListingATags.length; i += BATCH_SIZE) {
-                const batch = legacyListingATags.slice(i, i + BATCH_SIZE);
-                const batchSpots = await pool.querySync(DEFAULT_RELAYS, {
-                    kinds: [KINDS.PARKING_SPOT_LISTING],
-                    '#a': batch
-                });
-                allSpots = [...allSpots, ...batchSpots];
-            }
-
-            // Deduplicate
-            const uniqueSpotsMap = new Map();
-            allSpots.forEach(s => {
-                const d = s.tags.find((t: any) => t[0] === 'd')?.[1];
-                if (d && (!uniqueSpotsMap.has(d) || uniqueSpotsMap.get(d).created_at < s.created_at)) {
-                    uniqueSpotsMap.set(d, s);
-                }
-            });
-            allSpots = Array.from(uniqueSpotsMap.values());
-
-            console.log(`[Parlens] Fetched ${allSpots.length} spots for ${parsedListings.length} listings. Batched.`);
-
-            // Fetch Statuses for ALL spots - Batched
-            const spotATags = allSpots.map((s: any) =>
-                `${KINDS.PARKING_SPOT_LISTING}:${s.pubkey}:${s.tags.find((t: any) => t[0] === 'd')?.[1]}`
-            );
-
-            let spotEvents: any[] = [];
-
-            if (spotATags.length > 0) {
-                for (let i = 0; i < spotATags.length; i += BATCH_SIZE) {
-                    const batch = spotATags.slice(i, i + BATCH_SIZE);
-                    const batchStatuses = await pool.querySync(DEFAULT_RELAYS, {
-                        kinds: [KINDS.LISTED_SPOT_LOG],
-                        '#a': batch
-                    });
-                    spotEvents = [...spotEvents, ...batchStatuses];
-                }
-            }
-
-            // Map stats
-            const newStats = new Map();
-            const newSpotMapping = new Map();
-
-            // Create map of latest status per spot
-            const latestStatusMap = new Map();
-            spotEvents.forEach((e: any) => {
-                const a = e.tags.find((t: any) => t[0] === 'a')?.[1];
-                if (!latestStatusMap.has(a) || latestStatusMap.get(a).created_at < e.created_at) {
-                    latestStatusMap.set(a, e);
-                }
-            });
-
-            // Aggregate
-            parsedListings.forEach((listing: ListedParkingMetadata) => {
-                const listingATag = `${KINDS.LISTED_PARKING_METADATA}:${listing.pubkey}:${listing.d}`;
-
-                let listingSpots: any[] = [];
-                if (listing.total_spots && listing.total_spots > 0) {
-                    // Match via deterministic d-tags
-                    const expectedDTags = new Set<string>();
-                    for (let i = 1; i <= listing.total_spots; i++) {
-                        expectedDTags.add(`${listing.d}-spot-${i}`);
-                    }
-
-                    listingSpots = allSpots.filter((s: any) => {
-                        const d = s.tags.find((t: any) => t[0] === 'd')?.[1];
-                        return d && expectedDTags.has(d);
-                    });
-                } else {
-                    // Fallback check via 'a' tag
-                    listingSpots = allSpots.filter((s: any) => {
-                        const a = s.tags.find((t: any) => t[0] === 'a')?.[1];
-                        return a === listingATag;
-                    });
-                }
-
-                const stats = {
-                    car: { open: 0, occupied: 0, closed: 0, total: 0, rate: listing.rates?.car?.hourly || 0 },
-                    motorcycle: { open: 0, occupied: 0, closed: 0, total: 0, rate: listing.rates?.motorcycle?.hourly || 0 },
-                    bicycle: { open: 0, occupied: 0, closed: 0, total: 0, rate: listing.rates?.bicycle?.hourly || 0 }
-                };
-
-                listingSpots.forEach((spot: any) => {
-                    const d = spot.tags.find((t: any) => t[0] === 'd')?.[1];
-                    const type = (spot.tags.find((t: any) => t[0] === 'type')?.[1] as 'car' | 'motorcycle' | 'bicycle') || 'car';
-                    const spotATag = `${KINDS.PARKING_SPOT_LISTING}:${spot.pubkey}:${d}`;
-
-                    if (d) newSpotMapping.set(d, { listingId: listing.d, type });
-
-                    const statusEvent = latestStatusMap.get(spotATag);
-                    const status = statusEvent?.tags.find((t: any) => t[0] === 'status')?.[1] || 'open';
-
-                    if (stats[type]) {
-                        stats[type].total++;
-                        if (status === 'occupied') stats[type].occupied++;
-                        else if (status === 'closed') stats[type].closed++;
-                        else stats[type].open++;
+                // Generate a-tags for Kind 1714 query (using predictive d-tag patterns)
+                const spotATags: string[] = [];
+                batchListings.forEach(listing => {
+                    if (listing.total_spots && listing.total_spots > 0) {
+                        for (let j = 1; j <= listing.total_spots; j++) {
+                            const spotId = `${listing.d}-spot-${j}`;
+                            spotATags.push(`${KINDS.PARKING_SPOT_LISTING}:${listing.pubkey}:${spotId}`);
+                        }
                     }
                 });
-                newStats.set(listing.d, stats);
-            });
 
-            setListingStats(newStats);
-            setSpotToListingMap(newSpotMapping);
+                if (spotATags.length === 0) continue;
+
+                // Fetch Kind 1714 logs for this batch
+                const statusEvents = await pool.querySync(DEFAULT_RELAYS, {
+                    kinds: [KINDS.LISTED_SPOT_LOG],
+                    '#a': spotATags
+                });
+
+                // Create map of latest status per spot
+                const latestStatusMap = new Map();
+                statusEvents.forEach((e: any) => {
+                    const a = e.tags.find((t: any) => t[0] === 'a')?.[1];
+                    if (!latestStatusMap.has(a) || latestStatusMap.get(a).created_at < e.created_at) {
+                        latestStatusMap.set(a, e);
+                    }
+                });
+
+                // Calculate stats for each listing in this batch
+                const batchStats = new Map<string, any>();
+
+                batchListings.forEach(listing => {
+                    const stats = {
+                        car: { open: 0, occupied: 0, closed: 0, total: 0, rate: listing.rates?.car?.hourly || 0 },
+                        motorcycle: { open: 0, occupied: 0, closed: 0, total: 0, rate: listing.rates?.motorcycle?.hourly || 0 },
+                        bicycle: { open: 0, occupied: 0, closed: 0, total: 0, rate: listing.rates?.bicycle?.hourly || 0 }
+                    };
+
+                    if (listing.total_spots && listing.total_spots > 0) {
+                        // For each expected spot, check status from logs
+                        for (let j = 1; j <= listing.total_spots; j++) {
+                            const spotId = `${listing.d}-spot-${j}`;
+                            const spotATag = `${KINDS.PARKING_SPOT_LISTING}:${listing.pubkey}:${spotId}`;
+                            const statusEvent = latestStatusMap.get(spotATag);
+                            const status = statusEvent?.tags.find((t: any) => t[0] === 'status')?.[1] || 'open';
+                            const type = (statusEvent?.tags.find((t: any) => t[0] === 'type')?.[1] as 'car' | 'motorcycle' | 'bicycle') || 'car';
+
+                            if (stats[type]) {
+                                stats[type].total++;
+                                if (status === 'occupied') stats[type].occupied++;
+                                else if (status === 'closed') stats[type].closed++;
+                                else stats[type].open++;
+                            }
+                        }
+                    }
+
+                    batchStats.set(listing.d, stats);
+                });
+
+                // Build spot mapping for this batch
+                const batchMapping = new Map<string, { listingId: string; type: 'car' | 'motorcycle' | 'bicycle' }>();
+                batchListings.forEach(listing => {
+                    if (listing.total_spots && listing.total_spots > 0) {
+                        for (let j = 1; j <= listing.total_spots; j++) {
+                            const spotId = `${listing.d}-spot-${j}`;
+                            const spotATag = `${KINDS.PARKING_SPOT_LISTING}:${listing.pubkey}:${spotId}`;
+                            const statusEvent = latestStatusMap.get(spotATag);
+                            const type = (statusEvent?.tags.find((t: any) => t[0] === 'type')?.[1] as 'car' | 'motorcycle' | 'bicycle') || 'car';
+                            batchMapping.set(spotId, { listingId: listing.d, type });
+                        }
+                    }
+                });
+
+                // Update stats incrementally - each card updates as its data arrives
+                setListingStats(prev => {
+                    const newMap = new Map(prev);
+                    batchStats.forEach((stats, listingD) => {
+                        newMap.set(listingD, stats);
+                    });
+                    return newMap;
+                });
+
+                // Update spot mapping incrementally
+                setSpotToListingMap(prev => {
+                    const newMap = new Map(prev);
+                    batchMapping.forEach((mapping, spotId) => {
+                        newMap.set(spotId, mapping);
+                    });
+                    return newMap;
+                });
+            }
 
         } catch (error) {
             console.error('Error fetching listings:', error);
@@ -421,7 +398,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             setIsLoading(false);
             setStatusLoading(false);
         }
-    }, [pool]);
+    }, [pool]); // Note: Uses capturedLocationRef (ref) so no dependency needed
 
     // Fetch spots for detailed view with Batching and Progressive Loading
     const fetchSpots = useCallback(async (listing: ListedParkingMetadata) => {
@@ -569,6 +546,10 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
     };
 
     useEffect(() => {
+        // Capture current location on mount (will be updated only on explicit refresh)
+        if (currentLocation && !capturedLocationRef.current) {
+            capturedLocationRef.current = currentLocation;
+        }
         fetchListings();
     }, [fetchListings]); // Fetch once on mount - tab filtering is done client-side
 
@@ -1066,6 +1047,11 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
 
                                 // Yield to UI to paint spinner
                                 setTimeout(async () => {
+                                    // Update captured location on explicit refresh
+                                    if (currentLocation) {
+                                        capturedLocationRef.current = currentLocation;
+                                    }
+
                                     // Parallelize fetches:
                                     // 1. fetchListings(true) -> Silent mode, updates list/metadata but doesn't touch loading states
                                     // 2. fetchSpots -> Updates detail view spots
@@ -1279,7 +1265,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                                 className="p-2 rounded-full active:scale-95 transition-transform flex items-center justify-center"
                                                                 style={{ WebkitTapHighlightColor: 'transparent' }}
                                                             >
-                                                                <Star size={16} className={`dark:text-white/60 ${savedListings.has(listing.id) ? 'fill-yellow-500 stroke-yellow-500 text-yellow-500 dark:text-yellow-500' : 'text-black/60'}`} />
+                                                                <Star size={16} className={savedListings.has(listing.id) ? 'fill-yellow-500 stroke-yellow-500 text-yellow-500' : 'text-zinc-400'} />
                                                             </button>
                                                             <button
                                                                 onClick={(e) => {

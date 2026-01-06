@@ -45,6 +45,8 @@ export const FAB: React.FC<FABProps> = ({
     const [sessionGeohashes, setSessionGeohashes] = useState<Set<string>>(new Set());
     // Use a ref to store spots to avoid blinking/reflickering on every update
     const spotsMapRef = useRef<Map<string, any>>(new Map());
+    // Track last search geohash to prevent unnecessary re-searches on iOS GPS drift
+    const lastSearchGeohashRef = useRef<string | null>(null);
 
     // Timer for stopwatch
     useEffect(() => {
@@ -65,9 +67,16 @@ export const FAB: React.FC<FABProps> = ({
         }
     }, [status, sessionStart]);
 
-    // Update cumulative geohashes when search location changes
+    // Update cumulative geohashes when search location changes (geohash-stabilized for iOS)
     useEffect(() => {
         if (status === 'search' && searchLocation) {
+            // Only trigger if user has moved to a different 5-digit geohash cell (~4.9km)
+            const currentGeohash = encodeGeohash(searchLocation[0], searchLocation[1], 5);
+            if (currentGeohash === lastSearchGeohashRef.current) {
+                return; // Skip - user hasn't moved significantly
+            }
+            lastSearchGeohashRef.current = currentGeohash;
+
             const newGeohashes = getGeohashNeighbors(searchLocation[0], searchLocation[1], 5);
             setSessionGeohashes(prev => {
                 const next = new Set(prev);
@@ -80,6 +89,7 @@ export const FAB: React.FC<FABProps> = ({
             setSessionGeohashes(new Set());
             spotsMapRef.current.clear();
             setOpenSpots([]);
+            lastSearchGeohashRef.current = null; // Reset on idle
         }
     }, [status, searchLocation, setOpenSpots]);
 
@@ -87,15 +97,14 @@ export const FAB: React.FC<FABProps> = ({
     useEffect(() => {
         if (!pool) return;
 
-        spotsMapRef.current.clear();
-        setOpenSpots([]);
+        // Don't clear existing spots - accumulate across geohashes
 
         if (status === 'search' && sessionGeohashes.size > 0) {
             console.log('[Parlens] Subscribing to spots in geohashes:', Array.from(sessionGeohashes));
 
             const now = Math.floor(Date.now() / 1000);
 
-            const processSpotEvent = (event: any) => {
+            const processSpotEvent = (event: any, shouldUpdateState = false) => {
                 try {
                     const currentTime = Math.floor(Date.now() / 1000);
 
@@ -108,23 +117,43 @@ export const FAB: React.FC<FABProps> = ({
                         }
                     }
 
-                    // Check valid location (Kind 31714 uses 'location', Kind 11012 uses 'g')
-                    const locTag = event.tags.find((t: string[]) => t[0] === 'location');
+                    // Determine Unique Key (Logical ID)
+                    // Kind 1714: Use 'a' tag (address) to handle updates/removals
+                    // Kind 31714: Use 'id' (ephemeral)
+                    let uniqueKey = event.id;
+                    if (event.kind === KINDS.LISTED_SPOT_LOG) {
+                        const aTag = event.tags.find((t: string[]) => t[0] === 'a')?.[1];
+                        if (aTag) uniqueKey = aTag;
+                    }
 
+                    // Check valid location
+                    const locTag = event.tags.find((t: string[]) => t[0] === 'location');
                     let lat = 0;
                     let lon = 0;
 
                     if (locTag) {
                         [lat, lon] = locTag[1].split(',').map(Number);
                     } else if (event.kind !== KINDS.LISTING_STATUS_LOG) {
-                        // If not a status log (which has 'g'), and no location tag, invalid.
                         return;
+                    }
+
+                    // Handle Status Updates (Removals)
+                    if (event.kind === KINDS.LISTED_SPOT_LOG) {
+                        const statusTag = event.tags.find((t: string[]) => t[0] === 'status');
+                        // If not open, remove from map if it exists
+                        if (statusTag?.[1] !== 'open') {
+                            if (spotsMapRef.current.has(uniqueKey)) {
+                                spotsMapRef.current.delete(uniqueKey);
+                                if (shouldUpdateState) setOpenSpots(Array.from(spotsMapRef.current.values()));
+                            }
+                            return;
+                        }
                     }
 
                     let spotType = 'car';
                     let price = 0;
                     let spotCurrency = 'USD';
-                    let spotCount = 1; // Default count
+                    let spotCount = 1;
 
                     if (event.kind === KINDS.OPEN_SPOT_BROADCAST) {
                         const priceTag = event.tags.find((t: string[]) => t[0] === 'hourly_rate');
@@ -134,16 +163,8 @@ export const FAB: React.FC<FABProps> = ({
                         spotCurrency = currencyTag ? currencyTag[1] : 'USD';
                         spotType = typeTag ? typeTag[1] : 'car';
                     } else if (event.kind === KINDS.LISTED_SPOT_LOG) {
-                        // Handle Listed Spot Status Log (Kind 1714)
-                        // Only show spots with status 'open'
-                        const statusTag = event.tags.find((t: string[]) => t[0] === 'status');
-                        if (statusTag?.[1] !== 'open') return;
-
-                        // The location tag should already be extracted above
-                        // If no location tag, skip this event
                         if (!locTag) return;
 
-                        // Extract type and rate from tags
                         const typeTag = event.tags.find((t: string[]) => t[0] === 'type');
                         const rateTag = event.tags.find((t: string[]) => t[0] === 'hourly_rate');
                         const currencyTag = event.tags.find((t: string[]) => t[0] === 'currency');
@@ -152,7 +173,6 @@ export const FAB: React.FC<FABProps> = ({
                         price = rateTag ? parseFloat(rateTag[1]) : 0;
                         spotCurrency = currencyTag?.[1] || 'USD';
 
-                        // Filter by vehicle type if specified
                         if (spotType !== vehicleType) return;
                     }
 
@@ -166,9 +186,12 @@ export const FAB: React.FC<FABProps> = ({
                         count: spotCount
                     };
 
-                    if (!spotsMapRef.current.has(event.id)) {
-                        spotsMapRef.current.set(event.id, spot);
+                    // Update Map & State
+                    spotsMapRef.current.set(uniqueKey, spot);
+                    if (shouldUpdateState) {
+                        setOpenSpots(Array.from(spotsMapRef.current.values()));
                     }
+
                 } catch (e) {
                     console.warn('[Parlens] Error parsing spot event:', e);
                 }
@@ -237,13 +260,8 @@ export const FAB: React.FC<FABProps> = ({
                 ] as any,
                 {
                     onevent(event) {
-                        processSpotEvent(event);
-                        // Update map ref and trigger state update
-                        // Using ref + debounce-like update prevents flickering
-                        if (!spotsMapRef.current.has(event.id)) {
-                            spotsMapRef.current.set(event.id, event); // Store raw event for now
-                            setOpenSpots(Array.from(spotsMapRef.current.values()));
-                        }
+                        // Use updated process logic with state update enabled
+                        processSpotEvent(event, true);
                     },
                     oneose() {
                         // End of stored events, real-time mode starts

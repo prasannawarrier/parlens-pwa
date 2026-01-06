@@ -1937,7 +1937,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                     )}
 
                     {/* Create Route Bubble - IDLE state */}
-                    {status === 'idle' && !isRouteBubbleMinimized && !dropPinMode && (
+                    {status === 'idle' && !isRouteBubbleMinimized && !dropPinMode && !isPickingLocation && (
                         <div className="bg-white dark:bg-zinc-800 shadow-lg rounded-full px-4 py-2 flex items-center gap-2 border border-black/5 dark:border-white/10 animate-in fade-in zoom-in slide-in-from-top-4 pointer-events-auto">
                             <button
                                 onClick={() => setRouteModalOpen(true)}
@@ -1958,7 +1958,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                 </div>
 
                 {/* Minimized Route Button - Top Right */}
-                {status === 'idle' && isRouteBubbleMinimized && !dropPinMode && (
+                {status === 'idle' && isRouteBubbleMinimized && !dropPinMode && !isPickingLocation && (
                     <div className="absolute top-4 right-4 z-[1000] animate-in fade-in zoom-in slide-in-from-left-4 duration-300 pointer-events-auto">
                         <button
                             onClick={() => setRouteModalOpen(true)}
@@ -1978,14 +1978,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                             {/* Elegant Crosshair Design */}
                             <div className="relative flex items-center justify-center">
                                 {/* Outer Glow/Ring */}
-                                <div className="absolute w-8 h-8 rounded-full bg-blue-500/10 dark:bg-blue-400/10 animate-pulse" />
+                                <div className="absolute w-8 h-8 rounded-full bg-orange-500/10 dark:bg-orange-400/10 animate-pulse" />
 
                                 {/* Center Dot */}
-                                <div className="w-1.5 h-1.5 bg-[#007AFF] rounded-full shadow-sm z-10" />
+                                <div className="w-1.5 h-1.5 bg-orange-500 rounded-full shadow-sm z-10" />
 
                                 {/* Cross Lines */}
-                                <div className="absolute w-6 h-[1.5px] bg-[#007AFF]/60 rounded-full" />
-                                <div className="absolute h-6 w-[1.5px] bg-[#007AFF]/60 rounded-full" />
+                                <div className="absolute w-6 h-[1.5px] bg-orange-500/60 rounded-full" />
+                                <div className="absolute h-6 w-[1.5px] bg-orange-500/60 rounded-full" />
                             </div>
                         </div>
 
@@ -1993,7 +1993,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 translate-y-12 z-[1500]">
                             <button
                                 onClick={handleDropPin}
-                                className="bg-white dark:bg-zinc-800 text-[#007AFF] px-6 py-2.5 rounded-full font-bold text-sm shadow-xl backdrop-blur-md active:scale-95 transition-all flex items-center gap-2 border border-black/5 dark:border-white/10"
+                                className="bg-white dark:bg-zinc-800 text-orange-500 px-6 py-2.5 rounded-full font-bold text-sm shadow-xl backdrop-blur-md active:scale-95 transition-all flex items-center gap-2 border border-black/5 dark:border-white/10"
                             >
                                 <MapPin size={16} className="fill-current" />
                                 Drop Pin Here
@@ -2004,7 +2004,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                         <div className="absolute top-4 right-4 z-[2000] animate-in slide-in-from-top-4 fade-in">
                             <button
                                 onClick={confirmDrop}
-                                className="bg-[#007AFF] text-white px-6 py-2.5 rounded-full font-bold shadow-lg flex items-center gap-2 transition-transform active:scale-95 active:bg-[#007AFF]"
+                                className="bg-gradient-to-r from-amber-500 to-orange-500 text-white px-6 py-2.5 rounded-full font-bold shadow-lg shadow-amber-500/30 flex items-center gap-2 transition-transform active:scale-95"
                             >
                                 <Check size={18} strokeWidth={3} />
                                 Done
@@ -2020,7 +2020,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
 
 
             {/* Bottom Left Controls */}
-            <div className={`absolute z-[1000] flex flex-col items-start gap-3 animate-in slide-in-from-left-6 transition-opacity duration-300 ${dropPinMode ? 'opacity-0 pointer-events-none' : 'opacity-100'}`} style={{
+            <div className={`absolute z-[1000] flex flex-col items-start gap-3 animate-in slide-in-from-left-6 transition-opacity duration-300 ${(dropPinMode || isPickingLocation) ? 'opacity-0 pointer-events-none' : 'opacity-100'}`} style={{
                 bottom: 'max(1.5rem, calc(env(safe-area-inset-bottom) + 0.5rem))',
                 left: 'max(1rem, env(safe-area-inset-left))'
             }}>
@@ -2059,7 +2059,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             </div>
 
             {/* Bottom Right Controls - Positioned ABOVE Drop Pin 'Done' button if needed? No, Done is top right. */}
-            <div className="absolute z-[1000] flex flex-col items-end gap-3 animate-in slide-in-from-right-6" style={{
+            <div className={`absolute z-[1000] flex flex-col items-end gap-3 animate-in slide-in-from-right-6 transition-opacity duration-300 ${(dropPinMode || isPickingLocation) ? 'opacity-0 pointer-events-none' : 'opacity-100'}`} style={{
                 bottom: 'max(1.5rem, calc(env(safe-area-inset-bottom) + 0.5rem))',
                 right: 'max(1rem, env(safe-area-inset-right))'
             }}>
@@ -2449,8 +2449,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                         <div className="relative">
                             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-4 bg-black/50" />
                             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-1 bg-black/50" />
-                            <div className="w-8 h-8 border-2 border-purple-500 rounded-full flex items-center justify-center bg-white/20 backdrop-blur-sm shadow-xl animate-in zoom-in spin-in-180 duration-500">
-                                <MapPin size={16} className="text-purple-600 fill-current" />
+                            <div className="w-8 h-8 border-2 border-amber-500 rounded-full flex items-center justify-center bg-white/20 backdrop-blur-sm shadow-xl animate-in zoom-in spin-in-180 duration-500">
+                                <MapPin size={16} className="text-amber-600 fill-current" />
                             </div>
                         </div>
                     </div>
@@ -2466,7 +2466,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                 setPickedListingLocation({ lat: viewState.latitude, lon: viewState.longitude });
                                 setIsPickingLocation(false);
                             }}
-                            className="px-6 py-3 rounded-full bg-purple-600 text-white font-bold shadow-lg shadow-purple-500/30"
+                            className="px-6 py-3 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 text-white font-bold shadow-lg shadow-amber-500/30"
                         >
                             Confirm Location
                         </button>
