@@ -996,16 +996,28 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
     }, [spots]);
 
     // Enhanced filtered spots with floor and status filters
-    const filteredSpots = useMemo(() => spots.filter(s => {
-        if (vehicleFilter !== 'all' && s.type !== vehicleFilter) return false;
-        if (floorFilter !== 'all' && s.floor !== floorFilter) return false;
-        if (statusFilter !== 'all') {
+    // Non-owners only see open spots
+    const filteredSpots = useMemo(() => {
+        const isOwnerOrManager = selectedListing && pubkey && (
+            selectedListing.owners.includes(pubkey) || selectedListing.managers.includes(pubkey)
+        );
+
+        return spots.filter(s => {
+            if (vehicleFilter !== 'all' && s.type !== vehicleFilter) return false;
+            if (floorFilter !== 'all' && s.floor !== floorFilter) return false;
+
             const status = spotStatuses.get(s.d);
             const spotStatus = status?.status || 'open';
-            if (spotStatus !== statusFilter) return false;
-        }
-        return true;
-    }), [spots, vehicleFilter, floorFilter, statusFilter, spotStatuses]);
+
+            // Non-owners in public/private tabs only see open spots
+            if (!isOwnerOrManager && spotStatus !== 'open') return false;
+
+            if (statusFilter !== 'all') {
+                if (spotStatus !== statusFilter) return false;
+            }
+            return true;
+        });
+    }, [spots, vehicleFilter, floorFilter, statusFilter, spotStatuses, selectedListing, pubkey]);
 
     return (
         <div className="fixed inset-0 z-[3000] bg-zinc-50 dark:bg-black flex flex-col transition-colors">
@@ -1205,8 +1217,12 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                         <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-zinc-500 px-4 py-2 overflow-x-auto">
                             <div className="flex items-center gap-4">
                                 <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-green-500"></div>Open</div>
-                                <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-red-500"></div>Occupied</div>
-                                <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-zinc-400"></div>Closed</div>
+                                {activeTab === 'my' && (
+                                    <>
+                                        <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-red-500"></div>Occupied</div>
+                                        <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-zinc-400"></div>Closed</div>
+                                    </>
+                                )}
                             </div>
                             <button
                                 onClick={() => setShowSavedOnly(!showSavedOnly)}
@@ -1250,7 +1266,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                 <div className="flex flex-col items-start gap-1 mb-2">
                                                     <div className="flex items-center justify-between w-full gap-1.5">
                                                         <div className="min-w-0 flex items-center h-full">
-                                                            <h3 className="font-bold text-zinc-900 dark:text-white text-sm leading-tight truncate">{listing.listing_name}</h3>
+                                                            <h3 className="font-bold text-zinc-900 dark:text-white text-base leading-tight truncate">{listing.listing_name}</h3>
                                                         </div>
 
                                                         {/* Access List Button */}
@@ -1263,7 +1279,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                                 className="p-2 rounded-full active:scale-95 transition-transform flex items-center justify-center"
                                                                 style={{ WebkitTapHighlightColor: 'transparent' }}
                                                             >
-                                                                <Star size={14} className={`dark:text-white/60 ${savedListings.has(listing.id) ? 'fill-yellow-500 stroke-yellow-500 text-yellow-500 dark:text-yellow-500' : 'text-black/60'}`} />
+                                                                <Star size={16} className={`dark:text-white/60 ${savedListings.has(listing.id) ? 'fill-yellow-500 stroke-yellow-500 text-yellow-500 dark:text-yellow-500' : 'text-black/60'}`} />
                                                             </button>
                                                             <button
                                                                 onClick={(e) => {
@@ -1273,15 +1289,15 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                                 style={{ WebkitTapHighlightColor: 'transparent' }}
                                                                 className="p-1.5 text-zinc-400 flex items-center justify-center"
                                                             >
-                                                                <Users size={14} />
+                                                                <Users size={16} />
                                                             </button>
                                                             {activeTab === 'my' && (listing.owners.includes(pubkey!) || listing.managers.includes(pubkey!)) ? (
                                                                 <>
                                                                     <button onClick={(e) => { e.stopPropagation(); setEditingListing(listing); setShowCreateForm(true); }} style={{ WebkitTapHighlightColor: 'transparent' }} className="p-1.5 text-zinc-400 flex items-center justify-center">
-                                                                        <Pencil size={14} />
+                                                                        <Pencil size={16} />
                                                                     </button>
                                                                     <button onClick={(e) => { e.stopPropagation(); deleteListing(listing); }} style={{ WebkitTapHighlightColor: 'transparent' }} className="p-1.5 text-zinc-400 flex items-center justify-center">
-                                                                        <Trash2 size={14} />
+                                                                        <Trash2 size={16} />
                                                                     </button>
                                                                 </>
                                                             ) : (
@@ -1291,7 +1307,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                                         style={{ WebkitTapHighlightColor: 'transparent' }}
                                                                         className="p-1.5 text-zinc-400 flex items-center justify-center"
                                                                     >
-                                                                        <MoreVertical size={14} />
+                                                                        <MoreVertical size={16} />
                                                                     </button>
                                                                     {showHideMenu === listing.id && (
                                                                         <>
@@ -1381,13 +1397,19 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                                     <div className="text-xl font-bold text-zinc-300 dark:text-white/20">...</div>
                                                                 ) : isAvailable ? (
                                                                     <div className="flex flex-col items-center w-full">
-                                                                        <div className="font-bold text-sm flex items-center gap-1.5 mb-1.5">
-                                                                            <span className="text-green-500">{v.data?.open || 0}</span>
-                                                                            <span className="text-zinc-300 dark:text-white/20">|</span>
-                                                                            <span className="text-red-500">{v.data?.occupied || 0}</span>
-                                                                            <span className="text-zinc-300 dark:text-white/20">|</span>
-                                                                            <span className="text-zinc-400">{v.data?.closed || 0}</span>
-                                                                        </div>
+                                                                        {activeTab === 'my' ? (
+                                                                            // My Listings: Show full breakdown (Open|Occupied|Closed)
+                                                                            <div className="font-bold text-sm flex items-center gap-1.5 mb-1.5">
+                                                                                <span className="text-green-500">{v.data?.open || 0}</span>
+                                                                                <span className="text-zinc-300 dark:text-white/20">|</span>
+                                                                                <span className="text-red-500">{v.data?.occupied || 0}</span>
+                                                                                <span className="text-zinc-300 dark:text-white/20">|</span>
+                                                                                <span className="text-zinc-400">{v.data?.closed || 0}</span>
+                                                                            </div>
+                                                                        ) : (
+                                                                            // Public/Private: Show only Open count
+                                                                            <div className="font-bold text-lg text-green-500 mb-1.5">{v.data?.open || 0}</div>
+                                                                        )}
                                                                         {showRate && (
                                                                             <div className="w-full bg-black/5 dark:bg-white/5 rounded-lg py-0.5 px-2">
                                                                                 <div className="text-zinc-900 dark:text-white font-bold text-sm">
@@ -1405,138 +1427,139 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                 </div>
 
                                                 {/* Close All Toggle */}
-                                                {activeTab === 'my' && (listing.owners.includes(pubkey!) || listing.managers.includes(pubkey!)) && (
-                                                    <div className="mt-3 pt-3 border-t border-black/5 dark:border-white/5 flex items-center justify-between relative" onClick={(e) => e.stopPropagation()}>
-                                                        <span className={`text-sm font-semibold ${!isClosed ? 'text-green-600 dark:text-green-400' : 'text-zinc-500 dark:text-white/50'}`}>
-                                                            {!isClosed ? 'Listing Open' : 'Listing Closed'}
-                                                        </span>
-                                                        <button
-                                                            onClick={async () => {
-                                                                const newStatus = isClosed ? 'open' : 'closed';
-                                                                const confirmMsg = newStatus === 'closed'
-                                                                    ? 'This will mark ALL spots as CLOSED. Continue?'
-                                                                    : 'This will mark ALL spots as OPEN. Continue?';
-                                                                if (!confirm(confirmMsg)) return;
+                                                {
+                                                    activeTab === 'my' && (listing.owners.includes(pubkey!) || listing.managers.includes(pubkey!)) && (
+                                                        <div className="mt-3 pt-3 border-t border-black/5 dark:border-white/5 flex items-center justify-between relative" onClick={(e) => e.stopPropagation()}>
+                                                            <span className={`text-sm font-semibold ${!isClosed ? 'text-green-600 dark:text-green-400' : 'text-zinc-500 dark:text-white/50'}`}>
+                                                                {!isClosed ? 'Listing Open' : 'Listing Closed'}
+                                                            </span>
+                                                            <button
+                                                                onClick={async () => {
+                                                                    const newStatus = isClosed ? 'open' : 'closed';
+                                                                    const confirmMsg = newStatus === 'closed'
+                                                                        ? 'This will mark ALL spots as CLOSED. Continue?'
+                                                                        : 'This will mark ALL spots as OPEN. Continue?';
+                                                                    if (!confirm(confirmMsg)) return;
 
-                                                                setIsTogglingStatus(true);
-                                                                try {
-                                                                    // Fetch all spots for this listing
-                                                                    const aTag = `${KINDS.LISTED_PARKING_METADATA}:${listing.pubkey}:${listing.d}`;
-                                                                    const spotEvents = await pool.querySync(DEFAULT_RELAYS, {
-                                                                        kinds: [KINDS.PARKING_SPOT_LISTING],
-                                                                        '#a': [aTag]
-                                                                    });
+                                                                    setIsTogglingStatus(true);
+                                                                    try {
+                                                                        // Fetch all spots for this listing
+                                                                        const aTag = `${KINDS.LISTED_PARKING_METADATA}:${listing.pubkey}:${listing.d}`;
+                                                                        const spotEvents = await pool.querySync(DEFAULT_RELAYS, {
+                                                                            kinds: [KINDS.PARKING_SPOT_LISTING],
+                                                                            '#a': [aTag]
+                                                                        });
 
-                                                                    // Calculate new Snapshot Stats immediately
-                                                                    const snapshotStats = {
-                                                                        car: { open: 0, occupied: 0, total: 0, closed: 0, rate: 0 },
-                                                                        motorcycle: { open: 0, occupied: 0, total: 0, closed: 0, rate: 0 },
-                                                                        bicycle: { open: 0, occupied: 0, total: 0, closed: 0, rate: 0 }
-                                                                    };
+                                                                        // Calculate new Snapshot Stats immediately
+                                                                        const snapshotStats = {
+                                                                            car: { open: 0, occupied: 0, total: 0, closed: 0, rate: 0 },
+                                                                            motorcycle: { open: 0, occupied: 0, total: 0, closed: 0, rate: 0 },
+                                                                            bicycle: { open: 0, occupied: 0, total: 0, closed: 0, rate: 0 }
+                                                                        };
 
-                                                                    // Publish status log (Kind 1714) for each spot AND aggregate snapshot
-                                                                    // ... existing loop ... 
-                                                                    // Note: We need to preserve the rate from existing stats if possible, or recalculate
-                                                                    const currentStats = listingStats.get(listing.d);
+                                                                        // Publish status log (Kind 1714) for each spot AND aggregate snapshot
+                                                                        // ... existing loop ... 
+                                                                        // Note: We need to preserve the rate from existing stats if possible, or recalculate
+                                                                        const currentStats = listingStats.get(listing.d);
 
-                                                                    const promises = spotEvents.map(async (spot) => {
-                                                                        const spotD = spot.tags.find((t: string[]) => t[0] === 'd')?.[1];
-                                                                        let type = spot.tags.find((t: string[]) => t[0] === 'type')?.[1]?.toLowerCase() as 'car' | 'motorcycle' | 'bicycle' || 'car';
-                                                                        if (!['car', 'motorcycle', 'bicycle'].includes(type)) type = 'car';
+                                                                        const promises = spotEvents.map(async (spot) => {
+                                                                            const spotD = spot.tags.find((t: string[]) => t[0] === 'd')?.[1];
+                                                                            let type = spot.tags.find((t: string[]) => t[0] === 'type')?.[1]?.toLowerCase() as 'car' | 'motorcycle' | 'bicycle' || 'car';
+                                                                            if (!['car', 'motorcycle', 'bicycle'].includes(type)) type = 'car';
 
-                                                                        const spotATag = `${KINDS.PARKING_SPOT_LISTING}:${spot.pubkey}:${spotD}`;
+                                                                            const spotATag = `${KINDS.PARKING_SPOT_LISTING}:${spot.pubkey}:${spotD}`;
 
-                                                                        // Update stats
-                                                                        if (snapshotStats[type]) {
-                                                                            snapshotStats[type].total++;
-                                                                            if (newStatus === 'closed') snapshotStats[type].closed++;
-                                                                            else snapshotStats[type].open++;
+                                                                            // Update stats
+                                                                            if (snapshotStats[type]) {
+                                                                                snapshotStats[type].total++;
+                                                                                if (newStatus === 'closed') snapshotStats[type].closed++;
+                                                                                else snapshotStats[type].open++;
 
-                                                                            // Preserve or fetch rates? For snapshot, rate is average/min?
-                                                                            // Using currentStats rates to persist UI values 
-                                                                            if (currentStats && currentStats[type]) {
-                                                                                snapshotStats[type].rate = currentStats[type].rate;
+                                                                                // Preserve or fetch rates? For snapshot, rate is average/min?
+                                                                                // Using currentStats rates to persist UI values 
+                                                                                if (currentStats && currentStats[type]) {
+                                                                                    snapshotStats[type].rate = currentStats[type].rate;
+                                                                                }
                                                                             }
-                                                                        }
 
-                                                                        // Get rate for this spot type
-                                                                        const spotRate = listing.rates?.[type]?.hourly || currentStats?.[type]?.rate || 0;
-                                                                        const spotCurrency = listing.rates?.[type]?.currency || 'USD';
+                                                                            // Get rate for this spot type
+                                                                            const spotRate = listing.rates?.[type]?.hourly || currentStats?.[type]?.rate || 0;
+                                                                            const spotCurrency = listing.rates?.[type]?.currency || 'USD';
 
-                                                                        // Compute 5-char geohash for search compatibility
-                                                                        const [lat, lon] = listing.location.split(',').map((s: string) => parseFloat(s.trim()));
-                                                                        const searchableGeohash = encodeGeohash(lat, lon, 5);
+                                                                            // Compute 5-char geohash for search compatibility
+                                                                            const [lat, lon] = listing.location.split(',').map((s: string) => parseFloat(s.trim()));
+                                                                            const searchableGeohash = encodeGeohash(lat, lon, 5);
 
-                                                                        const statusEvent = {
-                                                                            kind: KINDS.LISTED_SPOT_LOG,
+                                                                            const statusEvent = {
+                                                                                kind: KINDS.LISTED_SPOT_LOG,
+                                                                                created_at: Math.floor(Date.now() / 1000),
+                                                                                tags: [
+                                                                                    ['a', spotATag],
+                                                                                    ['status', newStatus],
+                                                                                    ['updated_by', pubkey],
+                                                                                    ['g', searchableGeohash],
+                                                                                    ['location', listing.location],
+                                                                                    ['type', type],
+                                                                                    ['hourly_rate', String(spotRate)],
+                                                                                    ['currency', spotCurrency],
+                                                                                    ['client', 'parlens']
+                                                                                ],
+                                                                                content: JSON.stringify({
+                                                                                    hourly_rate: spotRate,
+                                                                                    currency: spotCurrency
+                                                                                })
+                                                                            };
+                                                                            const signed = await signEvent(statusEvent);
+                                                                            return pool.publish(DEFAULT_RELAYS, signed);
+                                                                        });
+
+                                                                        await Promise.allSettled(promises);
+
+                                                                        // Publish Kind 1147 Listing Status Log
+                                                                        const listingATag = `${KINDS.LISTED_PARKING_METADATA}:${listing.pubkey}:${listing.d}`;
+                                                                        const statusLogEvent = {
+                                                                            kind: KINDS.LISTING_STATUS_LOG,
                                                                             created_at: Math.floor(Date.now() / 1000),
                                                                             tags: [
-                                                                                ['a', spotATag],
-                                                                                ['status', newStatus],
-                                                                                ['updated_by', pubkey],
-                                                                                ['g', searchableGeohash],
-                                                                                ['location', listing.location],
-                                                                                ['type', type],
-                                                                                ['hourly_rate', String(spotRate)],
-                                                                                ['currency', spotCurrency],
+                                                                                ['a', listingATag],
+                                                                                ['g', listing.g],
                                                                                 ['client', 'parlens']
                                                                             ],
-                                                                            content: JSON.stringify({
-                                                                                hourly_rate: spotRate,
-                                                                                currency: spotCurrency
-                                                                            })
+                                                                            content: JSON.stringify(snapshotStats)
                                                                         };
-                                                                        const signed = await signEvent(statusEvent);
-                                                                        return pool.publish(DEFAULT_RELAYS, signed);
-                                                                    });
+                                                                        await Promise.allSettled(pool.publish(DEFAULT_RELAYS, await signEvent(statusLogEvent)));
 
-                                                                    await Promise.allSettled(promises);
+                                                                        // Update listing metadata
+                                                                        const newTags = listing.originalEvent.tags.filter((t: string[]) => t[0] !== 'status');
+                                                                        newTags.push(['status', newStatus]);
 
-                                                                    // Publish Kind 1147 Listing Status Log
-                                                                    const listingATag = `${KINDS.LISTED_PARKING_METADATA}:${listing.pubkey}:${listing.d}`;
-                                                                    const statusLogEvent = {
-                                                                        kind: KINDS.LISTING_STATUS_LOG,
-                                                                        created_at: Math.floor(Date.now() / 1000),
-                                                                        tags: [
-                                                                            ['a', listingATag],
-                                                                            ['g', listing.g],
-                                                                            ['client', 'parlens']
-                                                                        ],
-                                                                        content: JSON.stringify(snapshotStats)
-                                                                    };
-                                                                    await Promise.allSettled(pool.publish(DEFAULT_RELAYS, await signEvent(statusLogEvent)));
+                                                                        const metaEvent = {
+                                                                            ...listing.originalEvent,
+                                                                            created_at: Math.floor(Date.now() / 1000),
+                                                                            tags: newTags
+                                                                        };
+                                                                        const signedMeta = await signEvent(metaEvent);
+                                                                        await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedMeta));
 
-                                                                    // Update listing metadata
-                                                                    const newTags = listing.originalEvent.tags.filter((t: string[]) => t[0] !== 'status');
-                                                                    newTags.push(['status', newStatus]);
+                                                                        // NO Local Updates (Relay Only)
 
-                                                                    const metaEvent = {
-                                                                        ...listing.originalEvent,
-                                                                        created_at: Math.floor(Date.now() / 1000),
-                                                                        tags: newTags
-                                                                    };
-                                                                    const signedMeta = await signEvent(metaEvent);
-                                                                    await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedMeta));
+                                                                        // Wait for propagation (1.5s) then Silent Refresh
+                                                                        await new Promise(resolve => setTimeout(resolve, 1500));
+                                                                        await fetchListings(true);
 
-                                                                    // NO Local Updates (Relay Only)
-
-                                                                    // Wait for propagation (1.5s) then Silent Refresh
-                                                                    await new Promise(resolve => setTimeout(resolve, 1500));
-                                                                    await fetchListings(true);
-
-                                                                } catch (e) {
-                                                                    console.error('Failed to update status:', e);
-                                                                    alert('Failed to update status');
-                                                                } finally {
-                                                                    setIsTogglingStatus(false);
-                                                                }
-                                                            }}
-                                                            className={`relative h-7 w-12 rounded-full transition-colors ${!isClosed ? 'bg-green-500' : 'bg-zinc-200 dark:bg-white/10'}`}
-                                                        >
-                                                            <span className={`block h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${!isClosed ? 'translate-x-[26px]' : 'translate-x-[4px]'}`} />
-                                                        </button>
-                                                    </div>
-                                                )
+                                                                    } catch (e) {
+                                                                        console.error('Failed to update status:', e);
+                                                                        alert('Failed to update status');
+                                                                    } finally {
+                                                                        setIsTogglingStatus(false);
+                                                                    }
+                                                                }}
+                                                                className={`relative h-7 w-12 rounded-full transition-colors ${!isClosed ? 'bg-green-500' : 'bg-zinc-200 dark:bg-white/10'}`}
+                                                            >
+                                                                <span className={`block h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${!isClosed ? 'translate-x-[26px]' : 'translate-x-[4px]'}`} />
+                                                            </button>
+                                                        </div>
+                                                    )
                                                 }
                                             </div>
                                         );
