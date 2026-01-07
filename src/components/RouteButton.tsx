@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { KINDS, DEFAULT_RELAYS } from '../lib/nostr';
 import type { RouteLogContent } from '../lib/nostr';
 import { encryptParkingLog, decryptParkingLog } from '../lib/encryption';
-import { parseCoordinate, formatCoords, recoverPlusCode } from '../lib/geo';
+import { getSuggestions, parseCoordinate, formatCoords } from '../lib/geo';
 
 interface Waypoint {
     id: string;
@@ -47,128 +47,7 @@ interface NominatimResult {
     type: string;
 }
 
-const OnlineSearch: React.FC<{ query: string; onSelect: (result: NominatimResult) => void; countryCode: string | null; currentLocation: [number, number] | null }> = ({ query, onSelect, countryCode, currentLocation }) => {
-    const [result, setResult] = useState<NominatimResult | null>(null);
-    const [loading, setLoading] = useState(false);
 
-    useEffect(() => {
-        const fetchLocation = async () => {
-            if (!query || query.length < 4) return;
-            setLoading(true);
-
-            // Run both searches in parallel for faster results
-            const plusCodeSearch = async (): Promise<NominatimResult | null> => {
-                try {
-                    const firstSpaceIndex = query.indexOf(' ');
-                    if (firstSpaceIndex > 3 && query.includes('+')) {
-                        const potentialCode = query.substring(0, firstSpaceIndex).trim();
-                        const context = query.substring(firstSpaceIndex + 1).trim();
-
-                        if (potentialCode.includes('+') && context.length > 0) {
-                            console.log('[Parlens] Plus Code search:', potentialCode, 'in', context);
-                            const contextRes = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(context)}&format=json&limit=1`);
-                            const contextData = await contextRes.json();
-
-                            if (contextData && contextData.length > 0) {
-                                const refLat = parseFloat(contextData[0].lat);
-                                const refLon = parseFloat(contextData[0].lon);
-                                const recovered = recoverPlusCode(potentialCode, refLat, refLon);
-                                if (recovered) {
-                                    return {
-                                        place_id: -1,
-                                        lat: recovered.lat.toString(),
-                                        lon: recovered.lon.toString(),
-                                        display_name: `Plus Code: ${potentialCode.toUpperCase()}, ${contextData[0].display_name}`,
-                                        type: 'plus_code'
-                                    };
-                                }
-                            }
-                        }
-                    }
-                } catch (e) {
-                    console.error('[Parlens] Plus Code search error:', e);
-                }
-                return null;
-            };
-
-            const nominatimSearch = async (): Promise<NominatimResult | null> => {
-                try {
-                    let url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`;
-                    if (countryCode) {
-                        url += `&countrycodes=${countryCode}`;
-                    }
-                    if (currentLocation) {
-                        const [lat, lon] = currentLocation;
-                        const viewbox = `${lon - 1},${lat + 1},${lon + 1},${lat - 1}`;
-                        url += `&viewbox=${viewbox}`;
-                    }
-
-                    console.log('[Parlens] Nominatim search:', url);
-                    const response = await fetch(url);
-                    const data = await response.json();
-                    console.log('[Parlens] Nominatim result:', data);
-                    return data && data.length > 0 ? data[0] : null;
-                } catch (e) {
-                    console.error('[Parlens] Nominatim search error:', e);
-                    return null;
-                }
-            };
-
-            // Run both in parallel
-            const [plusCodeResult, nominatimResult] = await Promise.all([
-                plusCodeSearch(),
-                nominatimSearch()
-            ]);
-
-            // Prefer Plus Code result if available, otherwise use Nominatim
-            if (plusCodeResult) {
-                setResult(plusCodeResult);
-            } else if (nominatimResult) {
-                setResult(nominatimResult);
-            } else {
-                setResult(null);
-            }
-
-            setLoading(false);
-        };
-
-        const timeoutId = setTimeout(fetchLocation, 500);
-        return () => clearTimeout(timeoutId);
-    }, [query, countryCode]); // currentLocation intentionally excluded to prevent loops
-
-    if (loading) {
-        return (
-            <div className="mb-2 p-3 text-xs text-zinc-400 dark:text-white/40 italic flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full border-2 border-zinc-300 border-t-zinc-600 animate-spin" />
-                Searching...
-            </div>
-        );
-    }
-
-    if (!result) return null;
-
-    return (
-        <div className="mb-2 rounded-2xl overflow-hidden bg-purple-50 dark:bg-purple-500/10 border border-purple-500/20">
-            <div className="px-3 py-1.5 text-xs font-medium text-purple-700 dark:text-purple-400 bg-purple-100/50 dark:bg-purple-500/5">
-                🌍 {result.type === 'plus_code' ? 'Plus Code Location' : 'Global Search Result'}
-            </div>
-            <button
-                onClick={() => onSelect(result)}
-                className="w-full p-3 flex items-center gap-3 transition-colors text-left"
-            >
-                <MapPin size={16} className="text-purple-600 dark:text-purple-400 shrink-0" />
-                <div className="flex-1 truncate">
-                    <div className="text-sm font-bold text-zinc-900 dark:text-white truncate">
-                        {result.display_name.split(',')[0]}
-                    </div>
-                    <div className="text-xs text-zinc-500 dark:text-white/60 truncate">
-                        {result.display_name}
-                    </div>
-                </div>
-            </button>
-        </div>
-    );
-};
 
 export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteChange, currentLocation, onDropPinModeChange, pendingWaypoints, onDropPinConsumed, onOpenChange, onWaypointsChange, onRequestOrientationPermission, isOpen: controlledIsOpen, onClose, hideTrigger, onRouteCreated }) => {
     const { pool, pubkey, signEvent } = useAuth();
@@ -215,8 +94,29 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
     const [isDeleting, setIsDeleting] = useState(false);
     const [countryCode, setCountryCode] = useState<string | null>(null);
     const [snappedWaypoints, setSnappedWaypoints] = useState<{ [index: number]: { lat: number, lon: number } }>({});
+    const [onlineSuggestions, setOnlineSuggestions] = useState<NominatimResult[]>([]);
+    const [isSearchingOnline, setIsSearchingOnline] = useState(false);
 
-    // Track locally deleted d-tags to prevent re-appearing after refetch
+    // Online search effect
+    useEffect(() => {
+        if (!searchQuery || searchQuery.length < 3) {
+            setOnlineSuggestions([]);
+            return;
+        }
+
+        // Skip if coordinate/plus code
+        if (parseCoordinate(searchQuery)) return;
+
+        setIsSearchingOnline(true);
+        const timer = setTimeout(() => {
+            getSuggestions(searchQuery, countryCode, currentLocation, 1) // Limit to 1 result
+                .then(setOnlineSuggestions)
+                .catch(console.error)
+                .finally(() => setIsSearchingOnline(false));
+        }, 500);
+
+        return () => clearTimeout(timer);
+    }, [searchQuery, countryCode, currentLocation]);
     const deletedDTagsRef = useRef<Set<string>>(new Set());
 
     // Fetch country code once when location is available
@@ -825,14 +725,17 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                             <label className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-white/20 ml-2">
                                 Add Waypoint
                             </label>
-                            <div className="relative">
+                            <div className="relative z-[2000]">
                                 <input
                                     ref={inputRef}
                                     type="text"
                                     placeholder="Search waypoint"
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
-                                    className="w-full h-14 rounded-2xl bg-zinc-100 dark:bg-white/5 border border-black/5 dark:border-white/10 px-4 pr-12 text-zinc-900 dark:text-white placeholder:text-zinc-400 dark:placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    className={`w-full h-14 bg-zinc-100 dark:bg-white/5 border border-black/5 dark:border-white/10 px-4 pr-12 text-zinc-900 dark:text-white placeholder:text-zinc-400 dark:placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-blue-500 ${(savedWaypointMatches.length > 0 || onlineSuggestions.length > 0 || parseCoordinate(searchQuery))
+                                        ? 'rounded-t-xl rounded-b-none'
+                                        : 'rounded-xl'
+                                        }`}
                                 />
                                 {searchQuery && (
                                     <button
@@ -842,109 +745,143 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                                         <X size={16} />
                                     </button>
                                 )}
-                            </div>
 
-                            {/* Coordinate / Plus Code Match (Sync) */}
-                            {(() => {
-                                const parsed = parseCoordinate(searchQuery);
-                                if (parsed) {
-                                    return (
-                                        <div className="mb-2 rounded-2xl overflow-hidden bg-blue-50 dark:bg-blue-500/10 border border-blue-500/20">
-                                            <div className="px-3 py-1.5 text-xs font-medium text-blue-700 dark:text-blue-400 bg-blue-100/50 dark:bg-blue-500/5">
-                                                📍 {parsed.type === 'plus_code' ? 'Plus Code Location' : 'Coordinate'}
+                                {/* Unified Dropdown */}
+                                {(savedWaypointMatches.length > 0 || onlineSuggestions.length > 0 || parseCoordinate(searchQuery)) && (
+                                    <div className="absolute top-full left-0 right-0 bg-white dark:bg-zinc-900 rounded-b-xl shadow-xl border-x border-b border-black/5 dark:border-white/5 overflow-hidden z-[3000]">
+                                        <div className="max-h-[50vh] overflow-y-auto">
+                                            {/* Tags Header */}
+                                            <div className="px-4 py-2 bg-zinc-50 dark:bg-white/5 border-t border-black/5 dark:border-white/5 flex items-center gap-2 overflow-x-auto">
+                                                {parseCoordinate(searchQuery) && (
+                                                    <span className="shrink-0 inline-block px-2.5 py-1 rounded-lg bg-gradient-to-r from-blue-500/10 to-cyan-500/10 dark:from-blue-500/20 dark:to-cyan-500/20 text-[10px] font-bold text-blue-600 dark:text-blue-300 uppercase tracking-wider border border-blue-200 dark:border-blue-500/20">
+                                                        {parseCoordinate(searchQuery)?.type === 'plus_code' ? 'Plus Code' : 'Coordinate'}
+                                                    </span>
+                                                )}
+                                                {savedWaypointMatches.length > 0 && (
+                                                    <span className="shrink-0 inline-block px-2.5 py-1 rounded-lg bg-gradient-to-r from-emerald-500/10 to-teal-500/10 dark:from-emerald-500/20 dark:to-teal-500/20 text-[10px] font-bold text-emerald-600 dark:text-emerald-300 uppercase tracking-wider border border-emerald-200 dark:border-emerald-500/20">
+                                                        Saved Places
+                                                    </span>
+                                                )}
+                                                {onlineSuggestions.length > 0 && (
+                                                    <span className="shrink-0 inline-block px-2.5 py-1 rounded-lg bg-gradient-to-r from-violet-500/10 to-fuchsia-500/10 dark:from-violet-500/20 dark:to-fuchsia-500/20 text-[10px] font-bold text-violet-600 dark:text-violet-300 uppercase tracking-wider border border-violet-200 dark:border-violet-500/20">
+                                                        OSM Search
+                                                    </span>
+                                                )}
                                             </div>
-                                            <button
-                                                onClick={() => {
-                                                    const newWaypoint: Waypoint = {
-                                                        id: crypto.randomUUID(),
-                                                        name: parsed.type === 'plus_code' ? `Plus Code: ${searchQuery}` : `Loc: ${formatCoords(parsed.lat, parsed.lon)}`,
-                                                        lat: parsed.lat,
-                                                        lon: parsed.lon
-                                                    };
-                                                    setWaypoints(prev => [...prev, newWaypoint]);
-                                                    setSearchQuery('');
-                                                    setRouteCoords(null);
-                                                    setAlternateRouteCoords(null);
-                                                    setShowOnMap(false);
-                                                    onRouteChange(null, null, null, false);
-                                                    setSnappedWaypoints({});
-                                                }}
-                                                className="w-full p-3 flex items-center gap-3 transition-colors text-left"
-                                            >
-                                                <MapPin size={16} className="text-blue-600 dark:text-blue-400 shrink-0" />
-                                                <div className="flex-1 truncate">
-                                                    <div className="text-sm font-bold text-zinc-900 dark:text-white">
-                                                        Add Location
+
+                                            {/* 1. Coordinate Match */}
+                                            {(() => {
+                                                const parsed = parseCoordinate(searchQuery);
+                                                if (parsed) {
+                                                    return (
+                                                        <button
+                                                            onClick={() => {
+                                                                const newWaypoint: Waypoint = {
+                                                                    id: crypto.randomUUID(),
+                                                                    name: parsed.type === 'plus_code' ? `Plus Code: ${searchQuery}` : `Loc: ${formatCoords(parsed.lat, parsed.lon)}`,
+                                                                    lat: parsed.lat,
+                                                                    lon: parsed.lon
+                                                                };
+                                                                setWaypoints(prev => [...prev, newWaypoint]);
+                                                                setSearchQuery('');
+                                                                setRouteCoords(null);
+                                                                setAlternateRouteCoords(null);
+                                                                setShowOnMap(false);
+                                                                onRouteChange(null, null, null, false);
+                                                                setSnappedWaypoints({});
+                                                            }}
+                                                            className="w-full flex items-start gap-3 p-4 text-left hover:bg-zinc-50 dark:hover:bg-white/5 active:bg-zinc-100 transition-colors border-t border-black/5 dark:border-white/5 first:border-t-0 group"
+                                                        >
+                                                            <div className="mt-0.5 p-2 rounded-full bg-blue-50 dark:bg-blue-500/10 text-blue-500 group-hover:text-blue-600 dark:group-hover:text-blue-400 shrink-0 transition-colors">
+                                                                <MapPin size={16} />
+                                                            </div>
+                                                            <div className="flex-1 min-w-0">
+                                                                <div className="text-sm font-semibold text-zinc-900 dark:text-white truncate">
+                                                                    Add Location
+                                                                </div>
+                                                                <div className="text-xs text-zinc-500 dark:text-white/60 truncate">
+                                                                    {parsed.lat.toFixed(6)}, {parsed.lon.toFixed(6)}
+                                                                </div>
+                                                            </div>
+                                                        </button>
+                                                    );
+                                                }
+                                                return null;
+                                            })()}
+
+                                            {/* 2. Saved Matches */}
+                                            {savedWaypointMatches.map((match, index) => (
+                                                <button
+                                                    key={`saved-${index}`}
+                                                    onClick={() => {
+                                                        const newWaypoint: Waypoint = {
+                                                            id: crypto.randomUUID(),
+                                                            name: match.name,
+                                                            lat: match.lat,
+                                                            lon: match.lon
+                                                        };
+                                                        setWaypoints(prev => [...prev, newWaypoint]);
+                                                        setSearchQuery('');
+                                                        setRouteCoords(null);
+                                                        setAlternateRouteCoords(null);
+                                                        setShowOnMap(false);
+                                                        onRouteChange(null, null, null, false);
+                                                        setSnappedWaypoints({});
+                                                    }}
+                                                    className="w-full flex items-start gap-3 p-4 text-left hover:bg-zinc-50 dark:hover:bg-white/5 active:bg-zinc-100 transition-colors border-t border-black/5 dark:border-white/5 first:border-t-0 group"
+                                                >
+                                                    <div className="mt-0.5 p-2 rounded-full bg-emerald-50 dark:bg-emerald-500/10 text-emerald-500 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 shrink-0 transition-colors">
+                                                        <MapPin size={16} />
                                                     </div>
-                                                    <div className="text-xs text-zinc-500 dark:text-white/60">
-                                                        {parsed.lat.toFixed(6)}, {parsed.lon.toFixed(6)}
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="text-sm font-semibold text-zinc-900 dark:text-white truncate">
+                                                            {match.name}
+                                                        </div>
+                                                        <div className="text-xs text-zinc-500 dark:text-white/60 truncate">
+                                                            Saved from your routes
+                                                        </div>
                                                     </div>
-                                                </div>
-                                            </button>
+                                                </button>
+                                            ))}
+
+                                            {/* 3. Online Matches */}
+                                            {onlineSuggestions.map((result) => (
+                                                <button
+                                                    key={result.place_id}
+                                                    onClick={() => {
+                                                        const newWaypoint: Waypoint = {
+                                                            id: crypto.randomUUID(),
+                                                            name: result.display_name.split(',')[0],
+                                                            lat: parseFloat(result.lat),
+                                                            lon: parseFloat(result.lon)
+                                                        };
+                                                        setWaypoints(prev => [...prev, newWaypoint]);
+                                                        setSearchQuery('');
+                                                        setRouteCoords(null);
+                                                        setAlternateRouteCoords(null);
+                                                        setShowOnMap(false);
+                                                        onRouteChange(null, null, null, false);
+                                                        setSnappedWaypoints({});
+                                                    }}
+                                                    className="w-full flex items-start gap-3 p-4 text-left hover:bg-zinc-50 dark:hover:bg-white/5 active:bg-zinc-100 transition-colors border-t border-black/5 dark:border-white/5 first:border-t-0 group"
+                                                >
+                                                    <div className="mt-0.5 p-2 rounded-full bg-violet-50 dark:bg-violet-500/10 text-violet-500 group-hover:text-violet-600 dark:group-hover:text-violet-400 shrink-0 transition-colors">
+                                                        <MapPin size={16} />
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="text-sm font-semibold text-zinc-900 dark:text-white truncate">
+                                                            {result.display_name.split(',')[0]}
+                                                        </div>
+                                                        <div className="text-xs text-zinc-500 dark:text-white/60 truncate">
+                                                            {result.display_name.split(',').slice(1).join(',')}
+                                                        </div>
+                                                    </div>
+                                                </button>
+                                            ))}
                                         </div>
-                                    );
-                                }
-                                return null;
-                            })()}
-
-                            {/* Online / Nominatim Result (Async) - Always show for global search */}
-                            {searchQuery.length > 3 && !parseCoordinate(searchQuery) && (
-                                <OnlineSearch
-                                    query={searchQuery}
-                                    countryCode={countryCode}
-                                    currentLocation={currentLocation}
-                                    onSelect={(result) => {
-                                        const newWaypoint: Waypoint = {
-                                            id: crypto.randomUUID(),
-                                            name: result.display_name.split(',')[0], // Use first part of address
-                                            lat: parseFloat(result.lat),
-                                            lon: parseFloat(result.lon)
-                                        };
-                                        setWaypoints(prev => [...prev, newWaypoint]);
-                                        setSearchQuery('');
-                                        setRouteCoords(null);
-                                        setAlternateRouteCoords(null);
-                                        setShowOnMap(false);
-                                        onRouteChange(null, null, null, false);
-                                        setSnappedWaypoints({});
-                                    }}
-                                />
-                            )}
-
-                            {/* Saved Waypoint Matches (offline/local) */}
-                            {savedWaypointMatches.length > 0 && (
-                                <div className="rounded-2xl overflow-hidden bg-green-50 dark:bg-green-500/10 border border-green-500/20">
-                                    <div className="px-3 py-1.5 text-xs font-medium text-green-700 dark:text-green-400 bg-green-100/50 dark:bg-green-500/5">
-                                        ⭐ From your saved routes
                                     </div>
-                                    {savedWaypointMatches.map((match, index) => (
-                                        <button
-                                            key={`saved-${index}`}
-                                            onClick={() => {
-                                                const newWaypoint: Waypoint = {
-                                                    id: crypto.randomUUID(),
-                                                    name: match.name,
-                                                    lat: match.lat,
-                                                    lon: match.lon
-                                                };
-                                                setWaypoints(prev => [...prev, newWaypoint]);
-                                                setSearchQuery('');
-                                                setRouteCoords(null);
-                                                setAlternateRouteCoords(null);
-                                                setShowOnMap(false);
-                                                onRouteChange(null, null, null, false);
-                                                setSnappedWaypoints({});
-                                            }}
-                                            className="w-full p-3 flex items-center gap-3 transition-colors text-left border-b border-green-500/10 last:border-0"
-                                        >
-                                            <MapPin size={16} className="text-green-600 dark:text-green-400 shrink-0" />
-                                            <span className="flex-1 text-sm text-zinc-700 dark:text-white/80 truncate">
-                                                {match.name}
-                                            </span>
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
+                                )}
+                            </div>
 
                             {/* Add Current Location Button - below search results */}
                             {currentLocation && (

@@ -19,6 +19,7 @@ interface FABProps {
     setSessionStart: (time: number | null) => void;
     listedParkingSession?: any; // Active listed parking session
     onQRScan?: () => void; // Trigger QR scanner
+    routeWaypoints?: { lat: number; lon: number }[]; // Route waypoints for extended search
 }
 
 export const FAB: React.FC<FABProps> = ({
@@ -32,14 +33,19 @@ export const FAB: React.FC<FABProps> = ({
     sessionStart,
     setSessionStart,
     listedParkingSession,
-    onQRScan
+    onQRScan,
+    routeWaypoints
 }) => {
     const { pubkey, pool, signEvent } = useAuth();
     const [showCostPopup, setShowCostPopup] = useState(false);
     const [cost, setCost] = useState('0');
+    const [parkingNote, setParkingNote] = useState('');
     const [currency, setCurrency] = useState('USD');
     const [symbol, setSymbol] = useState('$');
     const [elapsedTime, setElapsedTime] = useState('00:00:00');
+
+    // Hidden items filtering
+    const [hiddenItems, setHiddenItems] = useState<Set<string>>(new Set());
 
     // Track cumulative geohashes for the current session
     const [sessionGeohashes, setSessionGeohashes] = useState<Set<string>>(new Set());
@@ -47,6 +53,19 @@ export const FAB: React.FC<FABProps> = ({
     const spotsMapRef = useRef<Map<string, any>>(new Map());
     // Track last search geohash to prevent unnecessary re-searches on iOS GPS drift
     const lastSearchGeohashRef = useRef<string | null>(null);
+
+    // Load hidden items
+    useEffect(() => {
+        try {
+            const saved = localStorage.getItem('parlens-hidden-items');
+            if (saved) {
+                const items: { id: string }[] = JSON.parse(saved);
+                setHiddenItems(new Set(items.map(i => i.id)));
+            }
+        } catch (e) {
+            console.error('Error loading hidden items:', e);
+        }
+    }, []);
 
     // Timer for stopwatch
     useEffect(() => {
@@ -67,7 +86,7 @@ export const FAB: React.FC<FABProps> = ({
         }
     }, [status, sessionStart]);
 
-    // Update cumulative geohashes when search location changes (geohash-stabilized for iOS)
+    // Update cumulative geohashes when search location or route waypoints change (geohash-stabilized for iOS)
     useEffect(() => {
         if (status === 'search' && searchLocation) {
             // Only trigger if user has moved to a different 5-digit geohash cell (~4.9km)
@@ -78,6 +97,15 @@ export const FAB: React.FC<FABProps> = ({
             lastSearchGeohashRef.current = currentGeohash;
 
             const newGeohashes = getGeohashNeighbors(searchLocation[0], searchLocation[1], 5);
+
+            // Also include geohashes for route waypoints
+            if (routeWaypoints && routeWaypoints.length > 0) {
+                for (const wp of routeWaypoints) {
+                    const wpGeohashes = getGeohashNeighbors(wp.lat, wp.lon, 5);
+                    wpGeohashes.forEach(g => newGeohashes.push(g));
+                }
+            }
+
             setSessionGeohashes(prev => {
                 const next = new Set(prev);
                 newGeohashes.forEach(g => next.add(g));
@@ -91,7 +119,7 @@ export const FAB: React.FC<FABProps> = ({
             setOpenSpots([]);
             lastSearchGeohashRef.current = null; // Reset on idle
         }
-    }, [status, searchLocation, setOpenSpots]);
+    }, [status, searchLocation, routeWaypoints, setOpenSpots]);
 
     // Fetch Open Spots (Kind 31714 & Kind 1714 'open')
     useEffect(() => {
@@ -109,11 +137,28 @@ export const FAB: React.FC<FABProps> = ({
                     const currentTime = Math.floor(Date.now() / 1000);
 
                     // Check expiration for Kind 31714
-                    if (event.kind === KINDS.OPEN_SPOT_BROADCAST) {
+                    if (event.kind === KINDS.PARKING_AREA_INDICATOR) {
                         const expirationTag = event.tags.find((t: string[]) => t[0] === 'expiration');
                         if (expirationTag) {
                             const expTime = parseInt(expirationTag[1]);
                             if (expTime < currentTime) return; // Expired
+                        }
+                    }
+
+                    // Check hidden items
+                    if (hiddenItems.has(event.pubkey)) return;
+
+                    // For listed spots, check if listing is hidden
+                    if (event.kind === KINDS.LISTED_SPOT_LOG) {
+                        const aTag = event.tags.find((t: string[]) => t[0] === 'a')?.[1];
+                        if (aTag) {
+                            const parts = aTag.split(':');
+                            if (parts.length === 3) {
+                                const pkb = parts[1];
+                                const d = parts[2];
+                                // Check if listing owner or listing ID is hidden
+                                if (hiddenItems.has(pkb) || hiddenItems.has(d)) return;
+                            }
                         }
                     }
 
@@ -133,7 +178,7 @@ export const FAB: React.FC<FABProps> = ({
 
                     if (locTag) {
                         [lat, lon] = locTag[1].split(',').map(Number);
-                    } else if (event.kind !== KINDS.LISTING_STATUS_LOG) {
+                    } else {
                         return;
                     }
 
@@ -155,7 +200,7 @@ export const FAB: React.FC<FABProps> = ({
                     let spotCurrency = 'USD';
                     let spotCount = 1;
 
-                    if (event.kind === KINDS.OPEN_SPOT_BROADCAST) {
+                    if (event.kind === KINDS.PARKING_AREA_INDICATOR) {
                         const priceTag = event.tags.find((t: string[]) => t[0] === 'hourly_rate');
                         const currencyTag = event.tags.find((t: string[]) => t[0] === 'currency');
                         const typeTag = event.tags.find((t: string[]) => t[0] === 'type');
@@ -183,7 +228,8 @@ export const FAB: React.FC<FABProps> = ({
                         price: price,
                         currency: spotCurrency,
                         type: spotType,
-                        count: spotCount
+                        count: spotCount,
+                        kind: event.kind // Track kind to differentiate Listed (1714) vs Parking Area (31714)
                     };
 
                     // Update Map & State
@@ -200,13 +246,21 @@ export const FAB: React.FC<FABProps> = ({
             // 1. Immediate fetch of existing spots
             const initialFetch = async () => {
                 try {
-                    // Fetch ephemeral open spot broadcasts (Kind 31714) - time-limited
+                    // Fetch parking area reports (Kind 31714) - default to past 7 days
+                    // User can configure time filter via Profile settings
+                    const areaTimeFilter = localStorage.getItem('parlens_parking_area_filter') || 'week';
+                    let areaSince = now - 604800; // Default: 7 days
+                    if (areaTimeFilter === 'today') areaSince = now - 86400;
+                    else if (areaTimeFilter === 'month') areaSince = now - 2592000;
+                    else if (areaTimeFilter === 'year') areaSince = now - 31536000;
+                    else if (areaTimeFilter === 'all') areaSince = 0;
+
                     const broadcastEvents = await pool.querySync(
                         DEFAULT_RELAYS,
                         {
-                            kinds: [KINDS.OPEN_SPOT_BROADCAST],
+                            kinds: [KINDS.PARKING_AREA_INDICATOR],
                             '#g': Array.from(sessionGeohashes),
-                            since: now - 600 // Past 10 mins for broadcasts
+                            since: areaSince
                         } as any
                     );
 
@@ -226,21 +280,99 @@ export const FAB: React.FC<FABProps> = ({
 
                     // Process spot status events - only keep latest per spot (a-tag)
                     const latestBySpot = new Map<string, any>();
+                    // Also collect parent Listing Metadata addresses to validate existence (orphaned check)
+                    const parentListingAddresses = new Set<string>();
+
                     for (const event of spotStatusEvents) {
                         const aTag = event.tags.find((t: string[]) => t[0] === 'a')?.[1];
                         if (!aTag) continue;
+
+                        // aTag format: 31147:pubkey:d-tag (parent) OR 37141:pubkey:spot-d-tag (spot address)
+                        // Actually Kind 1714 'a' tag points to the Spot (Kind 37141), which is a child of Listing (Kind 31147).
+                        // But usually the 'a' tag in 1714 points to the Spot Address. 
+                        // To check if listing is deleted, we need to check the Listing ID. 
+                        // The Spot Address 'd' tag usually contains the listing ID or we can infer it?
+                        // Actually, looking at ListedParkingPage, the Spot 'd' tag is `spot_${listing.d}_${spotId}`.
+                        // So we can reconstruct the parent Listing address: 31147:pubkey:listing_d_tag.
+                        // OR, we can just check if the spot Address itself (37141) exists? No, Kind 37141 is deleted too.
+                        // Better: Check if the 'parent' listing exists.
+                        // Wait, Kind 1714 usually tags the *Listing* in 'e' or 'a' tag too?
+                        // Let's assume Kind 1714 'a' tag is `37141:pubkey:spot_d`.
+                        // We need to parse this to find the Listing D tag?
+                        // Convention: spot_d = `spot_<listingD>_<timestamp/random>`. 
+                        // If we can't easily derive it, we might just check if the Spot (37141) exists?
+                        // But checking 37141 for every spot is heavy.
+                        // Let's rely on the fact that `deleteListing` deletes Kind 31147 (Listing Metadata).
+                        // If we can find the 31147 address from the 1714 event, we can check it.
+                        // Standard practice: Kind 1714 tags the reference 'a'.
+
+                        // Parse 'a' tag: "kind:pubkey:d_tag"
+                        const parts = aTag.split(':');
+                        if (parts.length === 3) {
+                            // We only need to confirm the parts enable parsing, but variables are unused
+                            parentListingAddresses.add(aTag);
+                        }
+
                         const existing = latestBySpot.get(aTag);
                         if (!existing || existing.created_at < event.created_at) {
                             latestBySpot.set(aTag, event);
                         }
                     }
-                    for (const event of latestBySpot.values()) {
-                        processSpotEvent(event);
+
+                    // Batch verify parent existence (Kind 37141 Spot Listing)
+                    // If the Spot Listing (37141) is deleted, the Spot Log (1714) is an orphan.
+                    if (parentListingAddresses.size > 0) {
+                        const uniqueAddresses = Array.from(parentListingAddresses);
+                        // We can't query by 'a' tag directly in filter (unless generic tag).
+                        // We query by 'd' tag and 'authors'.
+                        // Group by author for efficiency? 
+                        // Actually, just query Kind 37141 with '#d': [list of d tags] and authors: [list of pubkeys]
+
+                        const dTags = new Set<string>();
+                        const authors = new Set<string>();
+                        uniqueAddresses.forEach(a => {
+                            const p = a.split(':');
+                            if (p.length === 3) {
+                                authors.add(p[1]);
+                                dTags.add(p[2]);
+                            }
+                        });
+
+                        const validSpotsMap = await pool.querySync(DEFAULT_RELAYS, {
+                            kinds: [KINDS.PARKING_SPOT_LISTING], // 37141
+                            '#d': Array.from(dTags),
+                            authors: Array.from(authors)
+                        } as any);
+
+                        // Create set of valid addresses found
+                        const validAddresses = new Set<string>();
+                        validSpotsMap.forEach((e: any) => {
+                            const d = e.tags.find((t: string[]) => t[0] === 'd')?.[1];
+                            if (d) validAddresses.add(`${KINDS.PARKING_SPOT_LISTING}:${e.pubkey}:${d}`);
+                        });
+
+                        // Filter Process loop
+                        for (const event of latestBySpot.values()) {
+                            const aTag = event.tags.find((t: string[]) => t[0] === 'a')?.[1];
+                            if (validAddresses.has(aTag)) {
+                                processSpotEvent(event);
+                            } else {
+                                // console.log('Filtered orphaned spot:', aTag);
+                            }
+                        }
+                    } else {
+                        // Fallback if no addresses (shouldn't happen for valid spots)
+                        for (const event of latestBySpot.values()) {
+                            processSpotEvent(event);
+                        }
                     }
 
                     // Update state after initial fetch
                     if (spotsMapRef.current.size > 0) {
                         setOpenSpots(Array.from(spotsMapRef.current.values()));
+                    } else {
+                        // Ensure we clear if filter removed everything
+                        setOpenSpots([]);
                     }
                 } catch (e) {
                     console.error('[Parlens] Initial spot fetch failed:', e);
@@ -253,7 +385,7 @@ export const FAB: React.FC<FABProps> = ({
                 DEFAULT_RELAYS,
                 [
                     {
-                        kinds: [KINDS.OPEN_SPOT_BROADCAST, KINDS.LISTED_SPOT_LOG],
+                        kinds: [KINDS.PARKING_AREA_INDICATOR, KINDS.LISTED_SPOT_LOG],
                         '#g': Array.from(sessionGeohashes),
                         since: now  // Only NEW events from this point on
                     }
@@ -340,6 +472,7 @@ export const FAB: React.FC<FABProps> = ({
                 fee: cost,
                 currency,
                 type: vehicleType, // Include in encrypted content for private filtering
+                note: parkingNote || undefined, // Optional note
                 started_at: startTime,
                 finished_at: endTime
             };
@@ -393,45 +526,50 @@ export const FAB: React.FC<FABProps> = ({
             window.dispatchEvent(new Event('parking-log-updated'));
 
             // Broadcast open spot (Kind 31714 - Addressable) to help other users
-            // Use anonymous one-time keypair for privacy
-            const anonPrivkey = generateSecretKey();
+            // ONLY if user has opted in via Profile settings
+            const shareParkingAreas = localStorage.getItem('parlens_share_parking_areas');
+            if (shareParkingAreas === 'true') {
+                // Use anonymous one-time keypair for privacy
+                const anonPrivkey = generateSecretKey();
 
-            // Calculate hourly rate based on duration and fee
-            // Round duration UP to whole hours (10 mins = 1hr, 61 mins = 2hrs)
-            const durationSeconds = endTime - startTime;
-            const durationHours = Math.max(Math.ceil(durationSeconds / 3600), 1); // Minimum 1 hour
-            const hourlyRate = String(Math.round(parseFloat(cost) / durationHours));
-            const expirationTime = endTime + 300; // Expires in 5 minutes (300 seconds)
+                // Calculate hourly rate based on duration and fee
+                // Round duration UP to whole hours (10 mins = 1hr, 61 mins = 2hrs)
+                const durationSeconds = endTime - startTime;
+                const durationHours = Math.max(Math.ceil(durationSeconds / 3600), 1); // Minimum 1 hour
+                const hourlyRate = String(Math.round(parseFloat(cost) / durationHours));
 
-            const broadcastEventTemplate = {
-                kind: KINDS.OPEN_SPOT_BROADCAST,
-                content: '',
-                tags: [
-                    ['d', `spot_${geohash}_${endTime}`], // Unique identifier for addressable event
-                    ['g', geohash],
-                    ['location', `${lat},${lon}`],
-                    ['hourly_rate', hourlyRate],
-                    ['currency', currency],
-                    ['type', vehicleType],
-                    ['expiration', String(expirationTime)],
-                    ['client', 'parlens']
-                ],
-                created_at: endTime,
-            };
+                const broadcastEventTemplate = {
+                    kind: KINDS.PARKING_AREA_INDICATOR,
+                    content: '',
+                    tags: [
+                        ['d', `spot_${geohash}_${endTime}`], // Unique identifier for addressable event
+                        ['g', geohash],
+                        ['location', `${lat},${lon}`],
+                        ['hourly_rate', hourlyRate],
+                        ['currency', currency],
+                        ['type', vehicleType],
+                        ['client', 'parlens']
+                    ],
+                    created_at: endTime,
+                };
 
-            // Sign with anonymous key using nostr-tools
-            const signedBroadcast = finalizeEvent(broadcastEventTemplate, anonPrivkey);
+                // Sign with anonymous key using nostr-tools
+                const signedBroadcast = finalizeEvent(broadcastEventTemplate, anonPrivkey);
 
-            console.log('[Parlens] *** BROADCASTING OPEN SPOT ***');
-            console.log('[Parlens] Geohash:', geohash);
-            console.log('[Parlens] Location:', `${lat},${lon}`);
-            console.log('[Parlens] Event ID:', signedBroadcast.id);
-            console.log('[Parlens] Pubkey:', signedBroadcast.pubkey.substring(0, 20) + '...');
-            pool.publish(DEFAULT_RELAYS, signedBroadcast);
+                console.log('[Parlens] *** BROADCASTING OPEN SPOT (User opted in) ***');
+                console.log('[Parlens] Geohash:', geohash);
+                console.log('[Parlens] Location:', `${lat},${lon}`);
+                console.log('[Parlens] Event ID:', signedBroadcast.id);
+                console.log('[Parlens] Pubkey:', signedBroadcast.pubkey.substring(0, 20) + '...');
+                pool.publish(DEFAULT_RELAYS, signedBroadcast);
+            } else {
+                console.log('[Parlens] Parking area reporting is disabled. Skipping Kind 31714 broadcast.');
+            }
 
             // Reset session tracking
             setSessionStart(null);
             setParkLocation(null);
+            setParkingNote('');
 
         } catch (e) {
             console.error('Persistence error:', e);
@@ -516,6 +654,15 @@ export const FAB: React.FC<FABProps> = ({
                                 </button>
                             </div>
                         </div>
+
+                        {/* Notes input */}
+                        <input
+                            type="text"
+                            value={parkingNote}
+                            onChange={(e) => setParkingNote(e.target.value)}
+                            placeholder="Add a note (optional)"
+                            className="w-full bg-zinc-100 dark:bg-white/5 px-4 py-3 rounded-xl border border-black/5 dark:border-white/5 text-sm text-zinc-900 dark:text-white placeholder:text-zinc-400 dark:placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-[#007AFF]/50"
+                        />
 
                         <div className="w-full space-y-3">
                             <button

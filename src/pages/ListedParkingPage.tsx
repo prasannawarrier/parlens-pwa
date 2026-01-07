@@ -7,7 +7,9 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { MapPin, Plus, Trash2, X, Check, Copy, Pencil, ChevronRight, LocateFixed, Users, ArrowLeft, Search, RotateCw, EyeOff, Ban, MoreVertical, Star } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { KINDS, DEFAULT_RELAYS } from '../lib/nostr';
-import { encodeGeohash, calculateDistance } from '../lib/geo';
+import { getSuggestions, type NominatimResult, calculateDistance, encodeGeohash } from '../lib/geo';
+import { decryptParkingLog } from '../lib/encryption';
+import type { RouteLogContent } from '../lib/nostr';
 import { getCurrencyFromLocation } from '../lib/currency'; // Import currency utility
 import * as nip19 from 'nostr-tools/nip19';
 import { QRCodeSVG } from 'qrcode.react';
@@ -86,6 +88,12 @@ interface ListedParkingPageProps {
 type TabType = 'public' | 'private' | 'my';
 
 
+export interface SavedRoute {
+    id: string;
+    dTag: string;
+    decryptedContent: RouteLogContent;
+    created_at: number;
+}
 
 export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, currentLocation, countryCode, onPickLocation, pickedLocation }) => {
     const { pubkey, pool, signEvent } = useAuth();
@@ -143,6 +151,171 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
         type: 'listing' | 'owner';
     }
     const [hiddenItems, setHiddenItems] = useState<HiddenItem[]>([]);
+
+    // Search Center - defaults to current location, updated by search
+    const [searchCenter, setSearchCenter] = useState<[number, number] | null>(null);
+    const [suggestions, setSuggestions] = useState<NominatimResult[]>([]);
+    const [isSuggesting, setIsSuggesting] = useState(false);
+    const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    // Initialize search center on mount
+    useEffect(() => {
+        if (currentLocation && !searchCenter) {
+            setSearchCenter(currentLocation);
+            setSuggestions([]); // Clear suggestions on mount
+        }
+    }, [currentLocation]);
+
+    const [savedRoutes, setSavedRoutes] = useState<SavedRoute[]>([]);
+
+    // Load saved routes on mount
+    useEffect(() => {
+        const loadSavedRoutes = async () => {
+            try {
+                const saved = localStorage.getItem('parlens-saved-routes');
+                if (saved) {
+                    const parsed = JSON.parse(saved);
+                    const decrypted = await Promise.all(parsed.map(async (item: any) => {
+                        try {
+                            if (!pubkey) return null;
+                            const content = await decryptParkingLog(item.content, pubkey);
+                            return {
+                                id: item.id,
+                                dTag: item.dTag,
+                                decryptedContent: content,
+                                created_at: item.created_at
+                            };
+                        } catch (e) {
+                            return null;
+                        }
+                    }));
+                    setSavedRoutes(decrypted.filter(Boolean) as SavedRoute[]);
+                }
+            } catch (e) {
+                console.error('Error loading saved routes:', e);
+            }
+        };
+        loadSavedRoutes();
+    }, [pubkey]);
+
+    // Derived saved matches
+    const savedMatches = useMemo(() => {
+        if (!searchTerm || searchTerm.length < 2) return [];
+        const query = searchTerm.toLowerCase();
+        const matches: Array<{ name: string; lat: number; lon: number }> = [];
+
+        for (const route of savedRoutes) {
+            for (const wp of route.decryptedContent.waypoints) {
+                if (wp.name.toLowerCase().includes(query)) {
+                    if (!matches.find(m => m.name.toLowerCase() === wp.name.toLowerCase())) {
+                        matches.push({
+                            name: wp.name,
+                            lat: wp.lat,
+                            lon: wp.lon
+                        });
+                    }
+                }
+            }
+        }
+        return matches.slice(0, 3);
+    }, [searchTerm, savedRoutes]);
+
+    // Handle Input Change & Debounce Search
+    const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const val = e.target.value;
+        setSearchTerm(val);
+
+        if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+
+        if (val.length < 3) {
+            setSuggestions([]);
+            return;
+        }
+
+        // Debounce suggestion fetch
+        searchTimeoutRef.current = setTimeout(async () => {
+            setIsSuggesting(true);
+            const results = await getSuggestions(val, countryCode, currentLocation, 1);
+            setSuggestions(results);
+            setIsSuggesting(false);
+        }, 500); // 500ms debounce
+    };
+
+    // Confirm a suggestion from the list
+    const handleSelectSuggestion = (item: NominatimResult) => {
+        const lat = parseFloat(item.lat);
+        const lon = parseFloat(item.lon);
+
+        console.log('[Parlens] Selected suggestion:', item.display_name);
+
+        if (!isNaN(lat) && !isNaN(lon)) {
+            setSearchCenter([lat, lon]);
+            capturedLocationRef.current = [lat, lon];
+            setConfirmedSearchTerm(''); // Clear text filter to sorting mode
+            setSearchTerm(item.display_name.split(',')[0]); // Show short name in input
+            setSuggestions([]);
+        }
+    };
+
+    // Generic Search (Enter Key) - falls back to first suggestion or manual search
+    const handleSearch = async () => {
+        if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+
+        // If we have suggestions, pick the first one
+        if (suggestions.length > 0) {
+            handleSelectSuggestion(suggestions[0]);
+            return;
+        }
+
+        if (!searchTerm) {
+            setConfirmedSearchTerm('');
+            if (currentLocation) setSearchCenter(currentLocation);
+            setSuggestions([]);
+            return;
+        }
+
+        setIsSuggesting(true);
+        try {
+            // 1. Try Online Search (Location/Place)
+            const result = await getSuggestions(searchTerm, countryCode, currentLocation, 1); // Limit to 1 for direct search
+
+            if (result && result.length > 0) {
+                console.log('[Parlens] Search result:', result[0].display_name);
+                const lat = parseFloat(result[0].lat);
+                const lon = parseFloat(result[0].lon);
+                if (!isNaN(lat) && !isNaN(lon)) {
+                    setSearchCenter([lat, lon]);
+                    capturedLocationRef.current = [lat, lon];
+                    setConfirmedSearchTerm('');
+                    setSuggestions([]);
+                    setIsLoading(false);
+                    return;
+                }
+            }
+
+            // 2. Fallback: Text Filter
+            console.log('[Parlens] Location not found, falling back to text filter');
+            if (searchTerm.length > 2) {
+                // Limit to 1 result to match Waypoint Search
+                const fallbackSuggestions = await getSuggestions(searchTerm, countryCode, currentLocation, 1);
+                if (fallbackSuggestions.length > 0) {
+                    handleSelectSuggestion(fallbackSuggestions[0]);
+                    setIsLoading(false);
+                    return;
+                }
+            }
+            setConfirmedSearchTerm(searchTerm);
+            if (currentLocation) setSearchCenter(currentLocation);
+            setSuggestions([]);
+
+        } catch (e) {
+            console.error('Search error:', e);
+            setConfirmedSearchTerm(searchTerm);
+        } finally {
+            setIsSuggesting(false);
+            setIsLoading(false);
+        }
+    };
 
     useEffect(() => {
         try {
@@ -322,7 +495,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                 // Create map of latest status per spot
                 const latestStatusMap = new Map();
                 statusEvents.forEach((e: any) => {
-                    const a = e.tags.find((t: any) => t[0] === 'a')?.[1];
+                    const a = e.tags.find((t: string[]) => t[0] === 'a')?.[1];
                     if (!latestStatusMap.has(a) || latestStatusMap.get(a).created_at < e.created_at) {
                         latestStatusMap.set(a, e);
                     }
@@ -344,8 +517,8 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                             const spotId = `${listing.d}-spot-${j}`;
                             const spotATag = `${KINDS.PARKING_SPOT_LISTING}:${listing.pubkey}:${spotId}`;
                             const statusEvent = latestStatusMap.get(spotATag);
-                            const status = statusEvent?.tags.find((t: any) => t[0] === 'status')?.[1] || 'open';
-                            const type = (statusEvent?.tags.find((t: any) => t[0] === 'type')?.[1] as 'car' | 'motorcycle' | 'bicycle') || 'car';
+                            const status = statusEvent?.tags.find((t: string[]) => t[0] === 'status')?.[1] || 'open';
+                            const type = (statusEvent?.tags.find((t: string[]) => t[0] === 'type')?.[1] as 'car' | 'motorcycle' | 'bicycle') || 'car';
 
                             if (stats[type]) {
                                 stats[type].total++;
@@ -367,7 +540,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                             const spotId = `${listing.d}-spot-${j}`;
                             const spotATag = `${KINDS.PARKING_SPOT_LISTING}:${listing.pubkey}:${spotId}`;
                             const statusEvent = latestStatusMap.get(spotATag);
-                            const type = (statusEvent?.tags.find((t: any) => t[0] === 'type')?.[1] as 'car' | 'motorcycle' | 'bicycle') || 'car';
+                            const type = (statusEvent?.tags.find((t: string[]) => t[0] === 'type')?.[1] as 'car' | 'motorcycle' | 'bicycle') || 'car';
                             batchMapping.set(spotId, { listingId: listing.d, type });
                         }
                     }
@@ -500,7 +673,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
 
         const spotATags = spots.flatMap(s => {
             const clean = `${KINDS.PARKING_SPOT_LISTING}:${s.pubkey}:${s.d}`;
-            return [clean, clean + ' '];
+            return [clean, clean + ''];
         });
 
         const statusEvents = await pool.querySync(DEFAULT_RELAYS, {
@@ -569,7 +742,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                 onevent(event: any) {
                     // Filter out test events
                     const d = event.tags.find((t: string[]) => t[0] === 'd')?.[1];
-                    if (!d || event.content === 'Parlens Relay Check' || d.startsWith('test-relay-check-')) return;
+                    if (!d || event.content === 'Deleted' || event.content === 'Parlens Relay Check' || d.startsWith('test-relay-check-')) return;
 
                     console.log('[Parlens] New listing event received:', d);
 
@@ -646,52 +819,6 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
         };
     }, [pool]);
 
-    // Real-time subscription for Listing Status Logs (Kind 1147)
-    // This ensures List View counts update immediately when ANYONE changes a status
-    useEffect(() => {
-        if (!pool) return;
-
-        console.log('[Parlens] Subscribing to global status log updates (1147)');
-
-        const sub = pool.subscribeMany(
-            DEFAULT_RELAYS,
-            [{
-                kinds: [KINDS.LISTING_STATUS_LOG],
-                since: Math.floor(Date.now() / 1000) // Watch for new updates
-            }] as any,
-            {
-                onevent(event: any) {
-                    // Extract listing identifier from a-tag (format: "31147:pubkey:d-tag")
-                    const aTag = event.tags.find((t: string[]) => t[0] === 'a')?.[1];
-                    if (!aTag) return;
-                    const listingD = aTag.split(':').pop(); // Get the d-tag part
-                    if (!listingD) return;
-
-                    try {
-                        const logContent = JSON.parse(event.content);
-                        console.log('[Parlens] Received real-time status log for:', listingD);
-
-                        setListingStats(prev => {
-                            const newMap = new Map(prev);
-                            newMap.set(listingD, logContent);
-                            return newMap;
-                        });
-                    } catch (e) {
-                        console.warn('Error parsing incoming status log:', e);
-                    }
-                },
-                oneose() {
-                    console.log('[Parlens] Status log subscription active');
-                }
-            }
-        );
-
-        return () => {
-            console.log('[Parlens] Closing status log subscription');
-            sub.close();
-        };
-    }, [pool]);
-
     // Real-time subscription for Kind 1714 status updates
     useEffect(() => {
         if (!pool) return;
@@ -707,10 +834,10 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             // Detailed view: Subscribe to loaded spots
             filterATags = spots.map(s => `${KINDS.PARKING_SPOT_LISTING}:${s.pubkey}:${s.d}`);
         } else {
-            // List view: Optional. Subscribing to ALL listings' spots is heavy. 
+            // List view: Optional. Subscribing to ALL listings' spots is heavy.
             // We could fetch listing metadata's "total" but that doesn't give us a-tags.
-            // Leaving this blank means List View stats might not be real-time, 
-            // but avoids the global firehose performance issue. 
+            // Leaving this blank means List View stats might not be real-time,
+            // but avoids the global firehose performance issue.
             // User complaint is about "log status taking time" which implies detail view.
             return;
         }
@@ -879,6 +1006,12 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             };
             await Promise.allSettled(pool.publish(DEFAULT_RELAYS, await signEvent(deleteEvent)));
             setListings(prev => prev.filter(l => l.id !== listing.id));
+
+            // Also add to hidden items to ensure spots disappear from map implementation immediately
+            const newHidden = [...hiddenItems, { id: listing.d, name: listing.listing_name, type: 'listing' as const }];
+            setHiddenItems(newHidden);
+            localStorage.setItem('parlens-hidden-items', JSON.stringify(newHidden));
+
             setSelectedListing(null);
         } catch (e) { console.error(e); } finally { setIsDeleting(false); }
     };
@@ -928,14 +1061,15 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                 if (!exactMatchA && exactMatchB) return 1;
             }
 
-            // Distance (if location + user location available)
-            if (currentLocation && a.location && b.location) {
+            // Distance (if searchCenter or location available)
+            const center = searchCenter || currentLocation;
+            if (center && a.location && b.location) {
                 const [latA, lonA] = a.location.split(',').map(n => parseFloat(n.trim()));
                 const [latB, lonB] = b.location.split(',').map(n => parseFloat(n.trim()));
 
                 if (!isNaN(latA) && !isNaN(lonA) && !isNaN(latB) && !isNaN(lonB)) {
-                    const distA = calculateDistance(currentLocation[0], currentLocation[1], latA, lonA);
-                    const distB = calculateDistance(currentLocation[0], currentLocation[1], latB, lonB);
+                    const distA = calculateDistance(center[0], center[1], latA, lonA);
+                    const distB = calculateDistance(center[0], center[1], latB, lonB);
                     if (Math.abs(distA - distB) > 0.1) return distA - distB; // Sort by dist if diff > 100m
                 }
             }
@@ -960,7 +1094,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
         });
 
         return res;
-    }, [listings, activeTab, pubkey, searchTerm, listingStats, vehicleFilter, currentLocation, savedListings, showSavedOnly]);
+    }, [listings, activeTab, pubkey, searchTerm, listingStats, vehicleFilter, currentLocation, savedListings, showSavedOnly, confirmedSearchTerm, searchCenter]);
 
     // Paginated listings for display (limited to displayedCount)
     const paginatedListings = useMemo(() => {
@@ -1150,7 +1284,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                 {/* Bottom Spinner - Shows when more spots are loading */}
                                 {statusLoading && (
                                     <div className="flex items-center justify-center p-6 bg-zinc-50 dark:bg-white/5 rounded-2xl border-2 border-dashed border-zinc-200 dark:border-white/10 min-h-[100px]">
-                                        <div className="animate-spin w-8 h-8 border-4 border-blue-500/20 border-t-blue-500 rounded-full"></div>
+                                        <div className="animate-spin w-8 h-8 border-4 border-blue-500/20 border-t-blue-500 animate-spin"></div>
                                     </div>
                                 )}
                             </div>
@@ -1159,49 +1293,137 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                 ) : (
                     // List View
                     <>
-                        <div className="flex border-b border-black/5 dark:border-white/10 bg-white dark:bg-[#1c1c1e]">
-                            {(['public', 'private', 'my'] as TabType[]).map(tab => (
-                                <button
-                                    key={tab}
-                                    onClick={() => setActiveTab(tab)}
-                                    className={`flex-1 py-3 text-sm font-bold transition-colors ${activeTab === tab ? 'text-[#007AFF] border-b-2 border-[#007AFF]' : 'text-zinc-400'}`}
-                                >
-                                    {tab === 'public' ? 'Public Listings' : tab === 'private' ? 'Private Listings' : 'My Listings'}
-                                </button>
-                            ))}
+                        <div className="px-4 py-3 bg-white dark:bg-[#1c1c1e]">
+                            <div className="flex justify-between items-center gap-2 p-1 bg-zinc-100 dark:bg-white/5 rounded-xl border border-black/5 dark:border-white/5">
+                                {(['public', 'private', 'my'] as TabType[]).map(tab => (
+                                    <button
+                                        key={tab}
+                                        onClick={() => setActiveTab(tab)}
+                                        className={`flex-1 flex items-center justify-center py-2.5 rounded-md text-sm transition-all active:scale-95 ${activeTab === tab
+                                            ? 'bg-white dark:bg-white/10 text-zinc-900 dark:text-white font-bold shadow-sm'
+                                            : 'text-zinc-400 dark:text-white/40'
+                                            }`}
+                                    >
+                                        {tab === 'public' ? 'Public' : tab === 'private' ? 'Private' : 'My Listings'}
+                                    </button>
+                                ))}
+                            </div>
                         </div>
 
-                        {/* Search Bar Below Tabs */}
-                        <div className="flex items-center gap-2 px-4 py-3 bg-white dark:bg-[#1c1c1e] border-b border-black/5 dark:border-white/10">
-                            <div className="relative flex-1">
+                        {/* Search Bar with Suggestions */}
+                        <div className="relative px-4 py-3 bg-white dark:bg-[#1c1c1e] border-b border-black/5 dark:border-white/10 z-[3001]">
+                            <div className="relative z-[4000]">
+                                {/* Search Icon Inside Input Container to fix gap and z-index */}
+                                <div className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 z-10">
+                                    {isSuggesting ? (
+                                        <RotateCw size={18} className="animate-spin" />
+                                    ) : (
+                                        <Search size={18} />
+                                    )}
+                                </div>
+
                                 <input
                                     value={searchTerm}
-                                    onChange={e => setSearchTerm(e.target.value)}
-                                    onKeyDown={e => { if (e.key === 'Enter') setConfirmedSearchTerm(searchTerm); }}
-                                    placeholder="Search listing name or location"
-                                    className="w-full px-4 py-2.5 bg-zinc-100 dark:bg-white/10 rounded-xl text-sm font-medium text-zinc-900 dark:text-white border border-black/5 dark:border-white/10 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-all placeholder:text-zinc-400 dark:placeholder:text-white/40"
+                                    onChange={handleInputChange}
+                                    onKeyDown={e => { if (e.key === 'Enter') handleSearch(); }}
+                                    placeholder="Search for listings near..."
+                                    className={`w-full pl-10 pr-10 py-3 bg-zinc-100 dark:bg-zinc-800 text-sm font-medium text-zinc-900 dark:text-white border-none focus:ring-2 focus:ring-blue-500/50 transition-all placeholder:text-zinc-400 dark:placeholder:text-zinc-500 ${(suggestions.length > 0 || savedMatches.length > 0)
+                                        ? 'rounded-t-xl rounded-b-none'
+                                        : 'rounded-xl'
+                                        }`}
                                 />
+
+                                {searchTerm && (
+                                    <button
+                                        onClick={() => {
+                                            setSearchTerm('');
+                                            setSuggestions([]);
+                                            setConfirmedSearchTerm('');
+                                            if (currentLocation) setSearchCenter(currentLocation);
+                                        }}
+                                        className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-full text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 z-10"
+                                    >
+                                        <X size={16} />
+                                    </button>
+                                )}
+
+                                {/* Suggestions Dropdown */}
+                                {(suggestions.length > 0 || savedMatches.length > 0) && (
+                                    <div className="absolute top-full left-0 right-0 bg-white dark:bg-zinc-900 rounded-b-xl shadow-xl border-x border-b border-black/5 dark:border-white/5 overflow-hidden z-[4000] mt-0">
+                                        <div className="max-h-[60vh] overflow-y-auto">
+                                            {/* Tags Header */}
+                                            <div className="px-4 py-2 bg-zinc-50 dark:bg-white/5 border-t border-black/5 dark:border-white/5 flex items-center gap-2">
+                                                {suggestions.length > 0 && (
+                                                    <span className="inline-block px-2.5 py-1 rounded-lg bg-gradient-to-r from-violet-500/10 to-fuchsia-500/10 dark:from-violet-500/20 dark:to-fuchsia-500/20 text-[10px] font-bold text-violet-600 dark:text-violet-300 uppercase tracking-wider border border-violet-200 dark:border-violet-500/20">
+                                                        OSM Search
+                                                    </span>
+                                                )}
+                                                {savedMatches.length > 0 && (
+                                                    <span className="inline-block px-2.5 py-1 rounded-lg bg-gradient-to-r from-emerald-500/10 to-teal-500/10 dark:from-emerald-500/20 dark:to-teal-500/20 text-[10px] font-bold text-emerald-600 dark:text-emerald-300 uppercase tracking-wider border border-emerald-200 dark:border-emerald-500/20">
+                                                        Saved Places
+                                                    </span>
+                                                )}
+                                            </div>
+
+                                            {/* Saved Matches */}
+                                            {savedMatches.map((match, index) => (
+                                                <button
+                                                    key={`saved-${index}`}
+                                                    onClick={() => {
+                                                        const suggestion: NominatimResult = {
+                                                            place_id: parseInt(match.lat.toString().replace('.', '')),
+                                                            display_name: match.name,
+                                                            lat: match.lat.toString(),
+                                                            lon: match.lon.toString(),
+                                                            type: 'saved'
+                                                        };
+                                                        handleSelectSuggestion(suggestion);
+                                                    }}
+                                                    className="w-full flex items-start gap-3 p-4 text-left hover:bg-zinc-50 dark:hover:bg-white/5 active:bg-zinc-100 transition-colors border-t border-black/5 dark:border-white/5 first:border-t-0 group"
+                                                >
+                                                    <div className="mt-0.5 p-2 rounded-full bg-emerald-50 dark:bg-emerald-500/10 text-emerald-500 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 shrink-0 transition-colors">
+                                                        <MapPin size={16} />
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="text-sm font-semibold text-zinc-900 dark:text-white truncate">
+                                                            {match.name}
+                                                        </div>
+                                                        <div className="text-xs text-zinc-500 dark:text-zinc-400 truncate">
+                                                            Saved from your routes
+                                                        </div>
+                                                    </div>
+                                                </button>
+                                            ))}
+
+                                            {/* Online Matches */}
+                                            {suggestions.map((item) => (
+                                                <button
+                                                    key={item.place_id}
+                                                    onClick={() => handleSelectSuggestion(item)}
+                                                    className="w-full flex items-start gap-3 p-4 text-left hover:bg-zinc-50 dark:hover:bg-white/5 active:bg-zinc-100 transition-colors border-t border-black/5 dark:border-white/5 group"
+                                                >
+                                                    <div className="mt-0.5 p-2 rounded-full bg-violet-50 dark:bg-violet-500/10 text-violet-500 group-hover:text-violet-600 dark:group-hover:text-violet-400 shrink-0 transition-colors">
+                                                        <MapPin size={16} />
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="text-sm font-semibold text-zinc-900 dark:text-white truncate">
+                                                            {item.display_name.split(',')[0]}
+                                                        </div>
+                                                        <div className="text-xs text-zinc-500 dark:text-zinc-400 truncate">
+                                                            {item.display_name.split(',').slice(1).join(',')}
+                                                        </div>
+                                                    </div>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
-                            <button
-                                onClick={() => {
-                                    setIsLoading(true);
-                                    // Simulated delay for search feedback
-                                    setTimeout(() => {
-                                        setConfirmedSearchTerm(searchTerm);
-                                        setIsLoading(false);
-                                    }, 500);
-                                }}
-                                className="p-2.5 bg-zinc-100 dark:bg-white/10 rounded-xl border border-black/5 dark:border-white/10 text-zinc-400 active:scale-95 transition-transform"
-                                style={{ WebkitTapHighlightColor: 'transparent' }}
-                                title="Search"
-                            >
-                                <Search size={22} />
-                            </button>
                         </div>
 
-                        {/* Status Legend */}
-                        <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-zinc-500 px-4 py-2 overflow-x-auto">
-                            <div className="flex items-center gap-4">
+                        {/* Status Legend & Saved Listings Toggle */}
+                        <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-zinc-500 px-4 py-2 overflow-x-auto shrink-0">
+                            <div className="flex items-center gap-3">
                                 <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-green-500"></div>Open</div>
                                 {activeTab === 'my' && (
                                     <>
@@ -1210,11 +1432,15 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                     </>
                                 )}
                             </div>
+
                             <button
                                 onClick={() => setShowSavedOnly(!showSavedOnly)}
-                                className={`flex items-center gap-1 px-2 py-1 rounded-full border transition-colors ${showSavedOnly ? 'bg-yellow-500/10 border-yellow-500/20 text-yellow-600 dark:text-yellow-400' : 'bg-transparent border-transparent hover:bg-black/5 dark:hover:bg-white/5'}`}
+                                className={`flex items-center gap-1 px-2 py-1 rounded-full border transition-colors text-[10px] font-bold uppercase tracking-wider ${showSavedOnly
+                                    ? 'bg-yellow-500/10 border-yellow-500/20 text-yellow-600 dark:text-yellow-400'
+                                    : 'bg-zinc-100 dark:bg-white/5 border-transparent text-zinc-500 hover:bg-zinc-200 dark:hover:bg-white/10'
+                                    }`}
                             >
-                                <Star size={12} className={showSavedOnly ? 'fill-yellow-500 stroke-yellow-500' : ''} />
+                                <Star size={12} className={showSavedOnly ? 'fill-yellow-500 stroke-yellow-500' : 'fill-transparent stroke-zinc-400'} />
                                 {showSavedOnly ? 'Saved' : 'All'}
                             </button>
                         </div>
@@ -1500,20 +1726,6 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                                         });
 
                                                                         await Promise.allSettled(promises);
-
-                                                                        // Publish Kind 1147 Listing Status Log
-                                                                        const listingATag = `${KINDS.LISTED_PARKING_METADATA}:${listing.pubkey}:${listing.d}`;
-                                                                        const statusLogEvent = {
-                                                                            kind: KINDS.LISTING_STATUS_LOG,
-                                                                            created_at: Math.floor(Date.now() / 1000),
-                                                                            tags: [
-                                                                                ['a', listingATag],
-                                                                                ['g', listing.g],
-                                                                                ['client', 'parlens']
-                                                                            ],
-                                                                            content: JSON.stringify(snapshotStats)
-                                                                        };
-                                                                        await Promise.allSettled(pool.publish(DEFAULT_RELAYS, await signEvent(statusLogEvent)));
 
                                                                         // Update listing metadata
                                                                         const newTags = listing.originalEvent.tags.filter((t: string[]) => t[0] !== 'status');

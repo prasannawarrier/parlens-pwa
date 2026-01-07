@@ -1,13 +1,12 @@
 export const KINDS = {
     PARKING_LOG: 31417, // My Parking Log (Parameterized Replaceable for history)
-    OPEN_SPOT_BROADCAST: 31714, // Open Spot Broadcast (Addressable/Replaceable with expiration)
+    PARKING_AREA_INDICATOR: 31714, // Parking Area Indicator (Addressable/Replaceable with expiration)
     ROUTE_LOG: 34171, // My Route Log (Addressable for saved routes)
     RELAY_LIST: 10002, // NIP-65 Relay List Metadata (Replaceable)
     // Listed Parking Kinds
     LISTED_PARKING_METADATA: 31147, // Listed Parking Metadata (Parent - Addressable)
     PARKING_SPOT_LISTING: 37141, // Parking Spot Listing (Child - Addressable)
     LISTED_SPOT_LOG: 1714, // Listed Spot Log Update (Status - Regular)
-    LISTING_STATUS_LOG: 1147, // Listing Status Log (Regular event, tagged to listing a-tag)
     PRIVATE_LOG_NOTE: 1417, // Private Log Status Note (Encrypted - Regular)
 };
 
@@ -71,7 +70,7 @@ export interface RouteLogContent {
 }
 
 /**
- * Kind 31714 - Open Spot Broadcast (Public - Anonymous)
+ * Kind 31714 - Parking Area Indicator (Public - Anonymous)
  * 
  * Public Tags (all data is public, but published with anonymous keypair):
  *   ['d', 'spot_<geohash>_<timestamp>']

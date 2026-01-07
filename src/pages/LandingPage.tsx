@@ -32,17 +32,31 @@ const MAP_STYLES = {
 
 
 // Restored Stable SpotMarkerContent
-const SpotMarkerContent = memo(({ price, emoji, currency, isHistory = false }: { price: number, emoji: string, currency: string, isHistory?: boolean }) => {
+const SpotMarkerContent = memo(({ price, emoji, currency, isHistory = false, variant }: { price: number, emoji: string, currency: string, isHistory?: boolean, variant?: 'default' | 'history' | 'area' }) => {
     const symbol = getCurrencySymbol(currency);
+    // Determine styling based on variant (if provided) or isHistory fallback
+    const effectiveVariant = variant || (isHistory ? 'history' : 'default');
+
+    // Grey P for area markers (using CSS filter)
+    const isArea = effectiveVariant === 'area';
+    const isHistoryVariant = effectiveVariant === 'history';
+
+    // Pill background classes
+    const pillClasses = isArea
+        ? 'bg-white text-zinc-900 border-zinc-300'  // White Pill for Parking Area
+        : isHistoryVariant
+            ? 'bg-zinc-500 text-white border-white'  // Grey Pill for History
+            : 'bg-[#34C759] text-white border-white'; // Green Pill for Listed
+
     return (
         <div className="flex flex-col items-center justify-center transition-transform active:scale-95 pointer-events-none group">
-            <div className="text-[32px] leading-none drop-shadow-md z-10 filter pointer-events-auto cursor-pointer">
+            <div className={`text-[32px] leading-none drop-shadow-md z-10 pointer-events-auto cursor-pointer ${isArea ? 'grayscale' : ''}`}>
                 {emoji}
             </div>
             <div
                 className={`
-                    px-2 py-0.5 rounded-full text-[11px] font-bold text-white shadow-md border-[1.5px] border-white -mt-1.5 z-0 whitespace-nowrap pointer-events-auto
-                    ${isHistory ? 'bg-zinc-500' : 'bg-[#34C759]'}
+                    px-2 py-0.5 rounded-full text-[11px] font-bold shadow-md border-[1.5px] -mt-1.5 z-0 whitespace-nowrap pointer-events-auto
+                    ${pillClasses}
                 `}
             >
                 {symbol}{Math.round(price)}/hr
@@ -137,31 +151,31 @@ UserLocationMarker.displayName = 'UserLocationMarker';
 
 
 // Cluster Marker Component
-const ClusterMarkerContent = memo(({ count, minPrice, maxPrice, currency, type }: {
-    count: number; minPrice: number; maxPrice: number; currency: string; type: 'open' | 'history'
+const ClusterMarkerContent = memo(({ minPrice, maxPrice, currency, type }: {
+    minPrice: number; maxPrice: number; currency: string; type: 'open' | 'history' | 'area'
 }) => {
-    const emoji = type === 'open' ? '🅿️' : '🅟';
+    const emoji = type === 'area' ? '🅿️' : type === 'open' ? '🅿️' : '🅟';
+    const isArea = type === 'area';
     const isHistory = type === 'history';
     const symbol = getCurrencySymbol(currency);
     const priceRange = minPrice === maxPrice ? `${symbol}${minPrice}` : `${symbol}${minPrice}-${maxPrice}`;
 
+    // Pill styling based on type
+    const pillClasses = isArea
+        ? 'bg-white text-zinc-900 border-zinc-300'  // White Pill for Parking Area
+        : isHistory
+            ? 'bg-zinc-500 text-white border-white'  // Grey Pill for History
+            : 'bg-[#34C759] text-white border-white'; // Green Pill for Listed/Open
+
     return (
         <div className="flex flex-col items-center justify-center transition-transform active:scale-95 pointer-events-none group">
-            <div className="relative text-[32px] leading-none drop-shadow-md z-10 filter pointer-events-auto cursor-pointer">
+            <div className={`relative text-[32px] leading-none drop-shadow-md z-10 pointer-events-auto cursor-pointer ${isArea ? 'grayscale' : ''}`}>
                 {emoji}
-                {/* Count Badge */}
-                <div className={`
-                    absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] px-1
-                    text-[10px] font-bold text-white rounded-full border-2 border-white shadow-sm
-                    ${isHistory ? 'bg-zinc-500' : 'bg-[#34C759]'}
-                `}>
-                    {count}
-                </div>
             </div>
             <div
                 className={`
-                    px-2 py-0.5 rounded-full text-[11px] font-bold text-white shadow-md border-[1.5px] border-white -mt-1.5 z-0 whitespace-nowrap
-                    ${isHistory ? 'bg-zinc-500' : 'bg-[#34C759]'}
+                    px-2 py-0.5 rounded-full text-[11px] font-bold shadow-md border-[1.5px] -mt-1.5 z-0 whitespace-nowrap
+                    ${pillClasses}
                 `}
             >
                 {priceRange}/hr
@@ -684,8 +698,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
         }));
         setPendingWaypoints(waypointsToPass);
         setTempWaypoints([]);
-        setDropPinMode(false); // Helper will consume pendingWaypoints
-        // Note: RouteButton handles the actual routing update when it receives pendingWaypoints
+        setDropPinMode(false);
+        setRouteModalOpen(true); // Re-open route modal after drop pin completion
     }, [tempWaypoints]);
 
     // Orientation permission state (for iOS)
@@ -1223,22 +1237,56 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
         clusterSpots(processedHistorySpots, zoomLevel)
         , [processedHistorySpots, zoomLevel]);
 
-    const processedOpenSpots = useMemo(() => {
+    // Separate Listed Parking (Kind 1714) from Parking Area Reports (Kind 31714)
+    const listedSpots = useMemo(() => {
         if (status !== 'search') return [];
-        return openSpots.filter(s => (s.type || 'car') === vehicleType).map(s => ({
-            id: s.id,
-            lat: s.lat,
-            lon: s.lon,
-            price: s.price,
-            currency: s.currency,
-            count: s.count,
-            original: s
-        }));
+        return openSpots
+            .filter(s => s.kind === KINDS.LISTED_SPOT_LOG && (s.type || 'car') === vehicleType)
+            .map(s => ({
+                id: s.id,
+                lat: s.lat,
+                lon: s.lon,
+                price: s.price,
+                currency: s.currency,
+                count: s.count,
+                kind: s.kind,
+                original: s
+            }));
     }, [openSpots, vehicleType, status]);
 
-    const clusteredOpenSpots = useMemo(() =>
-        clusterSpots(processedOpenSpots, zoomLevel)
-        , [processedOpenSpots, zoomLevel]);
+    // Filter and transform area spots for clustering (Kind 31714) - RESPECT TOGGLE
+    const areaSpots = useMemo(() => {
+        if (status !== 'search') return [];
+
+        // Check toggle setting
+        try {
+            const showAreas = JSON.parse(localStorage.getItem('parlens_show_parking_areas') || 'true');
+            if (!showAreas) return [];
+        } catch { }
+
+        return openSpots
+            .filter(s => s.kind === KINDS.PARKING_AREA_INDICATOR && (s.type || 'car') === vehicleType)
+            .map(s => ({
+                id: s.id,
+                lat: s.lat,
+                lon: s.lon,
+                price: s.price,
+                currency: s.currency,
+                count: s.count,
+                kind: s.kind,
+                original: s
+            }));
+    }, [openSpots, vehicleType, status]);
+
+    // Listed Parking: NOT clustered (precise markers) - just apply standard clustering for zoom-out only
+    const clusteredListedSpots = useMemo(() =>
+        clusterSpots(listedSpots, zoomLevel)
+        , [listedSpots, zoomLevel]);
+
+    // Parking Area Reports: Clustered at 7-digit geohash level (capped)
+    const clusteredAreaSpots = useMemo(() =>
+        clusterSpots(areaSpots, zoomLevel, true, 7) // Use maxPrecision 7
+        , [areaSpots, zoomLevel]);
 
     // Memoize GeoJSON Sources to prevent re-renders
 
@@ -1528,32 +1576,25 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                         </Source>
                     )}
 
-                    {/* Open Spots Markers */}
-                    {status === 'search' && clusteredOpenSpots.map(item => {
-                        // eslint-disable-next-line
+                    {/* Listed Parking Spots (Kind 1714) - Blue P + Green Pill */}
+                    {status === 'search' && clusteredListedSpots.map((item: any) => {
                         const isClusterItem = isCluster(item);
                         return (
                             <Marker
-                                key={`open-${item.id}`}
+                                key={`listed-${item.id}`}
                                 longitude={item.lon}
                                 latitude={item.lat}
                                 anchor="center"
-                                style={{ willChange: 'transform' }} // Stabilization
+                                style={{ willChange: 'transform' }}
                                 onClick={(e) => {
                                     e.originalEvent.stopPropagation();
                                     if (isClusterItem) {
                                         mapRef.current?.flyTo({ center: [item.lon, item.lat], zoom: viewState.zoom + 2 });
-                                    } else {
-                                        // Was handleClick for drop pin, now no-op or handle specific spot selection if needed?
-                                        // Current logic: markers are just visual unless cluster expands.
-                                        // If we need to open details, that logic should be here.
-                                        // But for now, removing the broken call.
                                     }
                                 }}
                             >
                                 {isClusterItem ? (
                                     <ClusterMarkerContent
-                                        count={item.count}
                                         minPrice={item.minPrice}
                                         maxPrice={item.maxPrice}
                                         currency={item.currency}
@@ -1564,6 +1605,43 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                         price={item.price}
                                         currency={item.currency}
                                         emoji="🅿️"
+                                        variant="default"
+                                    />
+                                )}
+                            </Marker>
+                        );
+                    })}
+
+                    {/* Parking Area Reports (Kind 31714) - Grey P + White Pill */}
+                    {status === 'search' && clusteredAreaSpots.map((item: any) => {
+                        const isClusterItem = isCluster(item);
+                        return (
+                            <Marker
+                                key={`area-${item.id}`}
+                                longitude={item.lon}
+                                latitude={item.lat}
+                                anchor="center"
+                                style={{ willChange: 'transform' }}
+                                onClick={(e) => {
+                                    e.originalEvent.stopPropagation();
+                                    if (isClusterItem) {
+                                        mapRef.current?.flyTo({ center: [item.lon, item.lat], zoom: viewState.zoom + 2 });
+                                    }
+                                }}
+                            >
+                                {isClusterItem ? (
+                                    <ClusterMarkerContent
+                                        minPrice={item.minPrice}
+                                        maxPrice={item.maxPrice}
+                                        currency={item.currency}
+                                        type="area"
+                                    />
+                                ) : (
+                                    <SpotMarkerContent
+                                        price={item.price}
+                                        currency={item.currency}
+                                        emoji="🅿️"
+                                        variant="area"
                                     />
                                 )}
                             </Marker>
@@ -1786,7 +1864,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                             >
                                 {isClusterItem ? (
                                     <ClusterMarkerContent
-                                        count={item.count}
                                         minPrice={item.minPrice}
                                         maxPrice={item.maxPrice}
                                         currency={item.currency}
@@ -2276,6 +2353,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                         setSessionStart={setSessionStart}
                         listedParkingSession={listedParkingSession}
                         onQRScan={() => onRequestScan?.()}
+                        routeWaypoints={routeWaypoints || undefined}
                     />
                 )}
             </div>

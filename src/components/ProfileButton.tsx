@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Key, X, Shield, ChevronRight, MapPin, Clock, User, Trash2, Plus, Radio, Pencil, Check, EyeOff } from 'lucide-react';
+import { Key, X, Shield, ChevronRight, MapPin, Clock, User, Trash2, Plus, Radio, Pencil, Check, EyeOff, Share2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useParkingLogs } from '../hooks/useParkingLogs';
 import { nip19 } from 'nostr-tools';
@@ -60,6 +60,20 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
     const [profile, setProfile] = useState<any>(null);
     const [decryptedLogs, setDecryptedLogs] = useState<any[]>([]);
     const [showHistoryOnMap, setShowHistoryOnMap] = useState(false);
+
+    // Parking Area Reporting settings
+    const [showParkingAreas, setShowParkingAreas] = useState(() => {
+        const saved = localStorage.getItem('parlens_show_parking_areas');
+        return saved ? JSON.parse(saved) : false;
+    });
+    const [parkingAreaTimeFilter, setParkingAreaTimeFilter] = useState<'today' | 'week' | 'month' | 'year' | 'all'>(() => {
+        const saved = localStorage.getItem('parlens_parking_area_filter');
+        return (saved as any) || 'week';
+    });
+    const [shareParkingAreaReports, setShareParkingAreaReports] = useState(() => {
+        const saved = localStorage.getItem('parlens_share_parking_areas');
+        return saved ? JSON.parse(saved) : false;
+    });
 
     // Parking History filters
     const [filterType, setFilterType] = useState<'all' | 'bicycle' | 'motorcycle' | 'car'>('all');
@@ -399,7 +413,7 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                         </div>
 
                         <div className="space-y-4">
-                            <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-white/20 ml-2">Keys</h4>
+                            <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-white/20 ml-2">My Keys</h4>
                             <div className="space-y-0.5 rounded-[2rem] overflow-hidden bg-zinc-50 dark:bg-white/[0.03] border border-black/5 dark:border-white/5">
                                 <div className="p-5 flex items-center justify-between transition-colors cursor-pointer" onClick={() => {
                                     navigator.clipboard.writeText(profile?.npub);
@@ -599,6 +613,78 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                                 </div>
                                 <p className="text-xs text-zinc-400 dark:text-white/30 text-left ml-2">
                                     🚫 Items you hide in the listed parking page can be managed here.
+                                </p>
+                            </div>
+
+                            {/* Parking Areas Section */}
+                            <div className="space-y-4">
+                                <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-white/20 ml-2">Parking Areas</h4>
+
+                                {/* Show parking areas on map toggle */}
+                                <div className="flex items-center justify-between p-4 bg-zinc-50 dark:bg-white/5 rounded-[2rem] border border-black/5 dark:border-white/5">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-10 h-10 flex items-center justify-center rounded-xl bg-zinc-500/10 dark:bg-zinc-500/20 text-zinc-500 dark:text-zinc-400">
+                                            <span className="text-base font-bold">P</span>
+                                        </div>
+                                        <span className="font-semibold text-sm text-zinc-700 dark:text-white">Show parking areas on map</span>
+                                    </div>
+                                    <button
+                                        onClick={() => {
+                                            const newValue = !showParkingAreas;
+                                            setShowParkingAreas(newValue);
+                                            localStorage.setItem('parlens_show_parking_areas', JSON.stringify(newValue));
+                                        }}
+                                        className={`w-12 h-7 rounded-full transition-colors relative ${showParkingAreas ? 'bg-[#007AFF]' : 'bg-zinc-200 dark:bg-white/20'}`}
+                                    >
+                                        <div className={`absolute top-1 bottom-1 w-5 h-5 rounded-full bg-white transition-transform ${showParkingAreas ? 'left-[calc(100%-1.25rem-0.25rem)]' : 'left-1'}`} />
+                                    </button>
+                                </div>
+
+                                {/* Time Filter - Inline with label, only if enabled */}
+                                {showParkingAreas && (
+                                    <div className="flex items-center justify-between ml-2">
+                                        <span className="text-xs text-zinc-400 dark:text-white/30">See areas reported since:</span>
+                                        <select
+                                            value={parkingAreaTimeFilter}
+                                            onChange={(e) => {
+                                                const value = e.target.value as 'today' | 'week' | 'month' | 'year' | 'all';
+                                                setParkingAreaTimeFilter(value);
+                                                localStorage.setItem('parlens_parking_area_filter', value);
+                                            }}
+                                            className="appearance-none bg-transparent text-xs text-zinc-600 dark:text-zinc-300 focus:outline-none cursor-pointer"
+                                        >
+                                            <option value="today">Today</option>
+                                            <option value="week">This Week</option>
+                                            <option value="month">This Month</option>
+                                            <option value="year">This Year</option>
+                                            <option value="all">All Time</option>
+                                        </select>
+                                    </div>
+                                )}
+
+                                {/* Share parking area reports toggle - with Share icon and green highlight */}
+                                <div className="flex items-center justify-between p-4 bg-zinc-50 dark:bg-white/5 rounded-[2rem] border border-black/5 dark:border-white/5">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-10 h-10 flex items-center justify-center rounded-xl bg-green-500/10 dark:bg-green-500/20 text-green-500 dark:text-green-400">
+                                            <Share2 size={20} />
+                                        </div>
+                                        <span className="font-semibold text-sm text-zinc-700 dark:text-white">Share parking area reports</span>
+                                    </div>
+                                    <button
+                                        onClick={() => {
+                                            const newValue = !shareParkingAreaReports;
+                                            setShareParkingAreaReports(newValue);
+                                            localStorage.setItem('parlens_share_parking_areas', JSON.stringify(newValue));
+                                        }}
+                                        className={`w-12 h-7 rounded-full transition-colors relative ${shareParkingAreaReports ? 'bg-[#007AFF]' : 'bg-zinc-200 dark:bg-white/20'}`}
+                                    >
+                                        <div className={`absolute top-1 bottom-1 w-5 h-5 rounded-full bg-white transition-transform ${shareParkingAreaReports ? 'left-[calc(100%-1.25rem-0.25rem)]' : 'left-1'}`} />
+                                    </button>
+                                </div>
+
+                                {/* Privacy note - outside container */}
+                                <p className="text-xs text-zinc-400 dark:text-white/30 text-left ml-2 leading-relaxed">
+                                    🅿️ Parking areas are reported anonymously shortly after you complete a session. Sharing reports will help other users know where to find parking when visiting the area.
                                 </p>
                             </div>
 

@@ -45,7 +45,8 @@ function getClusterPrecision(zoom: number): number {
 export function clusterSpots<T extends SpotBase>(
     spots: T[],
     zoom: number,
-    shouldCluster: boolean = true
+    shouldCluster: boolean = true,
+    maxPrecision: number = 8
 ): (T | Cluster<SpotBase>)[] {
     // Always cluster if there are at least 2 spots
     if (!shouldCluster || spots.length < 2) {
@@ -62,14 +63,19 @@ export function clusterSpots<T extends SpotBase>(
         if (!hasWeighted && spots.length < 2) return spots;
     }
 
-    const precision = getClusterPrecision(zoom);
+    // Apply maxPrecision cap
+    const calculatedPrecision = getClusterPrecision(zoom);
+    const precision = Math.min(calculatedPrecision, maxPrecision);
     const clusters = new Map<string, Cluster<T>>();
 
     for (const spot of spots) {
         // At high zoom levels (>=15), use rounded coordinates for grouping to catch nearby spots
         // 4 decimal places = ~11m precision, catches GPS jitter and same-spot duplicates
         // At lower zoom levels, use geohash for broader clustering
-        const hash = zoom >= 15
+        // BUT if precision is capped (e.g. maxPrecision=7), we MUST use geohash regardless of zoom
+        const useCoordinateRounding = zoom >= 15 && precision >= 8;
+
+        const hash = useCoordinateRounding
             ? `${spot.lat.toFixed(4)},${spot.lon.toFixed(4)}`
             : encodeGeohash(spot.lat, spot.lon, precision);
 

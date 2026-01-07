@@ -276,3 +276,146 @@ export function calculateDistance(lat1: number, lon1: number, lat2: number, lon2
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;
 }
+
+export interface NominatimResult {
+    place_id: number;
+    lat: string;
+    lon: string;
+    display_name: string;
+    type: string;
+}
+
+/**
+ * Performs an online search using Nominatim (OSM) and Google Plus Codes.
+ * Returns the best match or null.
+ */
+export async function searchLocation(
+    query: string,
+    countryCode?: string | null,
+    currentLocation?: [number, number] | null
+): Promise<NominatimResult | null> {
+    if (!query || query.length < 3) return null;
+
+    // Run both searches in parallel for faster results
+    const plusCodeSearch = async (): Promise<NominatimResult | null> => {
+        try {
+            // Check for context-based Plus Code (e.g. "8FVC+GH City")
+            const firstSpaceIndex = query.indexOf(' ');
+            if (firstSpaceIndex > 3 && query.includes('+')) {
+                const potentialCode = query.substring(0, firstSpaceIndex).trim();
+                const context = query.substring(firstSpaceIndex + 1).trim();
+
+                if (potentialCode.includes('+') && context.length > 0) {
+                    console.log('[Parlens] Plus Code search:', potentialCode, 'in', context);
+                    const contextRes = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(context)}&format=json&limit=1`);
+                    const contextData = await contextRes.json();
+
+                    if (contextData && contextData.length > 0) {
+                        const refLat = parseFloat(contextData[0].lat);
+                        const refLon = parseFloat(contextData[0].lon);
+                        const recovered = recoverPlusCode(potentialCode, refLat, refLon);
+                        if (recovered) {
+                            return {
+                                place_id: -1,
+                                lat: recovered.lat.toString(),
+                                lon: recovered.lon.toString(),
+                                display_name: `Plus Code: ${potentialCode.toUpperCase()}, ${contextData[0].display_name}`,
+                                type: 'plus_code'
+                            };
+                        }
+                    }
+                }
+            } else {
+                // Direct Plus Code search (e.g. coordinates or full code)
+                const parsed = parseCoordinate(query);
+                if (parsed) {
+                    return {
+                        place_id: -1,
+                        lat: parsed.lat.toString(),
+                        lon: parsed.lon.toString(),
+                        display_name: parsed.type === 'plus_code' ? `Plus Code: ${query.toUpperCase()}` : `Location: ${formatCoords(parsed.lat, parsed.lon)}`,
+                        type: parsed.type
+                    };
+                }
+            }
+        } catch (e) {
+            console.error('[Parlens] Plus Code search error:', e);
+        }
+        return null; // Fallback
+    };
+
+    const nominatimSearch = async (): Promise<NominatimResult | null> => {
+        try {
+            let url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`;
+            if (countryCode) {
+                url += `&countrycodes=${countryCode}`;
+            }
+            if (currentLocation) {
+                // Prioritize results near current location
+                // viewbox=left,top,right,bottom
+                const boxSize = 1.0; // ~100km box
+                const left = currentLocation[1] - boxSize;
+                const right = currentLocation[1] + boxSize;
+                const top = currentLocation[0] + boxSize;
+                const bottom = currentLocation[0] - boxSize;
+                url += `&viewbox=${left},${top},${right},${bottom}`;
+            }
+
+            const res = await fetch(url);
+            const data = await res.json();
+            if (data && data.length > 0) {
+                return data[0] as NominatimResult;
+            }
+        } catch (e) {
+            console.error('[Parlens] Nominatim search error:', e);
+        }
+        return null;
+    };
+
+    try {
+        // Race them, or prefer Plus Code if it looks like one?
+        // Let's run both. If Plus Code returns valid result, it's usually specific.
+        const [pcResult, nomResult] = await Promise.all([plusCodeSearch(), nominatimSearch()]);
+
+        if (pcResult) return pcResult;
+        return nomResult;
+
+    } catch (e) {
+        console.error('Search failed', e);
+        return null;
+    }
+}
+
+/**
+ * Fetches search suggestions from Nominatim.
+ */
+export async function getSuggestions(
+    query: string,
+    countryCode?: string | null,
+    currentLocation?: [number, number] | null,
+    limit: number = 5
+): Promise<NominatimResult[]> {
+    if (!query || query.length < 3) return [];
+
+    try {
+        let url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=${limit}&addressdetails=1`;
+        if (countryCode) {
+            url += `&countrycodes=${countryCode}`;
+        }
+        if (currentLocation) {
+            const boxSize = 1.0;
+            const left = currentLocation[1] - boxSize;
+            const right = currentLocation[1] + boxSize;
+            const top = currentLocation[0] + boxSize;
+            const bottom = currentLocation[0] - boxSize;
+            url += `&viewbox=${left},${top},${right},${bottom}`;
+        }
+
+        const res = await fetch(url);
+        const data = await res.json();
+        return Array.isArray(data) ? data as NominatimResult[] : [];
+    } catch (e) {
+        console.error('[Parlens] Suggestion fetch error:', e);
+        return [];
+    }
+}
