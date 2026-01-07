@@ -95,7 +95,6 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
     const [countryCode, setCountryCode] = useState<string | null>(null);
     const [snappedWaypoints, setSnappedWaypoints] = useState<{ [index: number]: { lat: number, lon: number } }>({});
     const [onlineSuggestions, setOnlineSuggestions] = useState<NominatimResult[]>([]);
-    const [isSearchingOnline, setIsSearchingOnline] = useState(false);
 
     // Online search effect
     useEffect(() => {
@@ -107,12 +106,10 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
         // Skip if coordinate/plus code
         if (parseCoordinate(searchQuery)) return;
 
-        setIsSearchingOnline(true);
         const timer = setTimeout(() => {
             getSuggestions(searchQuery, countryCode, currentLocation, 1) // Limit to 1 result
                 .then(setOnlineSuggestions)
-                .catch(console.error)
-                .finally(() => setIsSearchingOnline(false));
+                .catch(console.error);
         }, 500);
 
         return () => clearTimeout(timer);
