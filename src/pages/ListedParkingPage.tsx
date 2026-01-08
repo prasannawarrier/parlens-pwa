@@ -133,6 +133,8 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
 
     // Captured location - set once on mount and updated only on explicit refresh
     const capturedLocationRef = useRef<[number, number] | null>(null);
+    // Prevent double-fetch on mount (React Strict Mode or re-renders)
+    const hasFetchedRef = useRef(false);
 
     const toggleSaved = (listingId: string) => {
         setSavedListings(prev => {
@@ -263,6 +265,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             setConfirmedSearchTerm(''); // Clear text filter to sorting mode
             setSearchTerm(item.display_name.split(',')[0]); // Show short name in input
             setSuggestions([]);
+            fetchListings(); // Trigger refresh with new location context
         }
     };
 
@@ -278,8 +281,12 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
 
         if (!searchTerm) {
             setConfirmedSearchTerm('');
-            if (currentLocation) setSearchCenter(currentLocation);
+            if (currentLocation) {
+                setSearchCenter(currentLocation);
+                capturedLocationRef.current = currentLocation;
+            }
             setSuggestions([]);
+            fetchListings(); // Refresh with current location
             return;
         }
 
@@ -298,6 +305,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                     setConfirmedSearchTerm('');
                     setSuggestions([]);
                     setIsLoading(false);
+                    fetchListings(); // Refresh with new searched location
                     return;
                 }
             }
@@ -315,10 +323,11 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             }
             setConfirmedSearchTerm(searchTerm);
             if (currentLocation) setSearchCenter(currentLocation);
+            // No fetchListings here - just filtering existing results by text
             setSuggestions([]);
-
         } catch (e) {
-            console.error('Search error:', e);
+            console.error('Search failed:', e);
+            // Fallback to text filter on error
             setConfirmedSearchTerm(searchTerm);
         } finally {
             setIsSuggesting(false);
@@ -390,11 +399,72 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
         }
 
         try {
-            // 1. Fetch Metadata
-            const rawEvents = await pool.querySync(DEFAULT_RELAYS, {
-                kinds: [KINDS.LISTED_PARKING_METADATA],
-                limit: 100
+            // 1. Fetch Metadata - Two-phase: User's listings first (always reliable), then public
+            let rawEvents: any[] = [];
+
+            // Phase A: Fetch listings where user is Author, Manager ('write'), or Member ('read')
+            // This ensures "my stuff" (and shared stuff) always loads regardless of relay traffic
+            if (pubkey) {
+                // Own listings
+                const myEventsPromise = pool.querySync(DEFAULT_RELAYS, {
+                    kinds: [KINDS.LISTED_PARKING_METADATA],
+                    authors: [pubkey]
+                });
+
+                // Listings where I am tagged (admin, write, or read)
+                // Note: '#p' catches all p-tags regardless of marker (admin/write/read)
+                const taggedEventsPromise = pool.querySync(DEFAULT_RELAYS, {
+                    kinds: [KINDS.LISTED_PARKING_METADATA],
+                    '#p': [pubkey]
+                });
+
+                const [myEvents, taggedEvents] = await Promise.all([myEventsPromise, taggedEventsPromise]);
+
+                // Merge and dedup Phase A
+                const phaseAMap = new Map();
+                [...myEvents, ...taggedEvents].forEach(e => phaseAMap.set(e.id, e));
+                rawEvents = Array.from(phaseAMap.values());
+                console.log('[Parlens] Phase A: Fetched', rawEvents.length, 'user/managed/member listings');
+            }
+
+            // Phase B: Fetch public listings (Geohash-scoped based on Search Location or Current Location)
+            let searchLoc = capturedLocationRef.current;
+
+            // If an explicit location argument was passed (e.g. from search), use that
+            // Note: arg can be boolean (silent) or object/array if extended in future. 
+            // For now, relies on capturedLocationRef which is updated by the caller if needed.
+            // But deeper logic: if user searched, `pickedLocation` or `searchCenter` should be used.
+            // Let's use `searchCenter` state if available, falling back to captured ref.
+            if (searchCenter) searchLoc = searchCenter;
+
+            let publicEvents = [];
+
+            if (searchLoc) {
+                const [lat, lon] = searchLoc;
+                // Use 5-char precision (approx 5km x 5km) matching the creation logic for broad discovery
+                // If the user's geohash is very precise, we truncate to 5 chars
+                const centerHash = encodeGeohash(lat, lon, 5);
+                console.log('[Parlens] Phase B: Searching public listings at', centerHash);
+
+                publicEvents = await pool.querySync(DEFAULT_RELAYS, {
+                    kinds: [KINDS.LISTED_PARKING_METADATA],
+                    '#g': [centerHash],
+                    limit: 100
+                });
+            } else {
+                console.log('[Parlens] Phase B: No location context, falling back to global limit');
+                publicEvents = await pool.querySync(DEFAULT_RELAYS, {
+                    kinds: [KINDS.LISTED_PARKING_METADATA],
+                    limit: 50 // Lower limit for global fallback to save bandwidth
+                });
+            }
+
+            // Merge, avoiding duplicates (user's listings already in rawEvents)
+            const existingIds = new Set(rawEvents.map((e: any) => e.id));
+            publicEvents.forEach((e: any) => {
+                if (!existingIds.has(e.id)) rawEvents.push(e);
             });
+            console.log('[Parlens] Phase B: Merged', publicEvents.length, 'public listings. Total:', rawEvents.length);
 
             // Deduplicate events (Addressable Kind 31147) - Keep only latest per d-tag
             const uniqueEventsMap = new Map<string, any>();
@@ -735,6 +805,9 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
         if (currentLocation && !capturedLocationRef.current) {
             capturedLocationRef.current = currentLocation;
         }
+        // Prevent double-fetch on mount (React Strict Mode or re-renders)
+        if (hasFetchedRef.current) return;
+        hasFetchedRef.current = true;
         fetchListings();
     }, [fetchListings]); // Fetch once on mount - tab filtering is done client-side
 
@@ -2000,6 +2073,7 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
                 ['listing_name', formData.listing_name.slice(0, 25)],
                 ['location', formData.location],
                 ['g', geohash],
+                ...(geohash.length >= 5 ? [['g', geohash.substring(0, 5)]] : []),
                 ['local_area', formData.local_area || ''],
                 ['city', formData.city || ''],
                 ['zipcode', formData.zipcode || ''],
