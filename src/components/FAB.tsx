@@ -248,11 +248,10 @@ export const FAB: React.FC<FABProps> = ({
                 }
             };
 
-            // 1. Immediate fetch of existing spots
+            // 1. Immediate fetch of existing spots - with isolated error handling per Kind
             const initialFetch = async () => {
+                // === BATCH 1: Parking Area Indicators (Kind 31714) ===
                 try {
-                    // Fetch parking area reports (Kind 31714) - default to past 7 days
-                    // User can configure time filter via Profile settings
                     const areaTimeFilter = localStorage.getItem('parlens_parking_area_filter') || 'week';
                     let areaSince = now - 604800; // Default: 7 days
                     if (areaTimeFilter === 'today') areaSince = now - 86400;
@@ -269,7 +268,22 @@ export const FAB: React.FC<FABProps> = ({
                         } as any
                     );
 
-                    // Fetch individual spot status logs (Kind 1714) - for listed parking spots
+                    // Process broadcast events immediately
+                    for (const event of broadcastEvents) {
+                        processSpotEvent(event);
+                    }
+                    // Update state after Batch 1
+                    if (spotsMapRef.current.size > 0) {
+                        setOpenSpots(Array.from(spotsMapRef.current.values()));
+                    }
+                    console.log('[Parlens] Batch 1 (Kind 31714) loaded:', broadcastEvents.length, 'events');
+                } catch (e) {
+                    console.error('[Parlens] Batch 1 (Kind 31714) failed:', e);
+                }
+
+                // === BATCH 2: Listed Spot Logs (Kind 1714) + Orphan Validation ===
+                // Combined to ensure orphans never appear temporarily on the map
+                try {
                     const spotStatusEvents = await pool.querySync(
                         DEFAULT_RELAYS,
                         {
@@ -277,11 +291,7 @@ export const FAB: React.FC<FABProps> = ({
                             '#g': Array.from(sessionGeohashes),
                         } as any
                     );
-
-                    // Process broadcast events
-                    for (const event of broadcastEvents) {
-                        processSpotEvent(event);
-                    }
+                    console.log('[Parlens] Batch 2 (Kind 1714) loaded:', spotStatusEvents.length, 'events');
 
                     // Process spot status events - only keep latest per spot (a-tag)
                     const latestBySpot = new Map<string, any>();
@@ -292,29 +302,9 @@ export const FAB: React.FC<FABProps> = ({
                         const aTag = event.tags.find((t: string[]) => t[0] === 'a')?.[1];
                         if (!aTag) continue;
 
-                        // aTag format: 31147:pubkey:d-tag (parent) OR 37141:pubkey:spot-d-tag (spot address)
-                        // Actually Kind 1714 'a' tag points to the Spot (Kind 37141), which is a child of Listing (Kind 31147).
-                        // But usually the 'a' tag in 1714 points to the Spot Address. 
-                        // To check if listing is deleted, we need to check the Listing ID. 
-                        // The Spot Address 'd' tag usually contains the listing ID or we can infer it?
-                        // Actually, looking at ListedParkingPage, the Spot 'd' tag is `spot_${listing.d}_${spotId}`.
-                        // So we can reconstruct the parent Listing address: 31147:pubkey:listing_d_tag.
-                        // OR, we can just check if the spot Address itself (37141) exists? No, Kind 37141 is deleted too.
-                        // Better: Check if the 'parent' listing exists.
-                        // Wait, Kind 1714 usually tags the *Listing* in 'e' or 'a' tag too?
-                        // Let's assume Kind 1714 'a' tag is `37141:pubkey:spot_d`.
-                        // We need to parse this to find the Listing D tag?
-                        // Convention: spot_d = `spot_<listingD>_<timestamp/random>`. 
-                        // If we can't easily derive it, we might just check if the Spot (37141) exists?
-                        // But checking 37141 for every spot is heavy.
-                        // Let's rely on the fact that `deleteListing` deletes Kind 31147 (Listing Metadata).
-                        // If we can find the 31147 address from the 1714 event, we can check it.
-                        // Standard practice: Kind 1714 tags the reference 'a'.
-
                         // Parse 'a' tag: "kind:pubkey:d_tag"
                         const parts = aTag.split(':');
                         if (parts.length === 3) {
-                            // We only need to confirm the parts enable parsing, but variables are unused
                             parentListingAddresses.add(aTag);
                         }
 
@@ -328,10 +318,6 @@ export const FAB: React.FC<FABProps> = ({
                     // If the Spot Listing (37141) is deleted, the Spot Log (1714) is an orphan.
                     if (parentListingAddresses.size > 0) {
                         const uniqueAddresses = Array.from(parentListingAddresses);
-                        // We can't query by 'a' tag directly in filter (unless generic tag).
-                        // We query by 'd' tag and 'authors'.
-                        // Group by author for efficiency? 
-                        // Actually, just query Kind 37141 with '#d': [list of d tags] and authors: [list of pubkeys]
 
                         const dTags = new Set<string>();
                         const authors = new Set<string>();
@@ -356,13 +342,11 @@ export const FAB: React.FC<FABProps> = ({
                             if (d) validAddresses.add(`${KINDS.PARKING_SPOT_LISTING}:${e.pubkey}:${d}`);
                         });
 
-                        // Filter Process loop
+                        // Filter Process loop - only add valid (non-orphaned) spots
                         for (const event of latestBySpot.values()) {
                             const aTag = event.tags.find((t: string[]) => t[0] === 'a')?.[1];
                             if (validAddresses.has(aTag)) {
                                 processSpotEvent(event);
-                            } else {
-                                // console.log('Filtered orphaned spot:', aTag);
                             }
                         }
                     } else {
@@ -372,15 +356,15 @@ export const FAB: React.FC<FABProps> = ({
                         }
                     }
 
-                    // Update state after initial fetch
+                    // Update state after Batch 2 (now includes orphan filtering)
                     if (spotsMapRef.current.size > 0) {
                         setOpenSpots(Array.from(spotsMapRef.current.values()));
                     } else {
-                        // Ensure we clear if filter removed everything
                         setOpenSpots([]);
                     }
+                    console.log('[Parlens] Batch 2 (Kind 1714 + orphan validation) completed');
                 } catch (e) {
-                    console.error('[Parlens] Initial spot fetch failed:', e);
+                    console.error('[Parlens] Batch 2 (Kind 1714 + orphan validation) failed:', e);
                 }
             };
             initialFetch();

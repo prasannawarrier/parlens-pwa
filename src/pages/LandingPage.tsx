@@ -506,9 +506,15 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             }
 
             const newStatus = 'occupied';
+            // Derive listing address from spot address (37141:pubkey:listingD-spot-N -> 31147:pubkey:listingD)
+            const spotParts = authData.a.split(':');
+            const spotD = spotParts[2] || '';
+            const listingD = spotD.replace(/-spot-\d+$/, '');
+            const listingATag = `${KINDS.LISTED_PARKING_METADATA}:${spotParts[1]}:${listingD}`;
             // Start Session Logic (unchanged)
             const tags = [
                 ['a', authData.a],
+                ['a', listingATag, '', 'root'],
                 ['status', newStatus],
                 ['updated_by', tempPubkey], // Temp pubkey
                 ['authorizer', authData.authorizer || pubkey || ''], // Owner/manager who authorized
@@ -619,8 +625,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
 
             // 1. Update Status to 'open' (Kind 1714) using NEW temp key (or reused one?)
             // We generated a NEW temp key in handleScannedCode just now.
+            // Derive listing address from spot address (37141:pubkey:listingD-spot-N -> 31147:pubkey:listingD)
+            const spotParts = authData.a.split(':');
+            const spotD = spotParts[2] || '';
+            const listingD = spotD.replace(/-spot-\d+$/, '');
+            const listingATag = `${KINDS.LISTED_PARKING_METADATA}:${spotParts[1]}:${listingD}`;
             const tags = [
                 ['a', authData.a],
+                ['a', listingATag, '', 'root'],
                 ['status', 'open'],
                 ['updated_by', tempPubkey],
                 ['authorizer', authData.authorizer || pubkey || ''],

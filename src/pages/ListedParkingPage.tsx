@@ -166,6 +166,15 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
         }
     }, [currentLocation]);
 
+    // Lock body scroll when this page is mounted (prevents iOS scroll issues)
+    useEffect(() => {
+        const originalOverflow = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        return () => {
+            document.body.style.overflow = originalOverflow;
+        };
+    }, []);
+
     const [savedRoutes, setSavedRoutes] = useState<SavedRoute[]>([]);
 
     // Load saved routes on mount
@@ -467,102 +476,105 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             setListings(sortedListings);
             setIsLoading(false); // Immediately show cards
 
-            // 2. Progressive Stats Fetching - per listing batch
-            const BATCH_SIZE = 10;
+            // 2. Progressive Stats Fetching - per listing batch (isolated error handling)
+            try {
+                const BATCH_SIZE = 10;
 
-            for (let i = 0; i < sortedListings.length; i += BATCH_SIZE) {
-                const batchListings = sortedListings.slice(i, i + BATCH_SIZE);
+                for (let i = 0; i < sortedListings.length; i += BATCH_SIZE) {
+                    const batchListings = sortedListings.slice(i, i + BATCH_SIZE);
 
-                // Generate a-tags for Kind 1714 query (using predictive d-tag patterns)
-                const spotATags: string[] = [];
-                batchListings.forEach(listing => {
-                    if (listing.total_spots && listing.total_spots > 0) {
-                        for (let j = 1; j <= listing.total_spots; j++) {
-                            const spotId = `${listing.d}-spot-${j}`;
-                            spotATags.push(`${KINDS.PARKING_SPOT_LISTING}:${listing.pubkey}:${spotId}`);
-                        }
-                    }
-                });
+                    // Generate parent listing addresses (root tags) for Kind 1714 query
+                    // This uses the Explicit Entity model - we query by parent, not by predicted spot IDs
+                    const listingATags: string[] = batchListings.map(listing =>
+                        `${KINDS.LISTED_PARKING_METADATA}:${listing.pubkey}:${listing.d}`
+                    );
 
-                if (spotATags.length === 0) continue;
+                    if (listingATags.length === 0) continue;
 
-                // Fetch Kind 1714 logs for this batch
-                const statusEvents = await pool.querySync(DEFAULT_RELAYS, {
-                    kinds: [KINDS.LISTED_SPOT_LOG],
-                    '#a': spotATags
-                });
-
-                // Create map of latest status per spot
-                const latestStatusMap = new Map();
-                statusEvents.forEach((e: any) => {
-                    const a = e.tags.find((t: string[]) => t[0] === 'a')?.[1];
-                    if (!latestStatusMap.has(a) || latestStatusMap.get(a).created_at < e.created_at) {
-                        latestStatusMap.set(a, e);
-                    }
-                });
-
-                // Calculate stats for each listing in this batch
-                const batchStats = new Map<string, any>();
-
-                batchListings.forEach(listing => {
-                    const stats = {
-                        car: { open: 0, occupied: 0, closed: 0, total: 0, rate: listing.rates?.car?.hourly || 0 },
-                        motorcycle: { open: 0, occupied: 0, closed: 0, total: 0, rate: listing.rates?.motorcycle?.hourly || 0 },
-                        bicycle: { open: 0, occupied: 0, closed: 0, total: 0, rate: listing.rates?.bicycle?.hourly || 0 }
-                    };
-
-                    if (listing.total_spots && listing.total_spots > 0) {
-                        // For each expected spot, check status from logs
-                        for (let j = 1; j <= listing.total_spots; j++) {
-                            const spotId = `${listing.d}-spot-${j}`;
-                            const spotATag = `${KINDS.PARKING_SPOT_LISTING}:${listing.pubkey}:${spotId}`;
-                            const statusEvent = latestStatusMap.get(spotATag);
-                            const status = statusEvent?.tags.find((t: string[]) => t[0] === 'status')?.[1] || 'open';
-                            const type = (statusEvent?.tags.find((t: string[]) => t[0] === 'type')?.[1] as 'car' | 'motorcycle' | 'bicycle') || 'car';
-
-                            if (stats[type]) {
-                                stats[type].total++;
-                                if (status === 'occupied') stats[type].occupied++;
-                                else if (status === 'closed') stats[type].closed++;
-                                else stats[type].open++;
-                            }
-                        }
-                    }
-
-                    batchStats.set(listing.d, stats);
-                });
-
-                // Build spot mapping for this batch
-                const batchMapping = new Map<string, { listingId: string; type: 'car' | 'motorcycle' | 'bicycle' }>();
-                batchListings.forEach(listing => {
-                    if (listing.total_spots && listing.total_spots > 0) {
-                        for (let j = 1; j <= listing.total_spots; j++) {
-                            const spotId = `${listing.d}-spot-${j}`;
-                            const spotATag = `${KINDS.PARKING_SPOT_LISTING}:${listing.pubkey}:${spotId}`;
-                            const statusEvent = latestStatusMap.get(spotATag);
-                            const type = (statusEvent?.tags.find((t: string[]) => t[0] === 'type')?.[1] as 'car' | 'motorcycle' | 'bicycle') || 'car';
-                            batchMapping.set(spotId, { listingId: listing.d, type });
-                        }
-                    }
-                });
-
-                // Update stats incrementally - each card updates as its data arrives
-                setListingStats(prev => {
-                    const newMap = new Map(prev);
-                    batchStats.forEach((stats, listingD) => {
-                        newMap.set(listingD, stats);
+                    // Fetch Kind 1714 status logs for all spots in these listings (via root tag)
+                    const statusEvents = await pool.querySync(DEFAULT_RELAYS, {
+                        kinds: [KINDS.LISTED_SPOT_LOG],
+                        '#a': listingATags
                     });
-                    return newMap;
-                });
 
-                // Update spot mapping incrementally
-                setSpotToListingMap(prev => {
-                    const newMap = new Map(prev);
-                    batchMapping.forEach((mapping, spotId) => {
-                        newMap.set(spotId, mapping);
+                    // Create map of latest status per spot (keyed by spot a-tag)
+                    const latestStatusMap = new Map();
+                    statusEvents.forEach((e: any) => {
+                        // Find the spot a-tag (first 'a' tag that points to Kind 37141)
+                        const a = e.tags.find((t: string[]) => t[0] === 'a' && t[1]?.startsWith(`${KINDS.PARKING_SPOT_LISTING}:`))?.[1];
+                        if (!a) return;
+                        if (!latestStatusMap.has(a) || latestStatusMap.get(a).created_at < e.created_at) {
+                            latestStatusMap.set(a, e);
+                        }
                     });
-                    return newMap;
-                });
+
+                    // Calculate stats for each listing based on ACTUAL spots found (Explicit Entity model)
+                    const batchStats = new Map<string, any>();
+
+                    // Initialize stats for all listings in batch
+                    batchListings.forEach(listing => {
+                        batchStats.set(listing.d, {
+                            car: { open: 0, occupied: 0, closed: 0, total: 0, rate: listing.rates?.car?.hourly || 0 },
+                            motorcycle: { open: 0, occupied: 0, closed: 0, total: 0, rate: listing.rates?.motorcycle?.hourly || 0 },
+                            bicycle: { open: 0, occupied: 0, closed: 0, total: 0, rate: listing.rates?.bicycle?.hourly || 0 }
+                        });
+                    });
+
+                    // Iterate through actual found spots and accumulate stats
+                    latestStatusMap.forEach((statusEvent) => {
+                        // Find which listing this spot belongs to (from root a-tag)
+                        const rootTag = statusEvent.tags.find((t: string[]) => t[0] === 'a' && t[3] === 'root')?.[1];
+                        if (!rootTag) return;
+
+                        // Extract listing d from root tag: "31147:pubkey:listingD"
+                        const listingD = rootTag.split(':')[2];
+                        const stats = batchStats.get(listingD);
+                        if (!stats) return;
+
+                        const status = statusEvent.tags.find((t: string[]) => t[0] === 'status')?.[1] || 'open';
+                        const type = (statusEvent.tags.find((t: string[]) => t[0] === 'type')?.[1] as 'car' | 'motorcycle' | 'bicycle') || 'car';
+
+                        if (stats[type]) {
+                            stats[type].total++;
+                            if (status === 'occupied') stats[type].occupied++;
+                            else if (status === 'closed') stats[type].closed++;
+                            else stats[type].open++;
+                        }
+                    });
+
+                    // Build spot mapping from actual found spots (Explicit Entity model)
+                    const batchMapping = new Map<string, { listingId: string; type: 'car' | 'motorcycle' | 'bicycle' }>();
+                    latestStatusMap.forEach((statusEvent, spotATag) => {
+                        // Extract spot ID from spotATag: "37141:pubkey:spotId"
+                        const spotId = spotATag.split(':')[2];
+                        // Find which listing this spot belongs to (from root a-tag)
+                        const rootTag = statusEvent.tags.find((t: string[]) => t[0] === 'a' && t[3] === 'root')?.[1];
+                        if (!rootTag) return;
+                        const listingD = rootTag.split(':')[2];
+                        const type = (statusEvent.tags.find((t: string[]) => t[0] === 'type')?.[1] as 'car' | 'motorcycle' | 'bicycle') || 'car';
+                        batchMapping.set(spotId, { listingId: listingD, type });
+                    });
+
+                    // Update stats incrementally - each card updates as its data arrives
+                    setListingStats(prev => {
+                        const newMap = new Map(prev);
+                        batchStats.forEach((stats, listingD) => {
+                            newMap.set(listingD, stats);
+                        });
+                        return newMap;
+                    });
+
+                    // Update spot mapping incrementally
+                    setSpotToListingMap(prev => {
+                        const newMap = new Map(prev);
+                        batchMapping.forEach((mapping, spotId) => {
+                            newMap.set(spotId, mapping);
+                        });
+                        return newMap;
+                    });
+                }
+            } catch (statusError) {
+                console.error('[Parlens] Status batch fetching failed (listings still displayed):', statusError);
             }
 
         } catch (error) {
@@ -1707,6 +1719,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                                                 created_at: Math.floor(Date.now() / 1000),
                                                                                 tags: [
                                                                                     ['a', spotATag],
+                                                                                    ['a', aTag, '', 'root'],
                                                                                     ['status', newStatus],
                                                                                     ['updated_by', pubkey],
                                                                                     ['g', searchableGeohash],
@@ -1893,6 +1906,15 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
         if (modalContent) modalContent.scrollTo({ top: 0, behavior: 'smooth' });
     }, [step]);
 
+    // Lock body scroll when modal is open (prevents background scrolling)
+    useEffect(() => {
+        const originalOverflow = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        return () => {
+            document.body.style.overflow = originalOverflow;
+        };
+    }, []);
+
     // Helper to render Npub chips
     const renderNpubChips = (value: string) => {
         if (!value) return null;
@@ -1964,9 +1986,10 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
         // Iterate to find rates
         finalFloors.forEach(f => {
             totalSpots += (f.counts.car || 0) + (f.counts.motorcycle || 0) + (f.counts.bicycle || 0);
-            if (!displayRates.car && f.rates.car) displayRates.car = { hourly: f.rates.car, currency: formData.currency };
-            if (!displayRates.motorcycle && f.rates.motorcycle) displayRates.motorcycle = { hourly: f.rates.motorcycle, currency: formData.currency };
-            if (!displayRates.bicycle && f.rates.bicycle) displayRates.bicycle = { hourly: f.rates.bicycle, currency: formData.currency };
+            // Capture rates even if 0 (free parking) - only skip if not defined
+            if (!displayRates.car && f.rates.car !== undefined) displayRates.car = { hourly: f.rates.car || 0, currency: formData.currency };
+            if (!displayRates.motorcycle && f.rates.motorcycle !== undefined) displayRates.motorcycle = { hourly: f.rates.motorcycle || 0, currency: formData.currency };
+            if (!displayRates.bicycle && f.rates.bicycle !== undefined) displayRates.bicycle = { hourly: f.rates.bicycle || 0, currency: formData.currency };
         });
 
         const metadata = {
@@ -2043,6 +2066,7 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
                                     created_at: Math.floor(Date.now() / 1000),
                                     tags: [
                                         ['a', spotATagForLog],
+                                        ['a', aTag, '', 'root'],
                                         ['status', 'open'],
                                         ['updated_by', pubkey],
                                         ['g', searchableGeohash],
@@ -2192,7 +2216,36 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
                                 value={formData.currency}
                                 onChange={e => setFormData({ ...formData, currency: e.target.value })}
                             >
-                                <option value="USD">USD ($)</option><option value="EUR">EUR (€)</option><option value="GBP">GBP (£)</option><option value="INR">INR (₹)</option>
+                                <option value="USD">USD ($)</option>
+                                <option value="EUR">EUR (€)</option>
+                                <option value="GBP">GBP (£)</option>
+                                <option value="INR">INR (₹)</option>
+                                <option value="JPY">JPY (¥)</option>
+                                <option value="CAD">CAD (C$)</option>
+                                <option value="AUD">AUD (A$)</option>
+                                <option value="CNY">CNY (¥)</option>
+                                <option value="AED">AED (د.إ)</option>
+                                <option value="SGD">SGD (S$)</option>
+                                <option value="CHF">CHF (Fr)</option>
+                                <option value="HKD">HKD (HK$)</option>
+                                <option value="SEK">SEK (kr)</option>
+                                <option value="NOK">NOK (kr)</option>
+                                <option value="DKK">DKK (kr)</option>
+                                <option value="NZD">NZD (NZ$)</option>
+                                <option value="MXN">MXN ($)</option>
+                                <option value="BRL">BRL (R$)</option>
+                                <option value="ZAR">ZAR (R)</option>
+                                <option value="KRW">KRW (₩)</option>
+                                <option value="THB">THB (฿)</option>
+                                <option value="MYR">MYR (RM)</option>
+                                <option value="PHP">PHP (₱)</option>
+                                <option value="IDR">IDR (Rp)</option>
+                                <option value="VND">VND (₫)</option>
+                                <option value="RUB">RUB (₽)</option>
+                                <option value="PLN">PLN (zł)</option>
+                                <option value="TRY">TRY (₺)</option>
+                                <option value="SAR">SAR (﷼)</option>
+                                <option value="EGP">EGP (E£)</option>
                             </select>
                         </div>
 
@@ -2382,8 +2435,10 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
                 updated_at: Math.floor(Date.now() / 1000)
             });
 
+            const listingATag = `${KINDS.LISTED_PARKING_METADATA}:${listing.pubkey}:${listing.d}`;
             const tags = [
                 ['a', spotATag],
+                ['a', listingATag, '', 'root'],
                 ['status', s],
                 ['updated_by', pubkey],
                 ['client', 'parlens']

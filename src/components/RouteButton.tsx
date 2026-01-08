@@ -584,6 +584,12 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
     const loadRoute = async (saved: SavedRoute) => {
         const content = saved.decryptedContent;
 
+        // Validate routeCoords exists - if not, route data is corrupted
+        if (!content.routeCoords || content.routeCoords.length === 0) {
+            alert('Failed to load route. Route data is missing or corrupted. Please try creating the route again.');
+            return;
+        }
+
         // Restore waypoints
         const restoredWaypoints: Waypoint[] = content.waypoints.map(w => ({
             id: crypto.randomUUID(),
