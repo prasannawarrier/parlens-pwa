@@ -1284,7 +1284,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                 {/* Bottom Spinner - Shows when more spots are loading */}
                                 {statusLoading && (
                                     <div className="flex items-center justify-center p-6 bg-zinc-50 dark:bg-white/5 rounded-2xl border-2 border-dashed border-zinc-200 dark:border-white/10 min-h-[100px]">
-                                        <div className="animate-spin w-8 h-8 border-4 border-blue-500/20 border-t-blue-500 animate-spin"></div>
+                                        <div className="animate-spin w-8 h-8 rounded-full border-4 border-blue-500/20 border-t-blue-500"></div>
                                     </div>
                                 )}
                             </div>
@@ -1293,14 +1293,14 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                 ) : (
                     // List View
                     <>
-                        <div className="px-4 py-3 bg-white dark:bg-[#1c1c1e]">
-                            <div className="flex justify-between items-center gap-2 p-1 bg-zinc-100 dark:bg-white/5 rounded-xl border border-black/5 dark:border-white/5">
+                        <div className="px-4 py-2 bg-white dark:bg-[#1c1c1e] border-t border-black/5 dark:border-white/10">
+                            <div className="flex justify-between items-center gap-2">
                                 {(['public', 'private', 'my'] as TabType[]).map(tab => (
                                     <button
                                         key={tab}
                                         onClick={() => setActiveTab(tab)}
-                                        className={`flex-1 flex items-center justify-center py-2.5 rounded-md text-sm transition-all active:scale-95 ${activeTab === tab
-                                            ? 'bg-white dark:bg-white/10 text-zinc-900 dark:text-white font-bold shadow-sm'
+                                        className={`flex-1 flex items-center justify-center py-2 text-sm transition-all active:scale-95 ${activeTab === tab
+                                            ? 'text-zinc-900 dark:text-white font-bold border-b-2 border-blue-500'
                                             : 'text-zinc-400 dark:text-white/40'
                                             }`}
                                     >
@@ -1598,9 +1598,9 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
 
                                                         // Rate display logic:
                                                         // - Always show if rate exists
-                                                        // - If Public and Available (has spots) but no rate, default to 0/hr
+                                                        // - If Available (has spots) but no rate, default to 0/hr
                                                         const displayRate = v.rate || { hourly: 0, currency: 'INR' };
-                                                        const showRate = !!v.rate || (isAvailable && listing.listing_type === 'public');
+                                                        const showRate = !!v.rate || isAvailable;
 
                                                         return (
                                                             <div key={v.type} className={`bg-zinc-50 dark:bg-white/10 rounded-xl p-2 text-center flex flex-col items-center justify-center min-h-[80px] ${isClosed ? 'opacity-50' : ''}`}>
@@ -2036,7 +2036,7 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
                                 const [lat, lon] = formData.location.split(',').map((s: string) => parseFloat(s.trim()));
                                 const searchableGeohash = encodeGeohash(lat, lon, 5); // 5-char for search compatibility
                                 const spotRate = displayRates[type]?.hourly || 0;
-                                const spotCurrency = displayRates[type]?.currency || 'USD';
+                                const spotCurrency = displayRates[type]?.currency || formData.currency;
 
                                 const initialStatus = {
                                     kind: KINDS.LISTED_SPOT_LOG,
@@ -2050,6 +2050,7 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
                                         ['type', type],
                                         ['hourly_rate', String(spotRate)],
                                         ['currency', spotCurrency],
+                                        ['listing_name', formData.listing_name],
                                         ['client', 'parlens']
                                     ],
                                     content: JSON.stringify({ hourly_rate: spotRate, currency: spotCurrency })
@@ -2310,7 +2311,7 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
         listingLocation: listingLocation,
         spotType: spot.type || 'car',
         hourlyRate: spot.rates?.hourly || listing.rates?.[spot.type]?.hourly || 0,
-        currency: spot.rates?.currency || listing.rates?.[spot.type]?.currency || 'USD'
+        currency: spot.rates?.currency || listing.rates?.[spot.type]?.currency || listing.rates?.car?.currency || 'INR'
     });
     const [copied, setCopied] = useState(false);
     const [isEditing, setIsEditing] = useState(false);

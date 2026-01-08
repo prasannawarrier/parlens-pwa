@@ -651,7 +651,7 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                                                 setParkingAreaTimeFilter(value);
                                                 localStorage.setItem('parlens_parking_area_filter', value);
                                             }}
-                                            className="appearance-none bg-transparent text-xs text-zinc-600 dark:text-zinc-300 focus:outline-none cursor-pointer"
+                                            className="px-2 py-1.5 bg-white dark:bg-zinc-800 border border-black/10 dark:border-white/20 rounded-xl text-[11px] font-medium text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2212%22%20height%3D%2212%22%20viewBox%3D%220%200%2012%2012%22%3E%3Cpath%20fill%3D%22%23888%22%20d%3D%22M2%204l4%204%204-4z%22%2F%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[right_0.5rem_center] pr-6"
                                         >
                                             <option value="today">Today</option>
                                             <option value="week">This Week</option>

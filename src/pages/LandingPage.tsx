@@ -185,6 +185,101 @@ const ClusterMarkerContent = memo(({ minPrice, maxPrice, currency, type }: {
 });
 ClusterMarkerContent.displayName = 'ClusterMarkerContent';
 
+// Marker Popup Component for both Area and Listed markers
+const MarkerPopup = memo(({ type, items, onClose, isPinned, onTogglePin }: {
+    type: 'area' | 'listed';
+    items: any[];
+    onClose: () => void;
+    isPinned?: boolean;
+    onTogglePin?: () => void;
+}) => {
+    if (type === 'area') {
+        // Parking Area Stats
+        const reportCount = items.length;
+        const timestamps = items.map(i => i.original?.created_at || i.created_at).filter(Boolean);
+        const firstReport = timestamps.length > 0 ? Math.min(...timestamps) : null;
+
+        const formatTimeline = () => {
+            if (!firstReport) return null;
+            const now = Math.floor(Date.now() / 1000);
+            const daysDiff = Math.floor((now - firstReport) / 86400);
+            if (daysDiff === 0) return '1 day';
+            return `${daysDiff + 1} days`;
+        };
+
+        return (
+            <div className="bg-white dark:bg-zinc-800 rounded-xl shadow-xl border border-black/10 dark:border-white/10 p-3 min-w-[180px] animate-in zoom-in-95 fade-in duration-150" onClick={e => e.stopPropagation()}>
+                <button onClick={onClose} className="absolute top-1 right-1 p-1 text-zinc-400 hover:text-zinc-600">
+                    <X size={14} />
+                </button>
+                <div className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
+                    Parking Area
+                </div>
+                <div className="space-y-1.5 text-xs">
+                    <div className="flex justify-between gap-4">
+                        <span className="text-zinc-500">Reports:</span>
+                        <span className="font-semibold text-zinc-900 dark:text-white">{reportCount}</span>
+                    </div>
+                    {formatTimeline() && (
+                        <div className="flex justify-between gap-4">
+                            <span className="text-zinc-500">Reported over:</span>
+                            <span className="font-semibold text-zinc-900 dark:text-white">{formatTimeline()}</span>
+                        </div>
+                    )}
+                </div>
+                {onTogglePin && (
+                    <button
+                        onClick={onTogglePin}
+                        className={`mt-3 w-full py-1.5 rounded-lg text-xs font-medium transition-colors ${isPinned
+                            ? 'bg-red-500/10 text-red-600 hover:bg-red-500/20'
+                            : 'bg-blue-500/10 text-blue-600 hover:bg-blue-500/20'
+                            }`}
+                    >
+                        {isPinned ? 'Remove from Map' : 'Keep on Map'}
+                    </button>
+                )}
+            </div>
+        );
+    }
+
+    // Listed Parking - show each listing as a row
+    return (
+        <div className="bg-white dark:bg-zinc-800 rounded-xl shadow-xl border border-black/10 dark:border-white/10 p-3 min-w-[200px] max-w-[280px] animate-in zoom-in-95 fade-in duration-150" onClick={e => e.stopPropagation()}>
+            <button onClick={onClose} className="absolute top-1 right-1 p-1 text-zinc-400 hover:text-zinc-600">
+                <X size={14} />
+            </button>
+            <div className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">Listed Parking</div>
+            <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                {items.map((item, idx) => (
+                    <div key={idx} className={`flex items-center justify-between gap-2 ${idx > 0 ? 'pt-2 border-t border-black/5 dark:border-white/10' : ''}`}>
+                        <div className="font-semibold text-xs text-zinc-900 dark:text-white truncate flex-1">
+                            {item.listing_name || item.original?.listing_name || 'Parking Spot'}
+                        </div>
+                        <div className="text-xs text-zinc-500 whitespace-nowrap">
+                            {getCurrencySymbol(item.currency)}{Math.round(item.price)}/hr
+                        </div>
+                        <div className="text-xs text-green-600 font-medium whitespace-nowrap">
+                            {item.openSpots || item.original?.openSpots || item.count || 1} open
+                        </div>
+                    </div>
+                ))}
+            </div>
+            {onTogglePin && (
+                <button
+                    onClick={onTogglePin}
+                    className={`mt-3 w-full py-1.5 rounded-lg text-xs font-medium transition-colors ${isPinned
+                        ? 'bg-red-500/10 text-red-600 hover:bg-red-500/20'
+                        : 'bg-blue-500/10 text-blue-600 hover:bg-blue-500/20'
+                        }`}
+                >
+                    {isPinned ? 'Remove from Map' : 'Keep on Map'}
+                </button>
+            )}
+        </div>
+    );
+});
+MarkerPopup.displayName = 'MarkerPopup';
+
 // Active Session Marker (Map Icon)
 const ActiveSessionMarkerContent = memo(({ vehicleType }: { vehicleType: 'bicycle' | 'motorcycle' | 'car' }) => {
     // Only the emoji marker on the map
@@ -311,6 +406,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
     });
     const [showListedDetails, setShowListedDetails] = useState(false);
 
+    // State for Marker Popup Bubbles
+    const [selectedMarkerPopup, setSelectedMarkerPopup] = useState<{
+        type: 'area' | 'listed';
+        lat: number;
+        lon: number;
+        items: any[];
+    } | null>(null);
+
     // Handle scanned code passed from QRScanPage via App.tsx
     useEffect(() => {
         if (initialScannedCode) {
@@ -323,6 +426,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
     // State for Route Creation Modal and Bubble
     const [routeModalOpen, setRouteModalOpen] = useState(false);
     const [isRouteBubbleMinimized, setIsRouteBubbleMinimized] = useState(false);
+
+    // State for Pinned Markers (Keep on Map feature)
+    const [pinnedMarkers, setPinnedMarkers] = useState<any[]>(() => {
+        try {
+            const saved = localStorage.getItem('parlens_pinned_markers');
+            return saved ? JSON.parse(saved) : [];
+        } catch { return []; }
+    });
 
     // QR Code Handler for Listed Parking - Session Toggle with Temp Keys
     const handleScannedCode = useCallback(async (code: string) => {
@@ -1239,7 +1350,29 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
 
     // Separate Listed Parking (Kind 1714) from Parking Area Reports (Kind 31714)
     const listedSpots = useMemo(() => {
-        if (status !== 'search') return [];
+        // Get pinned listed items (persist even outside search)
+        const pinnedListedItems = pinnedMarkers
+            .filter(p => p.markerType === 'listed')
+            .map(p => {
+                const fresh = openSpots.find(s => s.id === p.id);
+                const source = fresh || p;
+                return {
+                    id: p.id || `pinned-${p.lat}-${p.lon}`,
+                    lat: p.lat,
+                    lon: p.lon,
+                    price: source.price,
+                    currency: source.currency,
+                    count: source.count,
+                    kind: KINDS.LISTED_SPOT_LOG,
+                    listing_name: source.listing_name || p.listing_name,
+                    openSpots: source.openSpots || source.count || p.openSpots || 1,
+                    original: source,
+                    isPinned: true
+                };
+            });
+
+        if (status !== 'search') return pinnedListedItems;
+
         return openSpots
             .filter(s => s.kind === KINDS.LISTED_SPOT_LOG && (s.type || 'car') === vehicleType)
             .map(s => ({
@@ -1250,18 +1383,40 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                 currency: s.currency,
                 count: s.count,
                 kind: s.kind,
+                listing_name: s.listing_name,
+                openSpots: s.count || 1,
                 original: s
             }));
-    }, [openSpots, vehicleType, status]);
+    }, [openSpots, vehicleType, status, pinnedMarkers]);
 
     // Filter and transform area spots for clustering (Kind 31714) - RESPECT TOGGLE
     const areaSpots = useMemo(() => {
-        if (status !== 'search') return [];
+        // Get pinned area items (persist even outside search)
+        const pinnedAreaItems = pinnedMarkers
+            .filter(p => p.markerType === 'area')
+            .map(p => {
+                const fresh = openSpots.find(s => s.id === p.id);
+                const source = fresh || p;
+                return {
+                    id: p.id || `pinned-area-${p.lat}-${p.lon}`,
+                    lat: p.lat,
+                    lon: p.lon,
+                    price: source.price || 0,
+                    currency: source.currency || 'INR',
+                    count: source.count || 1,
+                    kind: KINDS.PARKING_AREA_INDICATOR,
+                    created_at: source.created_at || p.created_at,
+                    original: source,
+                    isPinned: true
+                };
+            });
+
+        if (status !== 'search') return pinnedAreaItems;
 
         // Check toggle setting
         try {
-            const showAreas = JSON.parse(localStorage.getItem('parlens_show_parking_areas') || 'true');
-            if (!showAreas) return [];
+            const showAreas = JSON.parse(localStorage.getItem('parlens_show_parking_areas') || 'false');
+            if (!showAreas) return pinnedAreaItems;
         } catch { }
 
         return openSpots
@@ -1274,9 +1429,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                 currency: s.currency,
                 count: s.count,
                 kind: s.kind,
+                created_at: s.created_at,
                 original: s
             }));
-    }, [openSpots, vehicleType, status]);
+    }, [openSpots, vehicleType, status, pinnedMarkers]);
 
     // Listed Parking: NOT clustered (precise markers) - just apply standard clustering for zoom-out only
     const clusteredListedSpots = useMemo(() =>
@@ -1287,6 +1443,30 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
     const clusteredAreaSpots = useMemo(() =>
         clusterSpots(areaSpots, zoomLevel, true, 7) // Use maxPrecision 7
         , [areaSpots, zoomLevel]);
+
+    const activePopupItems = useMemo(() => {
+        if (!selectedMarkerPopup) return [];
+
+        const sourceList = selectedMarkerPopup.type === 'listed' ? clusteredListedSpots : clusteredAreaSpots;
+
+        const targetId = selectedMarkerPopup.items[0]?.id;
+        if (!targetId) return selectedMarkerPopup.items;
+
+        for (const item of sourceList) {
+            const spots = (isCluster(item) ? (item as any).spots : [item]);
+            if (spots.some((s: any) => s.id === targetId)) {
+                return spots;
+            }
+        }
+        return selectedMarkerPopup.items;
+    }, [selectedMarkerPopup, clusteredListedSpots, clusteredAreaSpots]);
+
+    // Close popup when search ends
+    useEffect(() => {
+        if (status !== 'search') {
+            setSelectedMarkerPopup(null);
+        }
+    }, [status]);
 
     // Memoize GeoJSON Sources to prevent re-renders
 
@@ -1577,7 +1757,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                     )}
 
                     {/* Listed Parking Spots (Kind 1714) - Blue P + Green Pill */}
-                    {status === 'search' && clusteredListedSpots.map((item: any) => {
+                    {clusteredListedSpots.map((item: any) => {
                         const isClusterItem = isCluster(item);
                         return (
                             <Marker
@@ -1589,7 +1769,21 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                 onClick={(e) => {
                                     e.originalEvent.stopPropagation();
                                     if (isClusterItem) {
-                                        mapRef.current?.flyTo({ center: [item.lon, item.lat], zoom: viewState.zoom + 2 });
+                                        // For clusters, show popup with all items
+                                        setSelectedMarkerPopup({
+                                            type: 'listed',
+                                            lat: item.lat,
+                                            lon: item.lon,
+                                            items: (item as any).spots || [item]
+                                        });
+                                    } else {
+                                        // For single markers, show popup with single item
+                                        setSelectedMarkerPopup({
+                                            type: 'listed',
+                                            lat: item.lat,
+                                            lon: item.lon,
+                                            items: [item]
+                                        });
                                     }
                                 }}
                             >
@@ -1613,7 +1807,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                     })}
 
                     {/* Parking Area Reports (Kind 31714) - Grey P + White Pill */}
-                    {status === 'search' && clusteredAreaSpots.map((item: any) => {
+                    {clusteredAreaSpots.map((item: any) => {
                         const isClusterItem = isCluster(item);
                         return (
                             <Marker
@@ -1625,7 +1819,21 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                 onClick={(e) => {
                                     e.originalEvent.stopPropagation();
                                     if (isClusterItem) {
-                                        mapRef.current?.flyTo({ center: [item.lon, item.lat], zoom: viewState.zoom + 2 });
+                                        // For clusters, show popup with all items
+                                        setSelectedMarkerPopup({
+                                            type: 'area',
+                                            lat: item.lat,
+                                            lon: item.lon,
+                                            items: (item as any).spots || [item]
+                                        });
+                                    } else {
+                                        // For single markers, show popup with single item
+                                        setSelectedMarkerPopup({
+                                            type: 'area',
+                                            lat: item.lat,
+                                            lon: item.lon,
+                                            items: [item]
+                                        });
                                     }
                                 }}
                             >
@@ -1846,6 +2054,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                             </Marker>
                         );
                     })}     {/* History Spots Markers */}
+
+                    {/* Pinned markers are now integrated into listSpots/areaSpots rendering */}
                     {clusteredHistorySpots.map(item => {
                         const isClusterItem = isCluster(item);
                         return (
@@ -1910,6 +2120,50 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                     <QrCode size={20} className="text-[#007AFF]" />
                                 </div>
                                 <div className="w-0.5 h-3 bg-[#007AFF]/50"></div>
+                            </div>
+                        </Marker>
+                    )}
+
+                    {/* Marker Popup Bubble */}
+                    {selectedMarkerPopup && (
+                        <Marker
+                            longitude={selectedMarkerPopup.lon}
+                            latitude={selectedMarkerPopup.lat}
+                            anchor="bottom"
+                            style={{ zIndex: 1000 }}
+                        >
+                            <div className="relative">
+                                <MarkerPopup
+                                    type={selectedMarkerPopup.type}
+                                    items={activePopupItems}
+                                    onClose={() => setSelectedMarkerPopup(null)}
+                                    isPinned={activePopupItems.length > 0 && activePopupItems.every((item: any) => pinnedMarkers.some(p => p.id === item.id))}
+                                    onTogglePin={() => {
+                                        const isPinned = activePopupItems.length > 0 && activePopupItems.every((item: any) => pinnedMarkers.some(p => p.id === item.id));
+                                        let newPinned: any[];
+                                        if (isPinned) {
+                                            // Remove these specific items
+                                            const idsToRemove = new Set(activePopupItems.map((i: any) => i.id));
+                                            newPinned = pinnedMarkers.filter(p => !idsToRemove.has(p.id));
+                                        } else {
+                                            // Add missing items (avoid duplicates)
+                                            const existingIds = new Set(pinnedMarkers.map(p => p.id));
+                                            const itemsToAdd = activePopupItems
+                                                .filter((item: any) => !existingIds.has(item.id))
+                                                .map((item: any) => ({
+                                                    ...item,
+                                                    // Preserve original location for correct clustering
+                                                    lat: item.lat,
+                                                    lon: item.lon,
+                                                    markerType: selectedMarkerPopup.type
+                                                }));
+                                            newPinned = [...pinnedMarkers, ...itemsToAdd];
+                                        }
+                                        setPinnedMarkers(newPinned);
+                                        localStorage.setItem('parlens_pinned_markers', JSON.stringify(newPinned));
+                                        setSelectedMarkerPopup(null);
+                                    }}
+                                />
                             </div>
                         </Marker>
                     )}

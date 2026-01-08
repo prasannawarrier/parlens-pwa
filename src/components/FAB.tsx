@@ -199,6 +199,7 @@ export const FAB: React.FC<FABProps> = ({
                     let price = 0;
                     let spotCurrency = 'USD';
                     let spotCount = 1;
+                    let listingName: string | undefined;
 
                     if (event.kind === KINDS.PARKING_AREA_INDICATOR) {
                         const priceTag = event.tags.find((t: string[]) => t[0] === 'hourly_rate');
@@ -213,10 +214,12 @@ export const FAB: React.FC<FABProps> = ({
                         const typeTag = event.tags.find((t: string[]) => t[0] === 'type');
                         const rateTag = event.tags.find((t: string[]) => t[0] === 'hourly_rate');
                         const currencyTag = event.tags.find((t: string[]) => t[0] === 'currency');
+                        const listingNameTag = event.tags.find((t: string[]) => t[0] === 'listing_name');
 
                         spotType = typeTag?.[1] || 'car';
                         price = rateTag ? parseFloat(rateTag[1]) : 0;
                         spotCurrency = currencyTag?.[1] || 'USD';
+                        listingName = listingNameTag?.[1];
 
                         if (spotType !== vehicleType) return;
                     }
@@ -229,7 +232,9 @@ export const FAB: React.FC<FABProps> = ({
                         currency: spotCurrency,
                         type: spotType,
                         count: spotCount,
-                        kind: event.kind // Track kind to differentiate Listed (1714) vs Parking Area (31714)
+                        kind: event.kind,
+                        created_at: event.created_at,
+                        listing_name: listingName
                     };
 
                     // Update Map & State
@@ -548,6 +553,8 @@ export const FAB: React.FC<FABProps> = ({
                         ['hourly_rate', hourlyRate],
                         ['currency', currency],
                         ['type', vehicleType],
+                        ['session_start', String(startTime)],
+                        ['session_end', String(endTime)],
                         ['client', 'parlens']
                     ],
                     created_at: endTime,
