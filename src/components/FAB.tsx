@@ -312,17 +312,20 @@ export const FAB: React.FC<FABProps> = ({
 
                     // Process spot status events - only keep latest per spot (a-tag)
                     const latestBySpot = new Map<string, any>();
-                    // Also collect parent Listing Metadata addresses to validate existence (orphaned check)
+                    // Collect parent Listing Metadata addresses via 'root' tag to validate existence
                     const parentListingAddresses = new Set<string>();
 
                     for (const event of spotStatusEvents) {
                         const aTag = event.tags.find((t: string[]) => t[0] === 'a')?.[1];
                         if (!aTag) continue;
 
-                        // Parse 'a' tag: "kind:pubkey:d_tag"
-                        const parts = aTag.split(':');
-                        if (parts.length === 3) {
-                            parentListingAddresses.add(aTag);
+                        // Get 'root' tag pointing to parent Listing (31147:pubkey:d_tag)
+                        const rootTag = event.tags.find((t: string[]) => t[0] === 'root')?.[1];
+                        if (rootTag) {
+                            const parts = rootTag.split(':');
+                            if (parts.length === 3) {
+                                parentListingAddresses.add(rootTag);
+                            }
                         }
 
                         const existing = latestBySpot.get(aTag);
@@ -331,8 +334,8 @@ export const FAB: React.FC<FABProps> = ({
                         }
                     }
 
-                    // Batch verify parent existence (Kind 37141 Spot Listing)
-                    // If the Spot Listing (37141) is deleted, the Spot Log (1714) is an orphan.
+                    // Batch verify parent existence (Kind 31147 Listed Parking Metadata)
+                    // If the parent Listing (31147) is deleted, the Spot Log (1714) is an orphan.
                     if (parentListingAddresses.size > 0) {
                         const uniqueAddresses = Array.from(parentListingAddresses);
 
@@ -346,23 +349,24 @@ export const FAB: React.FC<FABProps> = ({
                             }
                         });
 
-                        const validSpotsMap = await pool.querySync(DEFAULT_RELAYS, {
-                            kinds: [KINDS.PARKING_SPOT_LISTING], // 37141
+                        const validListingsMap = await pool.querySync(DEFAULT_RELAYS, {
+                            kinds: [KINDS.LISTED_PARKING_METADATA], // 31147
                             '#d': Array.from(dTags),
                             authors: Array.from(authors)
                         } as any);
 
-                        // Create set of valid addresses found
+                        // Create set of valid listing addresses found
                         const validAddresses = new Set<string>();
-                        validSpotsMap.forEach((e: any) => {
+                        validListingsMap.forEach((e: any) => {
                             const d = e.tags.find((t: string[]) => t[0] === 'd')?.[1];
-                            if (d) validAddresses.add(`${KINDS.PARKING_SPOT_LISTING}:${e.pubkey}:${d}`);
+                            if (d) validAddresses.add(`${KINDS.LISTED_PARKING_METADATA}:${e.pubkey}:${d}`);
                         });
 
                         // Filter Process loop - only add valid (non-orphaned) spots
+                        // Events without root tags (legacy) are skipped
                         for (const event of latestBySpot.values()) {
-                            const aTag = event.tags.find((t: string[]) => t[0] === 'a')?.[1];
-                            if (validAddresses.has(aTag)) {
+                            const rootTag = event.tags.find((t: string[]) => t[0] === 'root')?.[1];
+                            if (rootTag && validAddresses.has(rootTag)) {
                                 processSpotEvent(event);
                             }
                         }
