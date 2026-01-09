@@ -319,12 +319,13 @@ export const FAB: React.FC<FABProps> = ({
                         const aTag = event.tags.find((t: string[]) => t[0] === 'a')?.[1];
                         if (!aTag) continue;
 
-                        // Get 'root' tag pointing to parent Listing (31147:pubkey:d_tag)
-                        const rootTag = event.tags.find((t: string[]) => t[0] === 'root')?.[1];
-                        if (rootTag) {
-                            const parts = rootTag.split(':');
+                        // Get root a-tag pointing to parent Listing (has 'root' marker at position 3)
+                        // Format: ['a', '31147:pubkey:d_tag', '', 'root']
+                        const rootATag = event.tags.find((t: string[]) => t[0] === 'a' && t[3] === 'root')?.[1];
+                        if (rootATag) {
+                            const parts = rootATag.split(':');
                             if (parts.length === 3) {
-                                parentListingAddresses.add(rootTag);
+                                parentListingAddresses.add(rootATag);
                             }
                         }
 
@@ -363,10 +364,10 @@ export const FAB: React.FC<FABProps> = ({
                         });
 
                         // Filter Process loop - only add valid (non-orphaned) spots
-                        // Events without root tags (legacy) are skipped
+                        // Events without root a-tags (legacy) are skipped
                         for (const event of latestBySpot.values()) {
-                            const rootTag = event.tags.find((t: string[]) => t[0] === 'root')?.[1];
-                            if (rootTag && validAddresses.has(rootTag)) {
+                            const rootATag = event.tags.find((t: string[]) => t[0] === 'a' && t[3] === 'root')?.[1];
+                            if (rootATag && validAddresses.has(rootATag)) {
                                 processSpotEvent(event);
                             }
                         }
