@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Search, MapPin, ArrowRight, ChevronUp, ChevronDown } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { KINDS, DEFAULT_RELAYS } from '../lib/nostr';
-import { encodeGeohash, getGeohashNeighbors } from '../lib/geo';
+import { encodeGeohash, getGeohashNeighbors, getCommonGeohashPrefix } from '../lib/geo';
 import { encryptParkingLog } from '../lib/encryption';
 import { getCurrencyFromLocation, getCurrencySymbol, getLocalCurrency } from '../lib/currency';
 import { generateSecretKey, finalizeEvent } from 'nostr-tools/pure';
@@ -250,6 +250,23 @@ export const FAB: React.FC<FABProps> = ({
 
             // 1. Immediate fetch of existing spots - with isolated error handling per Kind
             const initialFetch = async () => {
+                // Determine query geohash(es) - use Common Prefix for routes, neighbors for single location
+                let queryGeohashes: string[] = [];
+                if (routeWaypoints && routeWaypoints.length > 0) {
+                    // Route mode: Use Common Prefix for efficient single query
+                    const commonPrefix = getCommonGeohashPrefix(routeWaypoints);
+                    if (commonPrefix.length >= 1) {
+                        queryGeohashes = [commonPrefix];
+                        console.log('[Parlens] FAB: Using route common prefix:', commonPrefix);
+                    }
+                }
+                // Fallback to session geohashes (neighbors) if no route or bad prefix
+                if (queryGeohashes.length === 0) {
+                    queryGeohashes = Array.from(sessionGeohashes);
+                }
+
+                if (queryGeohashes.length === 0) return; // No geohashes to query
+
                 // === BATCH 1: Parking Area Indicators (Kind 31714) ===
                 try {
                     const areaTimeFilter = localStorage.getItem('parlens_parking_area_filter') || 'week';
@@ -263,7 +280,7 @@ export const FAB: React.FC<FABProps> = ({
                         DEFAULT_RELAYS,
                         {
                             kinds: [KINDS.PARKING_AREA_INDICATOR],
-                            '#g': Array.from(sessionGeohashes),
+                            '#g': queryGeohashes,
                             since: areaSince
                         } as any
                     );
@@ -288,7 +305,7 @@ export const FAB: React.FC<FABProps> = ({
                         DEFAULT_RELAYS,
                         {
                             kinds: [KINDS.LISTED_SPOT_LOG],
-                            '#g': Array.from(sessionGeohashes),
+                            '#g': queryGeohashes,
                         } as any
                     );
                     console.log('[Parlens] Batch 2 (Kind 1714) loaded:', spotStatusEvents.length, 'events');
@@ -533,6 +550,8 @@ export const FAB: React.FC<FABProps> = ({
                     tags: [
                         ['d', `spot_${geohash}_${endTime}`], // Unique identifier for addressable event
                         ['g', geohash],
+                        // Add hierarchical geohash tags (1-10 chars) for flexible route queries
+                        ...Array.from({ length: Math.min(geohash.length, 10) }, (_, i) => ['g', geohash.substring(0, i + 1)]).filter(tag => tag[1].length < geohash.length),
                         ['location', `${lat},${lon}`],
                         ['hourly_rate', hourlyRate],
                         ['currency', currency],

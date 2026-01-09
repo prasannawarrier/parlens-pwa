@@ -2782,6 +2782,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                         countryCode={countryCode}
                         onPickLocation={() => setIsPickingLocation(true)}
                         pickedLocation={pickedListingLocation}
+                        routeWaypoints={routeWaypoints || undefined}
                     />
                 )}
             </div>

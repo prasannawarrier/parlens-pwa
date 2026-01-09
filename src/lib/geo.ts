@@ -277,6 +277,42 @@ export function calculateDistance(lat1: number, lon1: number, lat2: number, lon2
     return R * c;
 }
 
+/**
+ * Calculates the common geohash prefix shared by all waypoints.
+ * Used for route optimization - query at a precision that covers the entire route.
+ * @param waypoints Array of coordinates to find common prefix for
+ * @param precision Maximum precision to encode (default 10)
+ * @returns Common prefix string, or empty string if no common prefix
+ */
+export function getCommonGeohashPrefix(
+    waypoints: { lat: number; lon: number }[],
+    precision: number = 10
+): string {
+    if (!waypoints || waypoints.length === 0) return '';
+
+    // Encode all waypoints to geohashes
+    const hashes = waypoints.map(wp => encodeGeohash(wp.lat, wp.lon, precision));
+
+    if (hashes.length === 0) return '';
+    if (hashes.length === 1) return hashes[0].substring(0, 5); // Single waypoint, use 5-char
+
+    // Find common prefix character by character
+    let prefix = '';
+    const first = hashes[0];
+
+    for (let i = 0; i < first.length; i++) {
+        const char = first[i];
+        const allMatch = hashes.every(h => i < h.length && h[i] === char);
+        if (allMatch) {
+            prefix += char;
+        } else {
+            break;
+        }
+    }
+
+    return prefix;
+}
+
 export interface NominatimResult {
     place_id: number;
     lat: string;

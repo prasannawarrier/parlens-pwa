@@ -7,7 +7,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { MapPin, Plus, Trash2, X, Check, Copy, Pencil, ChevronRight, LocateFixed, Users, ArrowLeft, Search, RotateCw, EyeOff, Ban, MoreVertical, Star } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { KINDS, DEFAULT_RELAYS } from '../lib/nostr';
-import { getSuggestions, type NominatimResult, calculateDistance, encodeGeohash } from '../lib/geo';
+import { getSuggestions, type NominatimResult, calculateDistance, encodeGeohash, getCommonGeohashPrefix } from '../lib/geo';
 import { decryptParkingLog } from '../lib/encryption';
 import type { RouteLogContent } from '../lib/nostr';
 import { getCurrencyFromLocation } from '../lib/currency'; // Import currency utility
@@ -83,6 +83,7 @@ interface ListedParkingPageProps {
     countryCode?: string | null;
     onPickLocation?: () => void;
     pickedLocation?: { lat: number, lon: number } | null;
+    routeWaypoints?: { lat: number; lon: number }[];
 }
 
 type TabType = 'public' | 'private' | 'my';
@@ -95,7 +96,7 @@ export interface SavedRoute {
     created_at: number;
 }
 
-export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, currentLocation, countryCode, onPickLocation, pickedLocation }) => {
+export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, currentLocation, countryCode, onPickLocation, pickedLocation, routeWaypoints }) => {
     const { pubkey, pool, signEvent } = useAuth();
     const [activeTab, setActiveTab] = useState<TabType>('public');
     const [selectedListing, setSelectedListing] = useState<ListedParkingMetadata | null>(null);
@@ -133,8 +134,6 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
 
     // Captured location - set once on mount and updated only on explicit refresh
     const capturedLocationRef = useRef<[number, number] | null>(null);
-    // Prevent double-fetch on mount (React Strict Mode or re-renders)
-    const hasFetchedRef = useRef(false);
 
     const toggleSaved = (listingId: string) => {
         setSavedListings(prev => {
@@ -427,28 +426,36 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                 console.log('[Parlens] Phase A: Fetched', rawEvents.length, 'user/managed/member listings');
             }
 
-            // Phase B: Fetch public listings (Geohash-scoped based on Search Location or Current Location)
-            let searchLoc = capturedLocationRef.current;
+            // Phase B: Fetch public listings (Route-optimized or Location-based)
+            let queryGeohash: string | null = null;
 
-            // If an explicit location argument was passed (e.g. from search), use that
-            // Note: arg can be boolean (silent) or object/array if extended in future. 
-            // For now, relies on capturedLocationRef which is updated by the caller if needed.
-            // But deeper logic: if user searched, `pickedLocation` or `searchCenter` should be used.
-            // Let's use `searchCenter` state if available, falling back to captured ref.
-            if (searchCenter) searchLoc = searchCenter;
+            // Priority 1: If route is active, use Common Prefix of all waypoints
+            if (routeWaypoints && routeWaypoints.length > 0) {
+                const commonPrefix = getCommonGeohashPrefix(routeWaypoints);
+                if (commonPrefix.length >= 1) {
+                    queryGeohash = commonPrefix;
+                    console.log('[Parlens] Phase B: Using route common prefix:', queryGeohash);
+                }
+            }
+
+            // Priority 2: Fallback to search location or current location (5-char)
+            if (!queryGeohash) {
+                let searchLoc = capturedLocationRef.current;
+                if (searchCenter) searchLoc = searchCenter;
+
+                if (searchLoc) {
+                    const [lat, lon] = searchLoc;
+                    queryGeohash = encodeGeohash(lat, lon, 5);
+                    console.log('[Parlens] Phase B: Using location geohash:', queryGeohash);
+                }
+            }
 
             let publicEvents = [];
 
-            if (searchLoc) {
-                const [lat, lon] = searchLoc;
-                // Use 5-char precision (approx 5km x 5km) matching the creation logic for broad discovery
-                // If the user's geohash is very precise, we truncate to 5 chars
-                const centerHash = encodeGeohash(lat, lon, 5);
-                console.log('[Parlens] Phase B: Searching public listings at', centerHash);
-
+            if (queryGeohash) {
                 publicEvents = await pool.querySync(DEFAULT_RELAYS, {
                     kinds: [KINDS.LISTED_PARKING_METADATA],
-                    '#g': [centerHash],
+                    '#g': [queryGeohash],
                     limit: 100
                 });
             } else {
@@ -526,18 +533,20 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             })
                 .filter(l => l.listing_name !== 'Unnamed' && l.listing_name.trim() !== '');
 
-            // Sort by distance if capturedLocation available, else by creation time
+            // Sort by geohash proximity (prefix match), then by creation time
             let sortedListings = parsedListings;
             const sortLocation = capturedLocationRef.current;
             if (sortLocation) {
+                const userGeohash = encodeGeohash(sortLocation[0], sortLocation[1], 5);
                 sortedListings = parsedListings.sort((a, b) => {
-                    const locA = a.location?.split(',').map(Number);
-                    const locB = b.location?.split(',').map(Number);
-                    if (!locA || locA.length < 2) return 1;
-                    if (!locB || locB.length < 2) return -1;
-                    const distA = calculateDistance(sortLocation[0], sortLocation[1], locA[0], locA[1]);
-                    const distB = calculateDistance(sortLocation[0], sortLocation[1], locB[0], locB[1]);
-                    return distA - distB;
+                    const gA = a.g || '';
+                    const gB = b.g || '';
+                    const matchA = gA.startsWith(userGeohash);
+                    const matchB = gB.startsWith(userGeohash);
+                    // Priority: Matching geohash first, then by created_at (newest first)
+                    if (matchA && !matchB) return -1;
+                    if (!matchA && matchB) return 1;
+                    return (b.created_at || 0) - (a.created_at || 0);
                 });
             } else {
                 sortedListings = parsedListings.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
@@ -653,7 +662,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             setIsLoading(false);
             setStatusLoading(false);
         }
-    }, [pool]); // Note: Uses capturedLocationRef (ref) so no dependency needed
+    }, [pool, routeWaypoints, searchCenter]); // Uses capturedLocationRef (ref) - no dependency needed
 
     // Fetch spots for detailed view with Batching and Progressive Loading
     const fetchSpots = useCallback(async (listing: ListedParkingMetadata) => {
@@ -805,11 +814,28 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
         if (currentLocation && !capturedLocationRef.current) {
             capturedLocationRef.current = currentLocation;
         }
-        // Prevent double-fetch on mount (React Strict Mode or re-renders)
-        if (hasFetchedRef.current) return;
-        hasFetchedRef.current = true;
+
+        // Persistent Refresh - only fetch if geohash has changed since last fetch
+        // This prevents redundant fetches when navigating back to the page
+        if (currentLocation) {
+            const currentHash = encodeGeohash(currentLocation[0], currentLocation[1], 5);
+            const lastFetchedHash = sessionStorage.getItem('parlens_last_fetch_hash');
+
+            if (lastFetchedHash === currentHash) {
+                console.log('[Parlens] Skipping fetch - same geohash:', currentHash);
+                // Still show loading briefly then mark as loaded (data is cached in state)
+                setIsLoading(false);
+                setStatusLoading(false);
+                return;
+            }
+
+            // New geohash - update storage and fetch
+            sessionStorage.setItem('parlens_last_fetch_hash', currentHash);
+            console.log('[Parlens] New geohash detected, fetching:', currentHash);
+        }
+
         fetchListings();
-    }, [fetchListings]); // Fetch once on mount - tab filtering is done client-side
+    }, [fetchListings, currentLocation]); // Re-run if currentLocation changes
 
     // Real-time subscription for listing metadata updates (NEW listings)
     useEffect(() => {
@@ -2073,7 +2099,8 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
                 ['listing_name', formData.listing_name.slice(0, 25)],
                 ['location', formData.location],
                 ['g', geohash],
-                ...(geohash.length >= 5 ? [['g', geohash.substring(0, 5)]] : []),
+                // Add hierarchical geohash tags (1-10 chars) for flexible route queries
+                ...Array.from({ length: Math.min(geohash.length, 10) }, (_, i) => ['g', geohash.substring(0, i + 1)]).filter(tag => tag[1].length < geohash.length),
                 ['local_area', formData.local_area || ''],
                 ['city', formData.city || ''],
                 ['zipcode', formData.zipcode || ''],
