@@ -29,7 +29,7 @@ export const DEFAULT_RELAYS = [
 export interface ParkingLogContent {
     status?: 'parked' | 'vacated'; // Encrypted for privacy
     type?: 'bicycle' | 'motorcycle' | 'car'; // Encrypted for privacy (NOT in public tags!)
-    location?: string; // Legacy: "lat, lng" with 6 decimal places
+    location?: string; // For listed: Listing Name; For regular: "lat, lng"
     lat?: number; // Latitude (encrypted)
     lon?: number; // Longitude (encrypted)
     g?: string; // Legacy: 10-digit geohash
@@ -41,6 +41,13 @@ export interface ParkingLogContent {
     fee?: string; // e.g., "10"
     currency?: string; // e.g., "USD"
     note?: string; // User-added note for this parking entry
+    // Listed Parking Fields (encrypted)
+    spotATag?: string; // Reference to spot (37141:pubkey:d)
+    listingATag?: string; // Reference to parent listing (31147:pubkey:d)
+    listingName?: string;
+    floor?: string;
+    spotNumber?: string;
+    shortName?: string;
 }
 
 // Waypoint for route storage

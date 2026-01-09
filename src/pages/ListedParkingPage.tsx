@@ -101,8 +101,20 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
     const [activeTab, setActiveTab] = useState<TabType>('public');
     const [selectedListing, setSelectedListing] = useState<ListedParkingMetadata | null>(null);
     const [showCreateForm, setShowCreateForm] = useState(false);
-    const [isLoading, setIsLoading] = useState(true);
-    const [statusLoading, setStatusLoading] = useState(true); // True until status data received from relays
+    const [isLoading, setIsLoading] = useState(() => {
+        // Lazy init: Check if we can skip loading (data already cached)
+        if (!currentLocation) return true; // No location yet, need to load
+        const currentHash = encodeGeohash(currentLocation[0], currentLocation[1], 5);
+        const lastFetchedHash = sessionStorage.getItem('parlens_last_fetch_hash');
+        return lastFetchedHash !== currentHash; // Load if hash changed
+    });
+    const [statusLoading, setStatusLoading] = useState(() => {
+        // Lazy init: Same logic as isLoading
+        if (!currentLocation) return true;
+        const currentHash = encodeGeohash(currentLocation[0], currentLocation[1], 5);
+        const lastFetchedHash = sessionStorage.getItem('parlens_last_fetch_hash');
+        return lastFetchedHash !== currentHash;
+    });
     const [listings, setListings] = useState<ListedParkingMetadata[]>([]);
     const [spots, setSpots] = useState<ParkingSpotListing[]>([]);
     const [spotStatuses, setSpotStatuses] = useState<Map<string, SpotStatus>>(new Map());
@@ -2454,12 +2466,15 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
     // For static QR, auth token is fixed; for dynamic, it would regenerate
     // Include spot metadata for search discovery when user scans QR
     const listingLocation = listing.location ? listing.location.split(',').map((n: string) => parseFloat(n.trim())) : undefined;
+    const listingATag = `${KINDS.LISTED_PARKING_METADATA}:${listing.pubkey}:${listing.d}`;
     const qrAuthData = JSON.stringify({
         a: spotATag,
+        listingATag, // Parent listing address for Parking Log reference
         authorizer: listing.owners?.[0] || pubkey,
         auth: `static - ${spot.d}`, // Static token based on spot d-tag
         // Metadata for Kind 1714 tags
         listingName: listing.listing_name,
+        floor: spot.floor || '', // Floor name
         spotNumber: spot.spot_number,
         shortName: spot.short_name,
         listingLocation: listingLocation,

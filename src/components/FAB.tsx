@@ -371,12 +371,8 @@ export const FAB: React.FC<FABProps> = ({
                                 processSpotEvent(event);
                             }
                         }
-                    } else {
-                        // Fallback if no addresses (shouldn't happen for valid spots)
-                        for (const event of latestBySpot.values()) {
-                            processSpotEvent(event);
-                        }
                     }
+                    // If no parentListingAddresses found, nothing is processed (strict mode)
 
                     // Update state after Batch 2 (now includes orphan filtering)
                     if (spotsMapRef.current.size > 0) {

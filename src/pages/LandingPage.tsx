@@ -3,7 +3,7 @@
  * Replaces Leaflet for native vector map rotation and smooth zoom
  */
 import React, { useState, useEffect, useRef, useCallback, memo, useMemo } from 'react';
-import { MapPin, Locate, X, ChevronDown, Check, Trash, Pencil, QrCode, ArrowUp, ArrowRight, ArrowLeft, ChevronUp, Copy, ScanLine, Route } from 'lucide-react';
+import { MapPin, Locate, X, ChevronDown, Check, Trash, Pencil, QrCode, ArrowUp, ArrowRight, ArrowLeft, ChevronUp, ScanLine, Route } from 'lucide-react';
 import Map, { Marker, Source, Layer, type MapRef } from 'react-map-gl/maplibre';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
@@ -394,9 +394,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
         spotATag: string;
         startTime: number;
         dTag?: string;
+        listingATag?: string; // Parent listing address for Parking Log
         listingName?: string;
         spotNumber?: string;
         shortName?: string;
+        floor?: string;
         authorizer?: string;
         tempPubkey?: string;
         listingLocation?: [number, number];
@@ -446,9 +448,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             // Try to parse as JSON auth data
             let authData: {
                 a: string;
+                listingATag?: string; // Parent listing address
                 authorizer: string;
                 auth: string;
                 listingName?: string;
+                floor?: string;
                 spotNumber?: string;
                 shortName?: string;
                 listingLocation?: [number, number];
@@ -562,9 +566,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             // Encrypted content with all listing refs
             const logContent = JSON.stringify({
                 spotATag: authData.a,
-                listingATag: authData.a.replace(/37141:/, '31147:').split(':').slice(0, 2).join(':'), // Derive listing a-tag
+                listingATag: authData.listingATag || '', // Parent listing reference (encrypted)
+                location: authData.listingName || '', // Use Listing Name as location for readability
                 statusLogEventId: signedStatus.id,
                 listingName: authData.listingName || '',
+                floor: authData.floor || '',
                 spotNumber: authData.spotNumber || '',
                 shortName: authData.shortName || '',
                 tempPubkey,
@@ -576,7 +582,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                 created_at: Math.floor(Date.now() / 1000),
                 tags: [
                     ['d', dTag],
-                    ['a', authData.a],
                     ['status', 'parked'],
                     ['client', 'parlens']
                 ],
@@ -590,9 +595,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                 spotATag: authData.a,
                 dTag,
                 startTime: Date.now(),
+                listingATag: authData.listingATag || '', // Parent listing for Parking Log
                 authorizer: authData.authorizer,
                 tempPubkey,
                 listingName: authData.listingName || '',
+                floor: authData.floor || '', // Floor name
                 spotNumber: authData.spotNumber || '',
                 shortName: authData.shortName || '',
                 listingLocation: listingLocation || undefined,
@@ -673,8 +680,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             // 2. Publish End Log (Kind 31417)
             const logContent = JSON.stringify({
                 spotATag: authData.a,
+                listingATag: session.listingATag || '', // Parent listing reference (encrypted)
+                location: session.listingName || '', // Use Listing Name as location for readability
                 statusLogEventId: signedStatus.id,
                 listingName: session.listingName || '',
+                floor: session.floor || '',
                 spotNumber: session.spotNumber || '',
                 shortName: session.shortName || '',
                 ended_at: Date.now(),
@@ -687,7 +697,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                 created_at: Math.floor(Date.now() / 1000),
                 tags: [
                     ['d', session.dTag || `parking-${Date.now()}`],
-                    ['a', authData.a],
                     ['status', 'idle'],
                     ['client', 'parlens']
                 ],
@@ -2199,9 +2208,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                     <div className="text-lg text-blue-500 font-bold">
                                         {listedParkingSession.shortName || `#${listedParkingSession.spotNumber}`}
                                     </div>
+                                    {listedParkingSession.floor && (
+                                        <div className="text-sm text-zinc-500 dark:text-zinc-400">
+                                            {listedParkingSession.floor}
+                                        </div>
+                                    )}
                                 </div>
 
-                                {/* QR / ID Display */}
+                                {/* QR Display */}
                                 <div className="space-y-4">
                                     <div className="p-6 bg-zinc-50 dark:bg-white/5 rounded-3xl flex justify-center border border-black/5 dark:border-white/5">
                                         {/* Real QR Code for Session */}
@@ -2216,24 +2230,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                             fgColor="currentColor"
                                             className="text-black dark:text-white"
                                         />
-                                    </div>
-
-                                    <div
-                                        onClick={() => {
-                                            navigator.clipboard.writeText(listedParkingSession.dTag || '');
-                                            alert('Copied parking ID');
-                                        }}
-                                        className="flex items-center justify-between p-4 bg-zinc-50 dark:bg-white/5 rounded-2xl cursor-pointer hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors"
-                                    >
-                                        <div className="overflow-hidden">
-                                            <div className="text-xs font-bold text-zinc-400 uppercase mb-1">Parking ID</div>
-                                            <div className="text-sm font-mono text-zinc-600 dark:text-white/70 truncate">
-                                                {listedParkingSession.dTag || 'N/A'}
-                                            </div>
-                                        </div>
-                                        <div className="p-2 bg-blue-500/10 rounded-full text-blue-500">
-                                            <Copy size={20} />
-                                        </div>
                                     </div>
                                 </div>
 
