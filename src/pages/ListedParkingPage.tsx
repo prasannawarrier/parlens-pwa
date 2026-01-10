@@ -439,33 +439,71 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                 console.log('[Parlens] Phase A: Fetched', rawEvents.length, 'user/managed/member listings');
             }
 
-            // Phase B: Fetch public listings (Location-based ONLY)
-            // Note: Route display on map is handled by FAB, not here
-            let queryGeohash: string | null = null;
+            // Phase B: Fetch Saved Listings (via a-tag references)
+            // Users save a-tag refs like "31147:pubkey:d-tag" in localStorage
+            try {
+                const savedRefs = JSON.parse(localStorage.getItem('parlens-saved-refs') || '[]') as string[];
+                if (savedRefs.length > 0) {
+                    console.log('[Parlens] Phase B: Fetching', savedRefs.length, 'saved listing refs');
+                    const savedEvents = await pool.querySync(DEFAULT_RELAYS, {
+                        kinds: [KINDS.LISTED_PARKING_METADATA],
+                        '#a': savedRefs
+                    });
 
-            // Use search location or current location (5-char geohash)
+                    // Merge saved events, avoiding duplicates
+                    const existingIds = new Set(rawEvents.map((e: any) => e.id));
+                    savedEvents.forEach((e: any) => {
+                        if (!existingIds.has(e.id)) {
+                            rawEvents.push(e);
+                            existingIds.add(e.id);
+                        }
+                    });
+                    console.log('[Parlens] Phase B: Merged', savedEvents.length, 'saved listings. Total:', rawEvents.length);
+                }
+            } catch (e) {
+                console.warn('[Parlens] Phase B: Failed to fetch saved refs:', e);
+            }
+
+            // Phase C: Fetch public listings (Hierarchical Geohash ONLY)
+            // Note: Route display on map is handled by FAB, not here
+            // Use user's 1-10 digit geohash prefixes to match listings with similar tags
             let searchLoc = capturedLocationRef.current;
             if (searchCenter) searchLoc = searchCenter;
 
+            let publicEvents: any[] = [];
+
             if (searchLoc) {
                 const [lat, lon] = searchLoc;
-                queryGeohash = encodeGeohash(lat, lon, 5);
-                console.log('[Parlens] Phase B: Using location geohash:', queryGeohash);
-            }
+                const fullGeohash = encodeGeohash(lat, lon, 10);
 
-            let publicEvents = [];
+                // Generate 1-10 character prefixes for hierarchical matching
+                const geohashPrefixes: string[] = [];
+                for (let i = 1; i <= 10; i++) {
+                    geohashPrefixes.push(fullGeohash.substring(0, i));
+                }
+                console.log('[Parlens] Phase B: Using hierarchical geohash prefixes:', geohashPrefixes);
 
-            if (queryGeohash) {
+                // Query with all prefixes - listings with matching g-tags at ANY level will be found
                 publicEvents = await pool.querySync(DEFAULT_RELAYS, {
                     kinds: [KINDS.LISTED_PARKING_METADATA],
-                    '#g': [queryGeohash],
+                    '#g': geohashPrefixes,
                     limit: 100
                 });
+                console.log('[Parlens] Phase B: Hierarchical query returned', publicEvents.length, 'events');
+
+                // Fallback to global if hierarchical query returns nothing
+                if (publicEvents.length === 0) {
+                    console.log('[Parlens] Phase B: No hierarchical hits, falling back to global query');
+                    publicEvents = await pool.querySync(DEFAULT_RELAYS, {
+                        kinds: [KINDS.LISTED_PARKING_METADATA],
+                        limit: 100
+                    });
+                }
             } else {
-                console.log('[Parlens] Phase B: No location context, falling back to global limit');
+                console.log('[Parlens] Phase B: No location context, using global query');
                 publicEvents = await pool.querySync(DEFAULT_RELAYS, {
                     kinds: [KINDS.LISTED_PARKING_METADATA],
-                    limit: 50 // Lower limit for global fallback to save bandwidth
+                    limit: 100
                 });
             }
 
@@ -474,7 +512,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             publicEvents.forEach((e: any) => {
                 if (!existingIds.has(e.id)) rawEvents.push(e);
             });
-            console.log('[Parlens] Phase B: Merged', publicEvents.length, 'public listings. Total:', rawEvents.length);
+            console.log('[Parlens] Phase C: Merged', publicEvents.length, 'public listings. Total:', rawEvents.length);
 
             // Deduplicate events (Addressable Kind 31147) - Keep only latest per d-tag
             const uniqueEventsMap = new Map<string, any>();

@@ -19,7 +19,6 @@ interface FABProps {
     setSessionStart: (time: number | null) => void;
     listedParkingSession?: any; // Active listed parking session
     onQRScan?: () => void; // Trigger QR scanner
-    routeWaypoints?: { lat: number; lon: number }[]; // Route waypoints for extended search
 }
 
 export const FAB: React.FC<FABProps> = ({
@@ -33,8 +32,7 @@ export const FAB: React.FC<FABProps> = ({
     sessionStart,
     setSessionStart,
     listedParkingSession,
-    onQRScan,
-    routeWaypoints
+    onQRScan
 }) => {
     const { pubkey, pool, signEvent } = useAuth();
     const [showCostPopup, setShowCostPopup] = useState(false);
@@ -98,14 +96,6 @@ export const FAB: React.FC<FABProps> = ({
 
             const newGeohashes = getGeohashNeighbors(searchLocation[0], searchLocation[1], 5);
 
-            // Also include geohashes for route waypoints
-            if (routeWaypoints && routeWaypoints.length > 0) {
-                for (const wp of routeWaypoints) {
-                    const wpGeohashes = getGeohashNeighbors(wp.lat, wp.lon, 5);
-                    wpGeohashes.forEach(g => newGeohashes.push(g));
-                }
-            }
-
             setSessionGeohashes(prev => {
                 const next = new Set(prev);
                 newGeohashes.forEach(g => next.add(g));
@@ -119,7 +109,7 @@ export const FAB: React.FC<FABProps> = ({
             setOpenSpots([]);
             lastSearchGeohashRef.current = null; // Reset on idle
         }
-    }, [status, searchLocation, routeWaypoints, setOpenSpots]);
+    }, [status, searchLocation, setOpenSpots]);
 
     // Fetch Open Spots (Kind 31714 & Kind 1714 'open')
     useEffect(() => {
@@ -250,22 +240,8 @@ export const FAB: React.FC<FABProps> = ({
 
             // 1. Immediate fetch of existing spots - with isolated error handling per Kind
             const initialFetch = async () => {
-                // Determine query geohash(es) - use per-waypoint geohashes for routes, neighbors for single location
-                let queryGeohashes: string[] = [];
-                if (routeWaypoints && routeWaypoints.length > 0) {
-                    // Route mode: Generate 5-char geohash for EACH waypoint
-                    // This handles routes spanning different geohash regions (even with no common prefix)
-                    const waypointHashes = new Set<string>();
-                    routeWaypoints.forEach(wp => {
-                        waypointHashes.add(encodeGeohash(wp.lat, wp.lon, 5));
-                    });
-                    queryGeohashes = Array.from(waypointHashes);
-                    console.log('[Parlens] FAB: Using route waypoint geohashes:', queryGeohashes);
-                }
-                // Fallback to session geohashes (neighbors) if no route or bad prefix
-                if (queryGeohashes.length === 0) {
-                    queryGeohashes = Array.from(sessionGeohashes);
-                }
+                // Query based on session geohashes (current location neighbors)
+                const queryGeohashes = Array.from(sessionGeohashes);
 
                 if (queryGeohashes.length === 0) return; // No geohashes to query
 
