@@ -12,7 +12,7 @@ import { ProfileButton } from '../components/ProfileButton';
 import { RouteButton } from '../components/RouteButton';
 import { clusterSpots, isCluster } from '../lib/clustering';
 import { getCurrencySymbol } from '../lib/currency';
-import { getSuggestions } from '../lib/geo';
+import { getSuggestions, parseCoordinate } from '../lib/geo';
 // @ts-ignore
 import Geohash from 'ngeohash';
 import { StableLocationTracker, LocationSmoother, PositionAnimator, BearingAnimator } from '../lib/locationSmoothing';
@@ -453,6 +453,38 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
     const [isParkingSearching, setIsParkingSearching] = useState(false);
     const parkingSearchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [isSearchDropPin, setIsSearchDropPin] = useState(false); // Distinguish search drop pin from route drop pin
+
+    // Cached routes for saved waypoint search (read from localStorage, synced by RouteButton)
+    const [cachedRoutes] = useState<any[]>(() => {
+        try {
+            const cached = localStorage.getItem('parlens_route_cache_v1');
+            return cached ? JSON.parse(cached) : [];
+        } catch { return []; }
+    });
+
+    // Search saved waypoints from cached routes (offline search)
+    const savedWaypointMatches = useMemo(() => {
+        if (!parkingSearchQuery || parkingSearchQuery.length < 2) return [];
+        const query = parkingSearchQuery.toLowerCase();
+        const matches: Array<{ name: string; lat: number; lon: number }> = [];
+
+        for (const route of cachedRoutes) {
+            const waypoints = route.decryptedContent?.waypoints || [];
+            for (const wp of waypoints) {
+                if (wp.name && wp.name.toLowerCase().includes(query)) {
+                    // Avoid duplicates by name
+                    if (!matches.find(m => m.name.toLowerCase() === wp.name.toLowerCase())) {
+                        matches.push({
+                            name: wp.name,
+                            lat: wp.lat,
+                            lon: wp.lon
+                        });
+                    }
+                }
+            }
+        }
+        return matches.slice(0, 3); // Limit to 3 results
+    }, [parkingSearchQuery, cachedRoutes]);
 
     // State for Pinned Markers (Keep on Map feature)
     const [pinnedMarkers, setPinnedMarkers] = useState<any[]>(() => {
@@ -2936,12 +2968,65 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                 <X size={20} />
                             </button>
                         </div>
-                        {/* Suggestions List */}
-                        {parkingSearchSuggestions.length > 0 && (
+                        {/* Suggestions List - Multi-source: Coordinates, Saved Waypoints, OSM */}
+                        {(parseCoordinate(parkingSearchQuery) || savedWaypointMatches.length > 0 || parkingSearchSuggestions.length > 0) && (
                             <div className="max-h-80 overflow-y-auto">
+                                {/* Coordinate match (if valid) */}
+                                {parseCoordinate(parkingSearchQuery) && (
+                                    <button
+                                        onClick={() => {
+                                            const parsed = parseCoordinate(parkingSearchQuery);
+                                            if (parsed) {
+                                                handleSelectParkingDestination({
+                                                    lat: String(parsed.lat),
+                                                    lon: String(parsed.lon),
+                                                    display_name: `${parsed.lat.toFixed(6)}, ${parsed.lon.toFixed(6)}`
+                                                });
+                                            }
+                                        }}
+                                        className="w-full flex items-start gap-3 p-4 text-left hover:bg-zinc-50 dark:hover:bg-white/5 active:bg-zinc-100 transition-colors border-t border-black/5 dark:border-white/5 first:border-t-0 group"
+                                    >
+                                        <div className="mt-0.5 p-2 rounded-full bg-blue-50 dark:bg-blue-500/10 text-blue-500 group-hover:text-blue-600 dark:group-hover:text-blue-400 shrink-0 transition-colors">
+                                            <MapPin size={16} />
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="text-sm font-semibold text-zinc-900 dark:text-white truncate">
+                                                {parseCoordinate(parkingSearchQuery)?.lat.toFixed(6)}, {parseCoordinate(parkingSearchQuery)?.lon.toFixed(6)}
+                                            </div>
+                                            <div className="text-[10px] text-zinc-400 dark:text-white/40 mt-0.5 uppercase tracking-wider">
+                                                {parseCoordinate(parkingSearchQuery)?.type === 'plus_code' ? 'Plus Code' : 'Coordinate'}
+                                            </div>
+                                        </div>
+                                    </button>
+                                )}
+                                {/* Saved waypoints from routes (emerald) */}
+                                {savedWaypointMatches.map((wp, idx) => (
+                                    <button
+                                        key={`saved-${idx}`}
+                                        onClick={() => handleSelectParkingDestination({
+                                            lat: String(wp.lat),
+                                            lon: String(wp.lon),
+                                            display_name: wp.name
+                                        })}
+                                        className="w-full flex items-start gap-3 p-4 text-left hover:bg-zinc-50 dark:hover:bg-white/5 active:bg-zinc-100 transition-colors border-t border-black/5 dark:border-white/5 first:border-t-0 group"
+                                    >
+                                        <div className="mt-0.5 p-2 rounded-full bg-emerald-50 dark:bg-emerald-500/10 text-emerald-500 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 shrink-0 transition-colors">
+                                            <MapPin size={16} />
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="text-sm font-semibold text-zinc-900 dark:text-white truncate">
+                                                {wp.name}
+                                            </div>
+                                            <div className="text-[10px] text-zinc-400 dark:text-white/40 mt-0.5 uppercase tracking-wider">
+                                                Saved Waypoint
+                                            </div>
+                                        </div>
+                                    </button>
+                                ))}
+                                {/* OSM online search results (violet) */}
                                 {parkingSearchSuggestions.map((result: any, idx: number) => (
                                     <button
-                                        key={idx}
+                                        key={`osm-${idx}`}
                                         onClick={() => handleSelectParkingDestination(result)}
                                         className="w-full flex items-start gap-3 p-4 text-left hover:bg-zinc-50 dark:hover:bg-white/5 active:bg-zinc-100 transition-colors border-t border-black/5 dark:border-white/5 first:border-t-0 group"
                                     >
