@@ -7,7 +7,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { MapPin, Plus, Trash2, X, Check, Copy, Pencil, ChevronRight, LocateFixed, Users, ArrowLeft, Search, RotateCw, EyeOff, Ban, MoreVertical, Star } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { KINDS, DEFAULT_RELAYS } from '../lib/nostr';
-import { getSuggestions, type NominatimResult, calculateDistance, encodeGeohash, getCommonGeohashPrefix } from '../lib/geo';
+import { getSuggestions, type NominatimResult, calculateDistance, encodeGeohash } from '../lib/geo';
 import { decryptParkingLog } from '../lib/encryption';
 import type { RouteLogContent } from '../lib/nostr';
 import { getCurrencyFromLocation } from '../lib/currency'; // Import currency utility
@@ -438,28 +438,18 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                 console.log('[Parlens] Phase A: Fetched', rawEvents.length, 'user/managed/member listings');
             }
 
-            // Phase B: Fetch public listings (Route-optimized or Location-based)
+            // Phase B: Fetch public listings (Location-based ONLY)
+            // Note: Route display on map is handled by FAB, not here
             let queryGeohash: string | null = null;
 
-            // Priority 1: If route is active, use Common Prefix of all waypoints
-            if (routeWaypoints && routeWaypoints.length > 0) {
-                const commonPrefix = getCommonGeohashPrefix(routeWaypoints);
-                if (commonPrefix.length >= 1) {
-                    queryGeohash = commonPrefix;
-                    console.log('[Parlens] Phase B: Using route common prefix:', queryGeohash);
-                }
-            }
+            // Use search location or current location (5-char geohash)
+            let searchLoc = capturedLocationRef.current;
+            if (searchCenter) searchLoc = searchCenter;
 
-            // Priority 2: Fallback to search location or current location (5-char)
-            if (!queryGeohash) {
-                let searchLoc = capturedLocationRef.current;
-                if (searchCenter) searchLoc = searchCenter;
-
-                if (searchLoc) {
-                    const [lat, lon] = searchLoc;
-                    queryGeohash = encodeGeohash(lat, lon, 5);
-                    console.log('[Parlens] Phase B: Using location geohash:', queryGeohash);
-                }
+            if (searchLoc) {
+                const [lat, lon] = searchLoc;
+                queryGeohash = encodeGeohash(lat, lon, 5);
+                console.log('[Parlens] Phase B: Using location geohash:', queryGeohash);
             }
 
             let publicEvents = [];
@@ -827,25 +817,8 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             capturedLocationRef.current = currentLocation;
         }
 
-        // Persistent Refresh - only fetch if geohash has changed since last fetch
-        // This prevents redundant fetches when navigating back to the page
-        if (currentLocation) {
-            const currentHash = encodeGeohash(currentLocation[0], currentLocation[1], 5);
-            const lastFetchedHash = sessionStorage.getItem('parlens_last_fetch_hash');
-
-            if (lastFetchedHash === currentHash) {
-                console.log('[Parlens] Skipping fetch - same geohash:', currentHash);
-                // Still show loading briefly then mark as loaded (data is cached in state)
-                setIsLoading(false);
-                setStatusLoading(false);
-                return;
-            }
-
-            // New geohash - update storage and fetch
-            sessionStorage.setItem('parlens_last_fetch_hash', currentHash);
-            console.log('[Parlens] New geohash detected, fetching:', currentHash);
-        }
-
+        // Always fetch on mount - React state doesn't persist across unmounts
+        // The sessionStorage hash comparison was causing empty listings on re-entry
         fetchListings();
     }, [fetchListings, currentLocation]); // Re-run if currentLocation changes
 
@@ -1823,7 +1796,8 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
 
                                                                             // Compute 5-char geohash for search compatibility
                                                                             const [lat, lon] = listing.location.split(',').map((s: string) => parseFloat(s.trim()));
-                                                                            const searchableGeohash = encodeGeohash(lat, lon, 5);
+                                                                            // Create full 10-char geohash for hierarchical route queries
+                                                                            const fullGeohash = encodeGeohash(lat, lon, 10);
 
                                                                             const statusEvent = {
                                                                                 kind: KINDS.LISTED_SPOT_LOG,
@@ -1833,7 +1807,8 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                                                     ['a', aTag, '', 'root'],
                                                                                     ['status', newStatus],
                                                                                     ['updated_by', pubkey],
-                                                                                    ['g', searchableGeohash],
+                                                                                    // Hierarchical geohash tags (1-10 chars) for flexible route queries
+                                                                                    ...Array.from({ length: 10 }, (_, i) => ['g', fullGeohash.substring(0, i + 1)]),
                                                                                     ['location', listing.location],
                                                                                     ['type', type],
                                                                                     ['hourly_rate', String(spotRate)],
@@ -2170,9 +2145,10 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
                             try {
                                 const spotATagForLog = `${KINDS.PARKING_SPOT_LISTING}:${pubkey}:${spotId}`;
                                 const [lat, lon] = formData.location.split(',').map((s: string) => parseFloat(s.trim()));
-                                const searchableGeohash = encodeGeohash(lat, lon, 5); // 5-char for search compatibility
                                 const spotRate = displayRates[type]?.hourly || 0;
                                 const spotCurrency = displayRates[type]?.currency || formData.currency;
+                                // Create full 10-char geohash for hierarchical route queries
+                                const fullGeohash = encodeGeohash(lat, lon, 10);
 
                                 const initialStatus = {
                                     kind: KINDS.LISTED_SPOT_LOG,
@@ -2182,7 +2158,8 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
                                         ['a', aTag, '', 'root'],
                                         ['status', 'open'],
                                         ['updated_by', pubkey],
-                                        ['g', searchableGeohash],
+                                        // Hierarchical geohash tags (1-10 chars) for flexible route queries
+                                        ...Array.from({ length: 10 }, (_, i) => ['g', fullGeohash.substring(0, i + 1)]),
                                         ['location', formData.location],
                                         ['type', type],
                                         ['hourly_rate', String(spotRate)],
@@ -2560,12 +2537,15 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
                 ['client', 'parlens']
             ];
 
-            // Add search metadata tags - use 5-char geohash for search compatibility
+            // Add search metadata tags - use hierarchical 1-10 char geohash for route queries
             if (listing.location) {
                 tags.push(['location', listing.location]);
                 const [lat, lon] = listing.location.split(',').map(Number);
-                const searchableGeohash = encodeGeohash(lat, lon, 5);
-                tags.push(['g', searchableGeohash]);
+                // Add 1-10 char geohash tags for flexible prefix matching
+                const fullGeohash = encodeGeohash(lat, lon, 10);
+                for (let i = 1; i <= 10; i++) {
+                    tags.push(['g', fullGeohash.substring(0, i)]);
+                }
             }
             // Add type tag for filtering
             if (spot.type) tags.push(['type', spot.type]);
