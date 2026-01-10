@@ -81,6 +81,7 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
     const [alternateRouteCoords, setAlternateRouteCoords] = useState<[number, number][] | null>(null);
     const [isCreatingRoute, setIsCreatingRoute] = useState(false);
     const inputRef = useRef<HTMLInputElement>(null);
+    const autoCreatePendingRef = useRef(false); // Track when to auto-create route after waypoints update
 
     // Saved routes state
     const [savedRoutes, setSavedRoutes] = useState<SavedRoute[]>([]);
@@ -468,6 +469,8 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                     lon: wp.lon
                 }));
 
+                const totalAfterAdd = waypoints.length + newWaypoints.length;
+
                 setWaypoints(prev => [...prev, ...newWaypoints]);
                 setRouteCoords(null);
                 setAlternateRouteCoords(null);
@@ -476,15 +479,30 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                 // Note: 'waypoints' state is stale here, so we construct the new list
                 onRouteChange(null, null, [...waypoints, ...newWaypoints], false);
                 setSnappedWaypoints({});
+
+                // If we now have 2+ waypoints, auto-create route (no modal needed)
+                if (totalAfterAdd >= 2) {
+                    autoCreatePendingRef.current = true;
+                }
             }
 
             onDropPinConsumed?.();
 
-            // Reopen modal to show route creation UI
-            setIsOpen(true);
+            // Only open modal if not auto-creating (need user to add more waypoints)
+            if (!autoCreatePendingRef.current) {
+                setIsOpen(true);
+            }
             onDropPinModeChange?.(false);
         }
     }, [pendingWaypoints, onDropPinConsumed, onDropPinModeChange, onRouteChange]);
+
+    // Auto-create route when pending flag is set (from marker popup's Create Route button)
+    useEffect(() => {
+        if (autoCreatePendingRef.current && waypoints.length >= 2) {
+            autoCreatePendingRef.current = false;
+            createRoute();
+        }
+    }, [waypoints.length]);
 
     // Save current route
     const saveRoute = async () => {
