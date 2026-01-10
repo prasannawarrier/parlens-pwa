@@ -96,7 +96,7 @@ export interface SavedRoute {
     created_at: number;
 }
 
-export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, currentLocation, countryCode, onPickLocation, pickedLocation, routeWaypoints }) => {
+export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, currentLocation, countryCode, onPickLocation, pickedLocation }) => {
     const { pubkey, pool, signEvent } = useAuth();
     const [activeTab, setActiveTab] = useState<TabType>('public');
     const [selectedListing, setSelectedListing] = useState<ListedParkingMetadata | null>(null);
@@ -146,6 +146,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
 
     // Captured location - set once on mount and updated only on explicit refresh
     const capturedLocationRef = useRef<[number, number] | null>(null);
+    const hasFetchedRef = useRef(false); // Tracks if initial fetch has occurred
 
     const toggleSaved = (listingId: string) => {
         setSavedListings(prev => {
@@ -664,7 +665,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             setIsLoading(false);
             setStatusLoading(false);
         }
-    }, [pool, routeWaypoints, searchCenter]); // Uses capturedLocationRef (ref) - no dependency needed
+    }, [pool, searchCenter]); // Uses capturedLocationRef (ref) - no dependency needed
 
     // Fetch spots for detailed view with Batching and Progressive Loading
     const fetchSpots = useCallback(async (listing: ListedParkingMetadata) => {
@@ -817,10 +818,13 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             capturedLocationRef.current = currentLocation;
         }
 
-        // Always fetch on mount - React state doesn't persist across unmounts
-        // The sessionStorage hash comparison was causing empty listings on re-entry
-        fetchListings();
-    }, [fetchListings, currentLocation]); // Re-run if currentLocation changes
+        // Fetch ONLY ONCE after location is captured - prevents glitching from live GPS updates
+        // Manual refresh button and page re-entry will trigger new fetches
+        if (!hasFetchedRef.current && capturedLocationRef.current) {
+            hasFetchedRef.current = true;
+            fetchListings();
+        }
+    }, [fetchListings, currentLocation]); // currentLocation in deps to capture it when first available
 
     // Real-time subscription for listing metadata updates (NEW listings)
     useEffect(() => {

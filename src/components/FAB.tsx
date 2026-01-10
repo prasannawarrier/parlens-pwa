@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Search, MapPin, ArrowRight, ChevronUp, ChevronDown } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { KINDS, DEFAULT_RELAYS } from '../lib/nostr';
-import { encodeGeohash, getGeohashNeighbors, getCommonGeohashPrefix } from '../lib/geo';
+import { encodeGeohash, getGeohashNeighbors } from '../lib/geo';
 import { encryptParkingLog } from '../lib/encryption';
 import { getCurrencyFromLocation, getCurrencySymbol, getLocalCurrency } from '../lib/currency';
 import { generateSecretKey, finalizeEvent } from 'nostr-tools/pure';
@@ -250,15 +250,17 @@ export const FAB: React.FC<FABProps> = ({
 
             // 1. Immediate fetch of existing spots - with isolated error handling per Kind
             const initialFetch = async () => {
-                // Determine query geohash(es) - use Common Prefix for routes, neighbors for single location
+                // Determine query geohash(es) - use per-waypoint geohashes for routes, neighbors for single location
                 let queryGeohashes: string[] = [];
                 if (routeWaypoints && routeWaypoints.length > 0) {
-                    // Route mode: Use Common Prefix for efficient single query
-                    const commonPrefix = getCommonGeohashPrefix(routeWaypoints);
-                    if (commonPrefix.length >= 1) {
-                        queryGeohashes = [commonPrefix];
-                        console.log('[Parlens] FAB: Using route common prefix:', commonPrefix);
-                    }
+                    // Route mode: Generate 5-char geohash for EACH waypoint
+                    // This handles routes spanning different geohash regions (even with no common prefix)
+                    const waypointHashes = new Set<string>();
+                    routeWaypoints.forEach(wp => {
+                        waypointHashes.add(encodeGeohash(wp.lat, wp.lon, 5));
+                    });
+                    queryGeohashes = Array.from(waypointHashes);
+                    console.log('[Parlens] FAB: Using route waypoint geohashes:', queryGeohashes);
                 }
                 // Fallback to session geohashes (neighbors) if no route or bad prefix
                 if (queryGeohashes.length === 0) {

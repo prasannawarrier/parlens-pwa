@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { KINDS, DEFAULT_RELAYS } from '../lib/nostr';
 import type { RouteLogContent } from '../lib/nostr';
 import { encryptParkingLog, decryptParkingLog } from '../lib/encryption';
-import { getSuggestions, parseCoordinate, formatCoords } from '../lib/geo';
+import { getSuggestions, parseCoordinate, formatCoords, encodeGeohash } from '../lib/geo';
 
 interface Waypoint {
     id: string;
@@ -518,12 +518,24 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
             const encrypted = await encryptParkingLog(routeContent, pubkey, seckey);
             const dTag = `route_${Date.now()}`;
 
+            // Generate hierarchical geohash tags for ALL waypoints (1-10 chars each)
+            // This enables finding the route via any sector it passes through
+            const allGeohashTags = new Set<string>();
+            waypointsToSave.forEach(wp => {
+                const fullHash = encodeGeohash(wp.lat, wp.lon, 10);
+                for (let i = 1; i <= 10; i++) {
+                    allGeohashTags.add(fullHash.substring(0, i));
+                }
+            });
+
             const event = {
                 kind: KINDS.ROUTE_LOG,
                 created_at: Math.floor(Date.now() / 1000),
                 tags: [
                     ['d', dTag],
                     ['client', 'parlens'],
+                    // Geohash tags for all waypoints (handles multi-sector routes)
+                    ...Array.from(allGeohashTags).map(g => ['g', g])
                 ],
                 content: encrypted,
             };
