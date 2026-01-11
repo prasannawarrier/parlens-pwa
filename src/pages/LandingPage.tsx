@@ -905,21 +905,30 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
     // Parking Search Handlers
     const handleParkingSearchInput = useCallback((query: string) => {
         setParkingSearchQuery(query);
-        if (parkingSearchTimeoutRef.current) {
-            clearTimeout(parkingSearchTimeoutRef.current);
-        }
-        if (query.length < 2) {
+    }, []);
+
+    // Parking search useEffect (fixes stale closure bug - matches RouteButton pattern)
+    useEffect(() => {
+        if (!parkingSearchQuery || parkingSearchQuery.length < 2) {
             setParkingSearchSuggestions([]);
+            setIsParkingSearching(false);
             return;
         }
+
         setIsParkingSearching(true);
-        parkingSearchTimeoutRef.current = setTimeout(async () => {
-            // Match RouteButton: limit to 1 result, use countryCode and location context
-            const results = await getSuggestions(parkingSearchQuery, countryCode, location, 1);
-            setParkingSearchSuggestions(results);
+        const timer = setTimeout(async () => {
+            try {
+                const results = await getSuggestions(parkingSearchQuery, countryCode, location, 5);
+                setParkingSearchSuggestions(results);
+            } catch (e) {
+                console.error('[Parlens] Parking search error:', e);
+                setParkingSearchSuggestions([]);
+            }
             setIsParkingSearching(false);
         }, 300);
-    }, [countryCode, location]);
+
+        return () => clearTimeout(timer);
+    }, [parkingSearchQuery, countryCode, location]);
 
     const handleSelectParkingDestination = useCallback((result: any) => {
         // Close search bar
@@ -950,6 +959,15 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
 
 
     const confirmDrop = useCallback(() => {
+        // If from parking search, return to search bar (not route modal)
+        if (isSearchDropPin) {
+            setDropPinMode(false);
+            setIsSearchDropPin(false);
+            setShowParkingSearchBar(true); // Return to parking search bar
+            return;
+        }
+
+        // Normal route waypoint flow
         const waypointsToPass = tempWaypoints.map(wp => ({
             lat: wp.lat,
             lon: wp.lon,
@@ -959,7 +977,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
         setTempWaypoints([]);
         setDropPinMode(false);
         setRouteModalOpen(true); // Re-open route modal after drop pin completion
-    }, [tempWaypoints]);
+    }, [tempWaypoints, isSearchDropPin]);
 
     // Orientation permission state (for iOS)
     const [orientationNeedsPermission, setOrientationNeedsPermission] = useState(false);
@@ -2323,6 +2341,39 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                         setSelectedMarkerPopup(null);
                                     }}
                                     onCreateRoute={() => {
+                                        // Auto-pin the marker so it survives when search is cleared
+                                        const isPinned = activePopupItems.length > 0 && activePopupItems.every((item: any) => pinnedMarkers.some(p => p.id === item.id));
+                                        if (!isPinned && activePopupItems.length > 0) {
+                                            const existingIds = new Set(pinnedMarkers.map(p => p.id));
+                                            const itemsToAdd = activePopupItems
+                                                .filter((item: any) => !existingIds.has(item.id))
+                                                .map((item: any) => ({
+                                                    ...item,
+                                                    lat: item.lat,
+                                                    lon: item.lon,
+                                                    markerType: selectedMarkerPopup.type
+                                                }));
+                                            const newPinned = [...pinnedMarkers, ...itemsToAdd];
+                                            setPinnedMarkers(newPinned);
+                                            localStorage.setItem('parlens_pinned_markers', JSON.stringify(newPinned));
+                                            console.log('[Parlens] Auto-pinned marker for route creation');
+
+                                            // Sync to saved listings for listed parking
+                                            if (selectedMarkerPopup.type === 'listed') {
+                                                try {
+                                                    const savedListings = new Set<string>(JSON.parse(localStorage.getItem('parlens-saved-listings') || '[]'));
+                                                    itemsToAdd.forEach((item: any) => {
+                                                        if (item.id) savedListings.add(item.id);
+                                                        if (item.listing_id) savedListings.add(item.listing_id);
+                                                    });
+                                                    localStorage.setItem('parlens-saved-listings', JSON.stringify(Array.from(savedListings)));
+                                                    console.log('[Parlens] Synced auto-pinned marker to saved listings');
+                                                } catch (e) {
+                                                    console.error('[Parlens] Failed to sync saved listings:', e);
+                                                }
+                                            }
+                                        }
+
                                         // Create a route from current location to marker location
                                         const markerLat = selectedMarkerPopup.lat;
                                         const markerLon = selectedMarkerPopup.lon;
@@ -2335,7 +2386,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                         waypoints.push({ lat: markerLat, lon: markerLon, name: 'Destination' });
 
                                         setPendingWaypoints(waypoints);
-                                        setRouteModalOpen(true);
+                                        // Route modal is handled by auto-create logic in RouteButton
                                         setSelectedMarkerPopup(null);
                                     }}
                                 />
@@ -2436,7 +2487,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                 onClick={() => setShowParkingSearchBar(true)}
                                 className="flex items-center gap-2 hover:opacity-80 transition-opacity"
                             >
-                                <div className="w-4 h-4 rounded-full bg-gradient-to-tr from-blue-500 to-cyan-500 shadow-sm" />
+                                <div className="w-4 h-4 rounded-full bg-[#007AFF] shadow-sm" />
                                 <span className="text-sm font-medium text-zinc-900 dark:text-white whitespace-nowrap">Search for Parking</span>
                             </button>
                         </div>
@@ -2580,11 +2631,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                             return;
                         }
 
-                        // Clear any active parking search when user recenters to live location
-                        if (status === 'search') {
-                            setStatus('idle');
-                            setOpenSpots([]);
-                        }
+                        // When recentering during search, keep search active but clear text query
+                        // FAB will automatically update to user's new location geohash
                         setParkingSearchQuery('');
                         setParkingSearchSuggestions([]);
 
@@ -2794,6 +2842,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                     isOpen={routeModalOpen}
                     onClose={() => setRouteModalOpen(false)}
                     hideTrigger={true}
+                    onRouteCreated={() => {
+                        // Clear parking search when route is created (pinned marker stays)
+                        if (status === 'search') {
+                            setStatus('idle');
+                            setOpenSpots([]);
+                        }
+                    }}
                 />
             </div>
 
@@ -2937,7 +2992,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                 value={parkingSearchQuery}
                                 onChange={(e) => handleParkingSearchInput(e.target.value)}
                                 placeholder="Search for parking near..."
-                                className="flex-1 bg-transparent outline-none text-zinc-900 dark:text-white placeholder:text-zinc-400 dark:placeholder:text-white/40 text-base"
+                                className="flex-1 h-12 bg-zinc-100 dark:bg-white/5 border border-black/5 dark:border-white/10 rounded-xl px-4 text-zinc-900 dark:text-white placeholder:text-zinc-400 dark:placeholder:text-white/40 text-base focus:outline-none focus:ring-2 focus:ring-blue-500"
                                 autoFocus
                             />
                             {isParkingSearching && (
@@ -3023,29 +3078,41 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                         </div>
                                     </button>
                                 ))}
-                                {/* OSM online search results (violet) */}
-                                {parkingSearchSuggestions.map((result: any, idx: number) => (
-                                    <button
-                                        key={`osm-${idx}`}
-                                        onClick={() => handleSelectParkingDestination(result)}
-                                        className="w-full flex items-start gap-3 p-4 text-left hover:bg-zinc-50 dark:hover:bg-white/5 active:bg-zinc-100 transition-colors border-t border-black/5 dark:border-white/5 first:border-t-0 group"
-                                    >
-                                        <div className="mt-0.5 p-2 rounded-full bg-violet-50 dark:bg-violet-500/10 text-violet-500 group-hover:text-violet-600 dark:group-hover:text-violet-400 shrink-0 transition-colors">
-                                            <MapPin size={16} />
-                                        </div>
-                                        <div className="flex-1 min-w-0">
-                                            <div className="text-sm font-semibold text-zinc-900 dark:text-white truncate">
-                                                {result.display_name?.split(',')[0]}
+                                {/* OSM online search results (blue for locality, violet for others) */}
+                                {parkingSearchSuggestions.map((result: any, idx: number) => {
+                                    // Check if result is a locality (city, town, village, etc.)
+                                    const localityTypes = ['city', 'borough', 'suburb', 'quarter', 'neighbourhood', 'town', 'village', 'hamlet', 'locality', 'residential', 'administrative'];
+                                    const isLocality = localityTypes.includes(result.type);
+
+                                    return (
+                                        <button
+                                            key={`osm-${idx}`}
+                                            onClick={() => handleSelectParkingDestination(result)}
+                                            className="w-full flex items-start gap-3 p-4 text-left hover:bg-zinc-50 dark:hover:bg-white/5 active:bg-zinc-100 transition-colors border-t border-black/5 dark:border-white/5 first:border-t-0 group"
+                                        >
+                                            <div className={`mt-0.5 p-2 rounded-full shrink-0 transition-colors ${isLocality
+                                                ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-500 group-hover:text-blue-600 dark:group-hover:text-blue-400'
+                                                : 'bg-violet-50 dark:bg-violet-500/10 text-violet-500 group-hover:text-violet-600 dark:group-hover:text-violet-400'
+                                                }`}>
+                                                <MapPin size={16} />
                                             </div>
-                                            <div className="text-xs text-zinc-500 dark:text-white/60 truncate">
-                                                {result.display_name?.split(',').slice(1).join(',')}
+                                            <div className="flex-1 min-w-0">
+                                                <div className="text-sm font-semibold text-zinc-900 dark:text-white truncate">
+                                                    {result.display_name?.split(',')[0]}
+                                                </div>
+                                                <div className="text-xs text-zinc-500 dark:text-white/60 truncate">
+                                                    {result.display_name?.split(',').slice(1).join(',')}
+                                                </div>
+                                                <div className={`text-[10px] mt-0.5 uppercase tracking-wider ${isLocality
+                                                    ? 'text-blue-500 dark:text-blue-400'
+                                                    : 'text-zinc-400 dark:text-white/40'
+                                                    }`}>
+                                                    {isLocality ? 'Locality' : 'OSM Search'}
+                                                </div>
                                             </div>
-                                            <div className="text-[10px] text-zinc-400 dark:text-white/40 mt-0.5 uppercase tracking-wider">
-                                                OSM Search
-                                            </div>
-                                        </div>
-                                    </button>
-                                ))}
+                                        </button>
+                                    );
+                                })}
                             </div>
                         )}
                     </div>
