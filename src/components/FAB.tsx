@@ -190,6 +190,8 @@ export const FAB: React.FC<FABProps> = ({
                     let spotCurrency = 'USD';
                     let spotCount = 1;
                     let listingName: string | undefined;
+                    let listingId: string | undefined;
+                    let listingATag: string | undefined;
 
                     if (event.kind === KINDS.PARKING_AREA_INDICATOR) {
                         const priceTag = event.tags.find((t: string[]) => t[0] === 'hourly_rate');
@@ -205,11 +207,21 @@ export const FAB: React.FC<FABProps> = ({
                         const rateTag = event.tags.find((t: string[]) => t[0] === 'hourly_rate');
                         const currencyTag = event.tags.find((t: string[]) => t[0] === 'currency');
                         const listingNameTag = event.tags.find((t: string[]) => t[0] === 'listing_name');
+                        // Extract root a-tag (listing_id) for sync
+                        const rootATag = event.tags.find((t: string[]) => t[0] === 'a' && t[3] === 'root')?.[1];
 
                         spotType = typeTag?.[1] || 'car';
                         price = rateTag ? parseFloat(rateTag[1]) : 0;
                         spotCurrency = currencyTag?.[1] || 'USD';
                         listingName = listingNameTag?.[1];
+                        // Extract listing D-tag and full address from root a-tag
+                        if (rootATag) {
+                            const parts = rootATag.split(':');
+                            if (parts.length === 3) {
+                                listingId = parts[2]; // D-tag of the listing
+                                listingATag = rootATag; // Full address for fetching
+                            }
+                        }
 
                         if (spotType !== vehicleType) return;
                     }
@@ -224,7 +236,9 @@ export const FAB: React.FC<FABProps> = ({
                         count: spotCount,
                         kind: event.kind,
                         created_at: event.created_at,
-                        listing_name: listingName
+                        listing_name: listingName,
+                        listing_id: listingId,
+                        listing_a_tag: listingATag
                     };
 
                     // Update Map & State

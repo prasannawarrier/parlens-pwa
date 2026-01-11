@@ -450,7 +450,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
     const [showParkingSearchBar, setShowParkingSearchBar] = useState(false);
     const [parkingSearchQuery, setParkingSearchQuery] = useState('');
     const [parkingSearchSuggestions, setParkingSearchSuggestions] = useState<any[]>([]);
-    const [isParkingSearching, setIsParkingSearching] = useState(false);
     const [isSearchDropPin, setIsSearchDropPin] = useState(false); // Distinguish search drop pin from route drop pin
 
     // Cached routes for saved waypoint search (read from localStorage, synced by RouteButton)
@@ -910,20 +909,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
     useEffect(() => {
         if (!parkingSearchQuery || parkingSearchQuery.length < 2) {
             setParkingSearchSuggestions([]);
-            setIsParkingSearching(false);
             return;
         }
 
-        setIsParkingSearching(true);
         const timer = setTimeout(async () => {
             try {
-                const results = await getSuggestions(parkingSearchQuery, countryCode, location, 5);
+                const results = await getSuggestions(parkingSearchQuery, countryCode, location, 1);
                 setParkingSearchSuggestions(results);
             } catch (e) {
                 console.error('[Parlens] Parking search error:', e);
                 setParkingSearchSuggestions([]);
             }
-            setIsParkingSearching(false);
         }, 300);
 
         return () => clearTimeout(timer);
@@ -1530,6 +1526,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                     count: source.count,
                     kind: KINDS.LISTED_SPOT_LOG,
                     listing_name: source.listing_name || p.listing_name,
+                    listing_id: source.listing_id || p.listing_id,
+                    listing_a_tag: source.listing_a_tag || p.listing_a_tag,
                     openSpots: source.openSpots || source.count || p.openSpots || 1,
                     original: source,
                     isPinned: true
@@ -1549,6 +1547,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                 count: s.count,
                 kind: s.kind,
                 listing_name: s.listing_name,
+                listing_id: s.listing_id,
+                listing_a_tag: s.listing_a_tag,
                 openSpots: s.count || 1,
                 original: s
             }));
@@ -2325,13 +2325,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                         if (selectedMarkerPopup.type === 'listed' && !isPinned) {
                                             try {
                                                 const savedListings = new Set<string>(JSON.parse(localStorage.getItem('parlens-saved-listings') || '[]'));
+                                                const savedRefs = new Set<string>(JSON.parse(localStorage.getItem('parlens-saved-refs') || '[]'));
                                                 activePopupItems.forEach((item: any) => {
-                                                    if (item.id) savedListings.add(item.id);
-                                                    // Also add the listing ID if it's different from item.id
+                                                    // Add listing_id to saved-listings for UI filtering
                                                     if (item.listing_id) savedListings.add(item.listing_id);
+                                                    // Add listing_a_tag to saved-refs for fetching
+                                                    if (item.listing_a_tag) savedRefs.add(item.listing_a_tag);
                                                 });
                                                 localStorage.setItem('parlens-saved-listings', JSON.stringify(Array.from(savedListings)));
-                                                console.log('[Parlens] Synced pinned markers to saved listings');
+                                                localStorage.setItem('parlens-saved-refs', JSON.stringify(Array.from(savedRefs)));
+                                                console.log('[Parlens] Synced pinned markers to saved listings and refs');
                                             } catch (e) {
                                                 console.error('[Parlens] Failed to sync saved listings:', e);
                                             }
@@ -2361,12 +2364,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                             if (selectedMarkerPopup.type === 'listed') {
                                                 try {
                                                     const savedListings = new Set<string>(JSON.parse(localStorage.getItem('parlens-saved-listings') || '[]'));
+                                                    const savedRefs = new Set<string>(JSON.parse(localStorage.getItem('parlens-saved-refs') || '[]'));
                                                     itemsToAdd.forEach((item: any) => {
-                                                        if (item.id) savedListings.add(item.id);
+                                                        // Add listing_id to saved-listings for UI filtering
                                                         if (item.listing_id) savedListings.add(item.listing_id);
+                                                        // Add listing_a_tag to saved-refs for fetching
+                                                        if (item.listing_a_tag) savedRefs.add(item.listing_a_tag);
                                                     });
                                                     localStorage.setItem('parlens-saved-listings', JSON.stringify(Array.from(savedListings)));
-                                                    console.log('[Parlens] Synced auto-pinned marker to saved listings');
+                                                    localStorage.setItem('parlens-saved-refs', JSON.stringify(Array.from(savedRefs)));
+                                                    console.log('[Parlens] Synced auto-pinned marker to saved listings and refs');
                                                 } catch (e) {
                                                     console.error('[Parlens] Failed to sync saved listings:', e);
                                                 }
@@ -2981,36 +2988,36 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
 
             {/* Parking Search Bar Overlay */}
             {showParkingSearchBar && (
-                <div className="fixed inset-0 z-[1800] flex flex-col items-center bg-black/50 backdrop-blur-sm animate-in fade-in">
+                <div className="fixed inset-0 z-[1800] flex flex-col items-center px-4 pt-12 bg-black/50 backdrop-blur-sm animate-in fade-in">
                     {/* Search Card */}
-                    <div className="w-full max-w-md mx-4 mt-12 bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl border border-black/10 dark:border-white/10 overflow-hidden">
+                    <div className="w-full max-w-md bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl border border-black/10 dark:border-white/10 overflow-hidden">
                         {/* Search Input Row */}
                         <div className="flex items-center gap-2 p-3 border-b border-zinc-200 dark:border-white/10">
-                            <input
-                                type="text"
-                                value={parkingSearchQuery}
-                                onChange={(e) => handleParkingSearchInput(e.target.value)}
-                                placeholder="Search for parking near..."
-                                className="flex-1 h-12 bg-zinc-100 dark:bg-white/5 border border-black/5 dark:border-white/10 rounded-xl px-4 text-zinc-900 dark:text-white placeholder:text-zinc-400 dark:placeholder:text-white/40 text-base focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                autoFocus
-                            />
-                            {isParkingSearching && (
-                                <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                            )}
-                            <button
-                                onClick={() => {
-                                    setShowParkingSearchBar(false);
-                                    setParkingSearchQuery('');
-                                    setParkingSearchSuggestions([]);
-                                    // Enable drop pin mode for searching via pin (not route)
-                                    setIsSearchDropPin(true);
-                                    setDropPinMode(true);
-                                }}
-                                className="p-2 rounded-lg bg-orange-500/10 text-orange-500 hover:bg-orange-500/20 transition-colors"
-                                title="Drop Pin"
-                            >
-                                <MapPin size={18} />
-                            </button>
+                            {/* Input with embedded Drop Pin button */}
+                            <div className="flex-1 flex items-center h-12 bg-zinc-100 dark:bg-white/5 border border-black/5 dark:border-white/10 rounded-xl overflow-hidden focus-within:ring-2 focus-within:ring-blue-500">
+                                <input
+                                    type="text"
+                                    value={parkingSearchQuery}
+                                    onChange={(e) => handleParkingSearchInput(e.target.value)}
+                                    placeholder="Search for parking near..."
+                                    className="flex-1 h-full bg-transparent px-4 text-zinc-900 dark:text-white placeholder:text-zinc-400 dark:placeholder:text-white/40 text-base focus:outline-none"
+                                    autoFocus
+                                />
+                                <button
+                                    onClick={() => {
+                                        setShowParkingSearchBar(false);
+                                        setParkingSearchQuery('');
+                                        setParkingSearchSuggestions([]);
+                                        // Enable drop pin mode for searching via pin (not route)
+                                        setIsSearchDropPin(true);
+                                        setDropPinMode(true);
+                                    }}
+                                    className="px-3 h-full flex items-center text-orange-500 hover:bg-orange-500/10 transition-colors"
+                                    title="Drop Pin"
+                                >
+                                    <MapPin size={18} />
+                                </button>
+                            </div>
                             <button
                                 onClick={() => {
                                     setShowParkingSearchBar(false);
@@ -3025,6 +3032,24 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                         {/* Suggestions List - Multi-source: Coordinates, Saved Waypoints, OSM */}
                         {(parseCoordinate(parkingSearchQuery) || savedWaypointMatches.length > 0 || parkingSearchSuggestions.length > 0) && (
                             <div className="max-h-80 overflow-y-auto">
+                                {/* Tags Header */}
+                                <div className="px-4 py-2 bg-zinc-50 dark:bg-white/5 border-b border-black/5 dark:border-white/5 flex items-center gap-2 overflow-x-auto">
+                                    {parseCoordinate(parkingSearchQuery) && (
+                                        <span className="shrink-0 inline-block px-2.5 py-1 rounded-lg bg-gradient-to-r from-blue-500/10 to-cyan-500/10 dark:from-blue-500/20 dark:to-cyan-500/20 text-[10px] font-bold text-blue-600 dark:text-blue-300 uppercase tracking-wider border border-blue-200 dark:border-blue-500/20">
+                                            {parseCoordinate(parkingSearchQuery)?.type === 'plus_code' ? 'Plus Code' : 'Coordinate'}
+                                        </span>
+                                    )}
+                                    {savedWaypointMatches.length > 0 && (
+                                        <span className="shrink-0 inline-block px-2.5 py-1 rounded-lg bg-gradient-to-r from-emerald-500/10 to-teal-500/10 dark:from-emerald-500/20 dark:to-teal-500/20 text-[10px] font-bold text-emerald-600 dark:text-emerald-300 uppercase tracking-wider border border-emerald-200 dark:border-emerald-500/20">
+                                            Saved Places
+                                        </span>
+                                    )}
+                                    {parkingSearchSuggestions.length > 0 && (
+                                        <span className="shrink-0 inline-block px-2.5 py-1 rounded-lg bg-gradient-to-r from-violet-500/10 to-fuchsia-500/10 dark:from-violet-500/20 dark:to-fuchsia-500/20 text-[10px] font-bold text-violet-600 dark:text-violet-300 uppercase tracking-wider border border-violet-200 dark:border-violet-500/20">
+                                            OSM Search
+                                        </span>
+                                    )}
+                                </div>
                                 {/* Coordinate match (if valid) */}
                                 {parseCoordinate(parkingSearchQuery) && (
                                     <button
@@ -3101,12 +3126,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                                 </div>
                                                 <div className="text-xs text-zinc-500 dark:text-white/60 truncate">
                                                     {result.display_name?.split(',').slice(1).join(',')}
-                                                </div>
-                                                <div className={`text-[10px] mt-0.5 uppercase tracking-wider ${isLocality
-                                                    ? 'text-blue-500 dark:text-blue-400'
-                                                    : 'text-zinc-400 dark:text-white/40'
-                                                    }`}>
-                                                    {isLocality ? 'Locality' : 'OSM Search'}
                                                 </div>
                                             </div>
                                         </button>

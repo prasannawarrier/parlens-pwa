@@ -1491,7 +1491,12 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                         <div className="max-h-[60vh] overflow-y-auto">
                                             {/* Tags Header */}
                                             <div className="px-4 py-2 bg-zinc-50 dark:bg-white/5 border-t border-black/5 dark:border-white/5 flex items-center gap-2">
-                                                {suggestions.length > 0 && (
+                                                {suggestions.some((s: any) => ['city', 'borough', 'suburb', 'quarter', 'neighbourhood', 'town', 'village', 'hamlet', 'locality', 'residential', 'administrative'].includes(s.type)) && (
+                                                    <span className="inline-block px-2.5 py-1 rounded-lg bg-gradient-to-r from-blue-500/10 to-cyan-500/10 dark:from-blue-500/20 dark:to-cyan-500/20 text-[10px] font-bold text-blue-600 dark:text-blue-300 uppercase tracking-wider border border-blue-200 dark:border-blue-500/20">
+                                                        Locality
+                                                    </span>
+                                                )}
+                                                {suggestions.some((s: any) => !['city', 'borough', 'suburb', 'quarter', 'neighbourhood', 'town', 'village', 'hamlet', 'locality', 'residential', 'administrative'].includes(s.type)) && (
                                                     <span className="inline-block px-2.5 py-1 rounded-lg bg-gradient-to-r from-violet-500/10 to-fuchsia-500/10 dark:from-violet-500/20 dark:to-fuchsia-500/20 text-[10px] font-bold text-violet-600 dark:text-violet-300 uppercase tracking-wider border border-violet-200 dark:border-violet-500/20">
                                                         OSM Search
                                                     </span>
@@ -1534,25 +1539,32 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                             ))}
 
                                             {/* Online Matches */}
-                                            {suggestions.map((item) => (
-                                                <button
-                                                    key={item.place_id}
-                                                    onClick={() => handleSelectSuggestion(item)}
-                                                    className="w-full flex items-start gap-3 p-4 text-left hover:bg-zinc-50 dark:hover:bg-white/5 active:bg-zinc-100 transition-colors border-t border-black/5 dark:border-white/5 group"
-                                                >
-                                                    <div className="mt-0.5 p-2 rounded-full bg-violet-50 dark:bg-violet-500/10 text-violet-500 group-hover:text-violet-600 dark:group-hover:text-violet-400 shrink-0 transition-colors">
-                                                        <MapPin size={16} />
-                                                    </div>
-                                                    <div className="flex-1 min-w-0">
-                                                        <div className="text-sm font-semibold text-zinc-900 dark:text-white truncate">
-                                                            {item.display_name.split(',')[0]}
+                                            {suggestions.map((item) => {
+                                                const localityTypes = ['city', 'borough', 'suburb', 'quarter', 'neighbourhood', 'town', 'village', 'hamlet', 'locality', 'residential', 'administrative'];
+                                                const isLocality = localityTypes.includes(item.type);
+                                                return (
+                                                    <button
+                                                        key={item.place_id}
+                                                        onClick={() => handleSelectSuggestion(item)}
+                                                        className="w-full flex items-start gap-3 p-4 text-left hover:bg-zinc-50 dark:hover:bg-white/5 active:bg-zinc-100 transition-colors border-t border-black/5 dark:border-white/5 group"
+                                                    >
+                                                        <div className={`mt-0.5 p-2 rounded-full shrink-0 transition-colors ${isLocality
+                                                            ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-500 group-hover:text-blue-600 dark:group-hover:text-blue-400'
+                                                            : 'bg-violet-50 dark:bg-violet-500/10 text-violet-500 group-hover:text-violet-600 dark:group-hover:text-violet-400'
+                                                            }`}>
+                                                            <MapPin size={16} />
                                                         </div>
-                                                        <div className="text-xs text-zinc-500 dark:text-zinc-400 truncate">
-                                                            {item.display_name.split(',').slice(1).join(',')}
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="text-sm font-semibold text-zinc-900 dark:text-white truncate">
+                                                                {item.display_name.split(',')[0]}
+                                                            </div>
+                                                            <div className="text-xs text-zinc-500 dark:text-zinc-400 truncate">
+                                                                {item.display_name.split(',').slice(1).join(',')}
+                                                            </div>
                                                         </div>
-                                                    </div>
-                                                </button>
-                                            ))}
+                                                    </button>
+                                                );
+                                            })}
                                         </div>
                                     </div>
                                 )}
