@@ -451,7 +451,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
     const [parkingSearchQuery, setParkingSearchQuery] = useState('');
     const [parkingSearchSuggestions, setParkingSearchSuggestions] = useState<any[]>([]);
     const [isParkingSearching, setIsParkingSearching] = useState(false);
-    const parkingSearchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [isSearchDropPin, setIsSearchDropPin] = useState(false); // Distinguish search drop pin from route drop pin
 
     // Cached routes for saved waypoint search (read from localStorage, synced by RouteButton)
