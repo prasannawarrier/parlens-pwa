@@ -12,6 +12,7 @@ import { decryptParkingLog } from '../lib/encryption';
 import type { RouteLogContent } from '../lib/nostr';
 import { getCurrencyFromLocation } from '../lib/currency'; // Import currency utility
 import * as nip19 from 'nostr-tools/nip19';
+import { fetchDistributedStream } from '../lib/optimization';
 import { QRCodeSVG } from 'qrcode.react';
 
 // Types for Listed Parking
@@ -484,12 +485,21 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                 console.log('[Parlens] Phase B: Using hierarchical geohash prefixes:', geohashPrefixes);
 
                 // Query with all prefixes - listings with matching g-tags at ANY level will be found
-                publicEvents = await pool.querySync(DEFAULT_RELAYS, {
-                    kinds: [KINDS.LISTED_PARKING_METADATA],
-                    '#g': geohashPrefixes,
-                    limit: 100
-                });
-                console.log('[Parlens] Phase B: Hierarchical query returned', publicEvents.length, 'events');
+                // Use distributed streaming for parallel relay fetching
+                await fetchDistributedStream(
+                    pool,
+                    DEFAULT_RELAYS,
+                    {
+                        kinds: [KINDS.LISTED_PARKING_METADATA],
+                        '#g': geohashPrefixes,
+                        limit: 100
+                    },
+                    {
+                        onEvent: (event) => publicEvents.push(event),
+                        timeoutMs: 8000
+                    }
+                );
+                console.log('[Parlens] Phase C: Distributed query returned', publicEvents.length, 'events');
 
                 // Fallback to global if hierarchical query returns nothing
                 if (publicEvents.length === 0) {
@@ -612,10 +622,20 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                     if (listingATags.length === 0) continue;
 
                     // Fetch Kind 1714 status logs for all spots in these listings (via root tag)
-                    const statusEvents = await pool.querySync(DEFAULT_RELAYS, {
-                        kinds: [KINDS.LISTED_SPOT_LOG],
-                        '#a': listingATags
-                    });
+                    // Use distributed streaming for parallel relay fetching
+                    const statusEvents: any[] = [];
+                    await fetchDistributedStream(
+                        pool,
+                        DEFAULT_RELAYS,
+                        {
+                            kinds: [KINDS.LISTED_SPOT_LOG],
+                            '#a': listingATags
+                        },
+                        {
+                            onEvent: (event) => statusEvents.push(event),
+                            timeoutMs: 8000
+                        }
+                    );
 
                     // Create map of latest status per spot (keyed by spot a-tag)
                     const latestStatusMap = new Map();
@@ -808,10 +828,20 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             return [clean, clean + ''];
         });
 
-        const statusEvents = await pool.querySync(DEFAULT_RELAYS, {
-            kinds: [KINDS.LISTED_SPOT_LOG],
-            '#a': spotATags,
-        });
+        // Use distributed streaming for parallel relay fetching
+        const statusEvents: any[] = [];
+        await fetchDistributedStream(
+            pool,
+            DEFAULT_RELAYS,
+            {
+                kinds: [KINDS.LISTED_SPOT_LOG],
+                '#a': spotATags,
+            },
+            {
+                onEvent: (event) => statusEvents.push(event),
+                timeoutMs: 8000
+            }
+        );
 
         const latestStatus = new Map<string, any>();
         statusEvents.forEach((ev: any) => {

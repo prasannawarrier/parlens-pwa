@@ -6,6 +6,7 @@ import { encodeGeohash, getGeohashNeighbors } from '../lib/geo';
 import { encryptParkingLog } from '../lib/encryption';
 import { getCurrencyFromLocation, getCurrencySymbol, getLocalCurrency } from '../lib/currency';
 import { generateSecretKey, finalizeEvent } from 'nostr-tools/pure';
+import { fetchDistributedStream, createThrottle } from '../lib/optimization';
 
 interface FABProps {
     status: 'idle' | 'search' | 'parked';
@@ -121,6 +122,14 @@ export const FAB: React.FC<FABProps> = ({
             console.log('[Parlens] Subscribing to spots in geohashes:', Array.from(sessionGeohashes));
 
             const now = Math.floor(Date.now() / 1000);
+
+            // AbortController for cancellation when geohashes change
+            const abortController = new AbortController();
+
+            // Throttled state flush for progressive UI loading (max once per 100ms)
+            const flushState = createThrottle(() => {
+                setOpenSpots(Array.from(spotsMapRef.current.values()));
+            }, 100);
 
             const processSpotEvent = (event: any, shouldUpdateState = false) => {
                 try {
@@ -268,38 +277,56 @@ export const FAB: React.FC<FABProps> = ({
                     else if (areaTimeFilter === 'year') areaSince = now - 31536000;
                     else if (areaTimeFilter === 'all') areaSince = 0;
 
-                    const broadcastEvents = await pool.querySync(
+                    let batch1Count = 0;
+                    await fetchDistributedStream(
+                        pool,
                         DEFAULT_RELAYS,
                         {
                             kinds: [KINDS.PARKING_AREA_INDICATOR],
                             '#g': queryGeohashes,
                             since: areaSince
-                        } as any
+                        },
+                        {
+                            onEvent: (event) => {
+                                processSpotEvent(event);
+                                batch1Count++;
+                                flushState(); // Throttled - updates UI progressively
+                            },
+                            signal: abortController.signal,
+                            timeoutMs: 8000
+                        }
                     );
-
-                    // Process broadcast events immediately
-                    for (const event of broadcastEvents) {
-                        processSpotEvent(event);
-                    }
-                    // Update state after Batch 1
-                    if (spotsMapRef.current.size > 0) {
-                        setOpenSpots(Array.from(spotsMapRef.current.values()));
-                    }
-                    console.log('[Parlens] Batch 1 (Kind 31714) loaded:', broadcastEvents.length, 'events');
+                    console.log('[Parlens] Batch 1 (Kind 31714) loaded:', batch1Count, 'events');
                 } catch (e) {
                     console.error('[Parlens] Batch 1 (Kind 31714) failed:', e);
                 }
 
                 // === BATCH 2: Listed Spot Logs (Kind 1714) + Orphan Validation ===
                 // Combined to ensure orphans never appear temporarily on the map
+                // Note: Must collect ALL events before validation (dependent on parent existence)
                 try {
-                    const spotStatusEvents = await pool.querySync(
+                    const spotStatusEvents: any[] = [];
+
+                    // Stream events into collection
+                    await fetchDistributedStream(
+                        pool,
                         DEFAULT_RELAYS,
                         {
                             kinds: [KINDS.LISTED_SPOT_LOG],
                             '#g': queryGeohashes,
-                        } as any
+                        },
+                        {
+                            onEvent: (event) => {
+                                spotStatusEvents.push(event);
+                            },
+                            signal: abortController.signal,
+                            timeoutMs: 8000
+                        }
                     );
+
+                    // Check if aborted before processing
+                    if (abortController.signal.aborted) return;
+
                     console.log('[Parlens] Batch 2 (Kind 1714) loaded:', spotStatusEvents.length, 'events');
 
                     // Process spot status events - only keep latest per spot (a-tag)
@@ -342,15 +369,26 @@ export const FAB: React.FC<FABProps> = ({
                             }
                         });
 
-                        const validListingsMap = await pool.querySync(DEFAULT_RELAYS, {
-                            kinds: [KINDS.LISTED_PARKING_METADATA], // 31147
-                            '#d': Array.from(dTags),
-                            authors: Array.from(authors)
-                        } as any);
+                        // Verify parent listings exist (using distributed fetch for consistency)
+                        const validListingEvents: any[] = [];
+                        await fetchDistributedStream(
+                            pool,
+                            DEFAULT_RELAYS,
+                            {
+                                kinds: [KINDS.LISTED_PARKING_METADATA], // 31147
+                                '#d': Array.from(dTags),
+                                authors: Array.from(authors)
+                            },
+                            {
+                                onEvent: (e) => validListingEvents.push(e),
+                                signal: abortController.signal,
+                                timeoutMs: 8000
+                            }
+                        );
 
                         // Create set of valid listing addresses found
                         const validAddresses = new Set<string>();
-                        validListingsMap.forEach((e: any) => {
+                        validListingEvents.forEach((e: any) => {
                             const d = e.tags.find((t: string[]) => t[0] === 'd')?.[1];
                             if (d) validAddresses.add(`${KINDS.LISTED_PARKING_METADATA}:${e.pubkey}:${d}`);
                         });
@@ -361,17 +399,14 @@ export const FAB: React.FC<FABProps> = ({
                             const rootATag = event.tags.find((t: string[]) => t[0] === 'a' && t[3] === 'root')?.[1];
                             if (rootATag && validAddresses.has(rootATag)) {
                                 processSpotEvent(event);
+                                flushState(); // Progressive update for each valid spot
                             }
                         }
                     }
                     // If no parentListingAddresses found, nothing is processed (strict mode)
 
-                    // Update state after Batch 2 (now includes orphan filtering)
-                    if (spotsMapRef.current.size > 0) {
-                        setOpenSpots(Array.from(spotsMapRef.current.values()));
-                    } else {
-                        setOpenSpots([]);
-                    }
+                    // Final state flush after Batch 2 (ensure final state is accurate)
+                    flushState();
                     console.log('[Parlens] Batch 2 (Kind 1714 + orphan validation) completed');
                 } catch (e) {
                     console.error('[Parlens] Batch 2 (Kind 1714 + orphan validation) failed:', e);
@@ -402,10 +437,11 @@ export const FAB: React.FC<FABProps> = ({
 
             return () => {
                 console.log('[Parlens] Unsubscribing from spots');
+                abortController.abort(); // Cancel any pending distributed fetches
                 sub.close();
             };
         }
-    }, [status, sessionGeohashes, pool, setOpenSpots]);
+    }, [status, sessionGeohashes, pool, setOpenSpots, vehicleType, hiddenItems]);
 
     const hasCheckedCurrency = useRef(false);
 
