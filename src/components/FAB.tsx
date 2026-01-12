@@ -123,6 +123,34 @@ export const FAB: React.FC<FABProps> = ({
 
             const now = Math.floor(Date.now() / 1000);
 
+            // Shared helper to aggregate spots by listing for UI
+            function updateOpenSpotsState() {
+                const individualSpots = Array.from(spotsMapRef.current.values());
+                const aggregated = new Map<string, any>();
+
+                individualSpots.forEach(s => {
+                    // Group by listing a-tag if available
+                    if (s.listing_a_tag) {
+                        if (aggregated.has(s.listing_a_tag)) {
+                            const existing = aggregated.get(s.listing_a_tag);
+                            existing.count += 1;
+                            // Keep mostly existing metadata, maybe update timestamp if newer
+                            if (s.created_at > existing.created_at) {
+                                existing.created_at = s.created_at;
+                            }
+                        } else {
+                            // Start new group, use listing a-tag as ID
+                            aggregated.set(s.listing_a_tag, { ...s, count: 1, id: s.listing_a_tag });
+                        }
+                    } else {
+                        // Keep independent spots as they are
+                        aggregated.set(s.id, s);
+                    }
+                });
+
+                setOpenSpots(Array.from(aggregated.values()));
+            }
+
             const processSpotEvent = (event: any, shouldUpdateState = false) => {
                 try {
                     const currentTime = Math.floor(Date.now() / 1000);
@@ -136,33 +164,18 @@ export const FAB: React.FC<FABProps> = ({
                         }
                     }
 
-                    // Check hidden items
+                    // Check hidden items (Basic Pubkey check)
                     if (hiddenItems.has(event.pubkey)) return;
 
-                    // For listed spots, check if listing is hidden
-                    if (event.kind === KINDS.LISTED_SPOT_LOG) {
-                        const aTag = event.tags.find((t: string[]) => t[0] === 'a')?.[1];
-                        if (aTag) {
-                            const parts = aTag.split(':');
-                            if (parts.length === 3) {
-                                const pkb = parts[1];
-                                const d = parts[2];
-                                // Check if listing owner or listing ID is hidden
-                                if (hiddenItems.has(pkb) || hiddenItems.has(d)) return;
-                            }
-                        }
-                    }
+                    // Parse Listing Info early for hidden check
+                    let listingId: string | undefined;
+                    let listingATag: string | undefined;
+                    let listingName: string | undefined;
+                    let spotType = 'car';
+                    let price = 0;
+                    let spotCurrency = 'USD';
 
-                    // Determine Unique Key (Logical ID)
-                    // Kind 1714: Use 'a' tag (address) to handle updates/removals
-                    // Kind 31714: Use 'id' (ephemeral)
-                    let uniqueKey = event.id;
-                    if (event.kind === KINDS.LISTED_SPOT_LOG) {
-                        const aTag = event.tags.find((t: string[]) => t[0] === 'a')?.[1];
-                        if (aTag) uniqueKey = aTag;
-                    }
-
-                    // Check valid location
+                    // Check valid location early
                     const locTag = event.tags.find((t: string[]) => t[0] === 'location');
                     let lat = 0;
                     let lon = 0;
@@ -173,79 +186,91 @@ export const FAB: React.FC<FABProps> = ({
                         return;
                     }
 
-                    // Handle Status Updates (Removals)
                     if (event.kind === KINDS.LISTED_SPOT_LOG) {
+                        const rootATag = event.tags.find((t: string[]) => t[0] === 'a' && t[3] === 'root')?.[1];
+                        if (rootATag) {
+                            const parts = rootATag.split(':');
+                            if (parts.length === 3) {
+                                listingId = parts[2]; // D-tag of the listing
+                                listingATag = rootATag; // Full address
+                                const pkb = parts[1];
+
+                                // Check if listing owner or listing ID is hidden
+                                if (hiddenItems.has(pkb) || (listingId && hiddenItems.has(listingId))) return;
+                            }
+                        }
+
+                        // Handle Status Updates (Removals) - Logic depends on uniqueKey
                         const statusTag = event.tags.find((t: string[]) => t[0] === 'status');
-                        // If not open, remove from map if it exists
+
+                        // Determine Unique Key (Spot A-Tag)
+                        let uniqueKey = event.id;
+                        const aTag = event.tags.find((t: string[]) => t[0] === 'a')?.[1];
+                        if (aTag) uniqueKey = aTag;
+
                         if (statusTag?.[1] !== 'open') {
                             if (spotsMapRef.current.has(uniqueKey)) {
                                 spotsMapRef.current.delete(uniqueKey);
-                                if (shouldUpdateState) setOpenSpots(Array.from(spotsMapRef.current.values()));
+                                if (shouldUpdateState) updateOpenSpotsState();
                             }
                             return;
                         }
-                    }
 
-                    let spotType = 'car';
-                    let price = 0;
-                    let spotCurrency = 'USD';
-                    let spotCount = 1;
-                    let listingName: string | undefined;
-                    let listingId: string | undefined;
-                    let listingATag: string | undefined;
+                        // Parse Metadata
+                        const typeTag = event.tags.find((t: string[]) => t[0] === 'type');
+                        const rateTag = event.tags.find((t: string[]) => t[0] === 'hourly_rate');
+                        const currencyTag = event.tags.find((t: string[]) => t[0] === 'currency');
+                        const listingNameTag = event.tags.find((t: string[]) => t[0] === 'listing_name');
 
-                    if (event.kind === KINDS.PARKING_AREA_INDICATOR) {
+                        spotType = typeTag?.[1] || 'car';
+                        price = rateTag ? parseFloat(rateTag[1]) : 0;
+                        spotCurrency = currencyTag?.[1] || 'USD';
+                        listingName = listingNameTag?.[1];
+
+                        if (spotType !== vehicleType) return;
+
+                        // Update Map
+                        const spot = {
+                            id: event.id,
+                            lat,
+                            lon,
+                            price,
+                            currency: spotCurrency,
+                            type: spotType,
+                            count: 1,
+                            kind: event.kind,
+                            created_at: event.created_at,
+                            listing_name: listingName,
+                            listing_id: listingId,
+                            listing_a_tag: listingATag
+                        };
+                        spotsMapRef.current.set(uniqueKey, spot);
+
+                    } else if (event.kind === KINDS.PARKING_AREA_INDICATOR) {
+                        // ... Standard Indicator Logic ...
                         const priceTag = event.tags.find((t: string[]) => t[0] === 'hourly_rate');
                         const currencyTag = event.tags.find((t: string[]) => t[0] === 'currency');
                         const typeTag = event.tags.find((t: string[]) => t[0] === 'type');
                         price = priceTag ? parseFloat(priceTag[1]) : 0;
                         spotCurrency = currencyTag ? currencyTag[1] : 'USD';
                         spotType = typeTag ? typeTag[1] : 'car';
-                    } else if (event.kind === KINDS.LISTED_SPOT_LOG) {
-                        if (!locTag) return;
 
-                        const typeTag = event.tags.find((t: string[]) => t[0] === 'type');
-                        const rateTag = event.tags.find((t: string[]) => t[0] === 'hourly_rate');
-                        const currencyTag = event.tags.find((t: string[]) => t[0] === 'currency');
-                        const listingNameTag = event.tags.find((t: string[]) => t[0] === 'listing_name');
-                        // Extract root a-tag (listing_id) for sync
-                        const rootATag = event.tags.find((t: string[]) => t[0] === 'a' && t[3] === 'root')?.[1];
-
-                        spotType = typeTag?.[1] || 'car';
-                        price = rateTag ? parseFloat(rateTag[1]) : 0;
-                        spotCurrency = currencyTag?.[1] || 'USD';
-                        listingName = listingNameTag?.[1];
-                        // Extract listing D-tag and full address from root a-tag
-                        if (rootATag) {
-                            const parts = rootATag.split(':');
-                            if (parts.length === 3) {
-                                listingId = parts[2]; // D-tag of the listing
-                                listingATag = rootATag; // Full address for fetching
-                            }
-                        }
-
-                        if (spotType !== vehicleType) return;
+                        const spot = {
+                            id: event.id,
+                            lat,
+                            lon,
+                            price,
+                            currency: spotCurrency,
+                            type: spotType,
+                            count: 1,
+                            kind: event.kind,
+                            created_at: event.created_at
+                        };
+                        spotsMapRef.current.set(event.id, spot);
                     }
 
-                    const spot = {
-                        id: event.id,
-                        lat,
-                        lon,
-                        price: price,
-                        currency: spotCurrency,
-                        type: spotType,
-                        count: spotCount,
-                        kind: event.kind,
-                        created_at: event.created_at,
-                        listing_name: listingName,
-                        listing_id: listingId,
-                        listing_a_tag: listingATag
-                    };
-
-                    // Update Map & State
-                    spotsMapRef.current.set(uniqueKey, spot);
                     if (shouldUpdateState) {
-                        setOpenSpots(Array.from(spotsMapRef.current.values()));
+                        updateOpenSpotsState();
                     }
 
                 } catch (e) {
@@ -379,7 +404,7 @@ export const FAB: React.FC<FABProps> = ({
 
                     // Update state after Batch 2 (now includes orphan filtering)
                     if (spotsMapRef.current.size > 0) {
-                        setOpenSpots(Array.from(spotsMapRef.current.values()));
+                        updateOpenSpotsState();
                     } else {
                         setOpenSpots([]);
                     }
