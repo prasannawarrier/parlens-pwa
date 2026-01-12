@@ -1,9 +1,11 @@
 import { SimplePool, getPublicKey, nip19, generateSecretKey, finalizeEvent } from 'nostr-tools';
+import { DEFAULT_RELAYS } from '../lib/nostr';
+import { relayHealthMonitor } from '../lib/relayHealth';
 
 const bytesToHex = (bytes: Uint8Array) =>
     Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
 
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react';
 
 interface AuthContextType {
     pubkey: string | null;
@@ -21,6 +23,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // enablePing: sends heartbeats to detect dropped connections (critical for iOS)
     // enableReconnect: automatically reconnects when connections fail
     const [pool] = useState(() => new SimplePool({ enablePing: true, enableReconnect: true }));
+
+    // Initialize relay health monitoring on mount
+    useEffect(() => {
+        relayHealthMonitor.initialize(DEFAULT_RELAYS);
+        console.log('[Parlens] Relay health monitor initialized for:', DEFAULT_RELAYS);
+    }, []);
 
     const login = async (method: 'extension' | 'nsec' | 'bunker' | 'create', value?: string, username?: string) => {
         let key = '';

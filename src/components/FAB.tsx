@@ -6,6 +6,7 @@ import { encodeGeohash, getGeohashNeighbors } from '../lib/geo';
 import { encryptParkingLog } from '../lib/encryption';
 import { getCurrencyFromLocation, getCurrencySymbol, getLocalCurrency } from '../lib/currency';
 import { generateSecretKey, finalizeEvent } from 'nostr-tools/pure';
+import { relayHealthMonitor } from '../lib/relayHealth';
 
 interface FABProps {
     status: 'idle' | 'search' | 'parked';
@@ -268,6 +269,7 @@ export const FAB: React.FC<FABProps> = ({
                     else if (areaTimeFilter === 'year') areaSince = now - 31536000;
                     else if (areaTimeFilter === 'all') areaSince = 0;
 
+                    const batch1Start = Date.now();
                     const broadcastEvents = await pool.querySync(
                         DEFAULT_RELAYS,
                         {
@@ -276,6 +278,10 @@ export const FAB: React.FC<FABProps> = ({
                             since: areaSince
                         } as any
                     );
+                    const batch1Latency = Date.now() - batch1Start;
+
+                    // Record success for all healthy relays
+                    DEFAULT_RELAYS.forEach(relay => relayHealthMonitor.recordSuccess(relay, batch1Latency));
 
                     // Process broadcast events immediately
                     for (const event of broadcastEvents) {
@@ -285,14 +291,17 @@ export const FAB: React.FC<FABProps> = ({
                     if (spotsMapRef.current.size > 0) {
                         setOpenSpots(Array.from(spotsMapRef.current.values()));
                     }
-                    console.log('[Parlens] Batch 1 (Kind 31714) loaded:', broadcastEvents.length, 'events');
+                    console.log('[Parlens] Batch 1 (Kind 31714) loaded:', broadcastEvents.length, 'events in', batch1Latency, 'ms');
                 } catch (e) {
+                    // Record failure for all relays
+                    DEFAULT_RELAYS.forEach(relay => relayHealthMonitor.recordFailure(relay));
                     console.error('[Parlens] Batch 1 (Kind 31714) failed:', e);
                 }
 
                 // === BATCH 2: Listed Spot Logs (Kind 1714) + Orphan Validation ===
                 // Combined to ensure orphans never appear temporarily on the map
                 try {
+                    const batch2Start = Date.now();
                     const spotStatusEvents = await pool.querySync(
                         DEFAULT_RELAYS,
                         {
@@ -300,7 +309,9 @@ export const FAB: React.FC<FABProps> = ({
                             '#g': queryGeohashes,
                         } as any
                     );
-                    console.log('[Parlens] Batch 2 (Kind 1714) loaded:', spotStatusEvents.length, 'events');
+                    const batch2Latency = Date.now() - batch2Start;
+                    DEFAULT_RELAYS.forEach(relay => relayHealthMonitor.recordSuccess(relay, batch2Latency));
+                    console.log('[Parlens] Batch 2 (Kind 1714) loaded:', spotStatusEvents.length, 'events in', batch2Latency, 'ms');
 
                     // Process spot status events - only keep latest per spot (a-tag)
                     const latestBySpot = new Map<string, any>();
@@ -374,6 +385,7 @@ export const FAB: React.FC<FABProps> = ({
                     }
                     console.log('[Parlens] Batch 2 (Kind 1714 + orphan validation) completed');
                 } catch (e) {
+                    DEFAULT_RELAYS.forEach(relay => relayHealthMonitor.recordFailure(relay));
                     console.error('[Parlens] Batch 2 (Kind 1714 + orphan validation) failed:', e);
                 }
             };
