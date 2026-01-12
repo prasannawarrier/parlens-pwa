@@ -418,6 +418,8 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             // Phase A: Fetch listings where user is Author, Manager ('write'), or Member ('read')
             // This ensures "my stuff" (and shared stuff) always loads regardless of relay traffic
             if (pubkey) {
+                const phaseAStart = Date.now();
+
                 // Own listings
                 const myEventsPromise = pool.querySync(DEFAULT_RELAYS, {
                     kinds: [KINDS.LISTED_PARKING_METADATA],
@@ -432,12 +434,14 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                 });
 
                 const [myEvents, taggedEvents] = await Promise.all([myEventsPromise, taggedEventsPromise]);
+                const phaseALatency = Date.now() - phaseAStart;
+                DEFAULT_RELAYS.forEach(relay => relayHealthMonitor.recordSuccess(relay, phaseALatency));
 
                 // Merge and dedup Phase A
                 const phaseAMap = new Map();
                 [...myEvents, ...taggedEvents].forEach(e => phaseAMap.set(e.id, e));
                 rawEvents = Array.from(phaseAMap.values());
-                console.log('[Parlens] Phase A: Fetched', rawEvents.length, 'user/managed/member listings');
+                console.log('[Parlens] Phase A: Fetched', rawEvents.length, 'user/managed/member listings in', phaseALatency, 'ms');
             }
 
             // Phase B: Fetch Saved Listings (via a-tag references)
@@ -446,10 +450,13 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                 const savedRefs = JSON.parse(localStorage.getItem('parlens-saved-refs') || '[]') as string[];
                 if (savedRefs.length > 0) {
                     console.log('[Parlens] Phase B: Fetching', savedRefs.length, 'saved listing refs');
+                    const phaseBStart = Date.now();
                     const savedEvents = await pool.querySync(DEFAULT_RELAYS, {
                         kinds: [KINDS.LISTED_PARKING_METADATA],
                         '#a': savedRefs
                     });
+                    const phaseBLatency = Date.now() - phaseBStart;
+                    DEFAULT_RELAYS.forEach(relay => relayHealthMonitor.recordSuccess(relay, phaseBLatency));
 
                     // Merge saved events, avoiding duplicates
                     const existingIds = new Set(rawEvents.map((e: any) => e.id));
@@ -459,9 +466,10 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                             existingIds.add(e.id);
                         }
                     });
-                    console.log('[Parlens] Phase B: Merged', savedEvents.length, 'saved listings. Total:', rawEvents.length);
+                    console.log('[Parlens] Phase B: Merged', savedEvents.length, 'saved listings in', phaseBLatency, 'ms. Total:', rawEvents.length);
                 }
             } catch (e) {
+                DEFAULT_RELAYS.forEach(relay => relayHealthMonitor.recordFailure(relay));
                 console.warn('[Parlens] Phase B: Failed to fetch saved refs:', e);
             }
 
@@ -815,10 +823,13 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             return [clean, clean + ''];
         });
 
+        const spotStatusStart = Date.now();
         const statusEvents = await pool.querySync(DEFAULT_RELAYS, {
             kinds: [KINDS.LISTED_SPOT_LOG],
             '#a': spotATags,
         });
+        const spotStatusLatency = Date.now() - spotStatusStart;
+        DEFAULT_RELAYS.forEach(relay => relayHealthMonitor.recordSuccess(relay, spotStatusLatency));
 
         const latestStatus = new Map<string, any>();
         statusEvents.forEach((ev: any) => {
