@@ -2648,6 +2648,7 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
             tags: [
                 ['e', logId],
                 ['a', spotATag],
+                ['a', listingATag],
                 ['p', pubkey],
                 ['client', 'parlens']
             ],
