@@ -720,7 +720,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
         }
     }, [pool, searchCenter]); // Uses capturedLocationRef (ref) - no dependency needed
 
-    // Fetch spots for detailed view with Batching and Progressive Loading
+    // Fetch spots for detailed view - Using a-tag query (linked tree structure)
     const fetchSpots = useCallback(async (listing: ListedParkingMetadata) => {
         if (!pool) return;
 
@@ -729,71 +729,32 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
         setStatusLoading(true);
 
         try {
-            const totalSpots = listing.total_spots || 0;
-            const batchSize = 10;
+            // Build the parent listing a-tag for linked tree query
+            const listingATag = `${KINDS.LISTED_PARKING_METADATA}:${listing.pubkey}:${listing.d}`;
 
-            // Generate expected d-tags based on sequential numbering
-            // Priority: Lowest numbers first
-            const allDTags: string[] = [];
-            if (totalSpots > 0) {
-                for (let i = 1; i <= totalSpots; i++) {
-                    allDTags.push(`${listing.d}-spot-${i}`);
-                }
-            } else {
-                // Fallback: If no total_spots, trying to fetch via 'a' tag (legacy/backup)
-                // But for "large listings" optimization, we prefer the d-tag batching.
-                // We'll do one 'a' tag fetch if total_spots is missing.
-                const aTag = `${KINDS.LISTED_PARKING_METADATA}:${listing.pubkey}:${listing.d}`;
-                const spotFallbackStart = Date.now();
-                const events = await pool.querySync(DEFAULT_RELAYS, {
-                    kinds: [KINDS.PARKING_SPOT_LISTING],
-                    '#a': [aTag],
-                });
-                const spotFallbackLatency = Date.now() - spotFallbackStart;
-                DEFAULT_RELAYS.forEach(relay => relayHealthMonitor.recordSuccess(relay, spotFallbackLatency));
-                // ... (Parsing logic from before would go here, but let's standardize on this flow)
-                // For now, if total_spots is 0, we might assume 0 spots or unknown.
-                // Let's assume the user has migrated to the new counter system.
-                console.warn('[Parlens] Kind 37141 fallback fetch:', events.length, 'spots in', spotFallbackLatency, 'ms');
-                const parsed = parseSpotsFromEvents(events, listing);
-                setSpots(parsed);
-                fetchStatusesForSpots(parsed);
-                setStatusLoading(false);
-                return;
+            // Single query using a-tag - all spots linked to this listing
+            const spotQueryStart = Date.now();
+            const spotEvents = await pool.querySync(DEFAULT_RELAYS, {
+                kinds: [KINDS.PARKING_SPOT_LISTING],
+                '#a': [listingATag]
+            });
+            const spotQueryLatency = Date.now() - spotQueryStart;
+            DEFAULT_RELAYS.forEach(relay => relayHealthMonitor.recordSuccess(relay, spotQueryLatency));
+            console.log('[Parlens] Kind 37141 a-tag query:', spotEvents.length, 'spots in', spotQueryLatency, 'ms');
+
+            // Parse and set spots
+            const parsed = parseSpotsFromEvents(spotEvents, listing);
+            setSpots(parsed);
+
+            // Fetch statuses for all spots
+            if (parsed.length > 0) {
+                await fetchStatusesForSpots(parsed);
             }
 
-            // Batched Fetching
-            for (let i = 0; i < allDTags.length; i += batchSize) {
-                const batch = allDTags.slice(i, i + batchSize);
-                const batchNum = Math.floor(i / batchSize) + 1;
-
-                const batchStart = Date.now();
-                const events = await pool.querySync(DEFAULT_RELAYS, {
-                    kinds: [KINDS.PARKING_SPOT_LISTING],
-                    '#d': batch
-                });
-                const batchLatency = Date.now() - batchStart;
-                DEFAULT_RELAYS.forEach(relay => relayHealthMonitor.recordSuccess(relay, batchLatency));
-                console.log(`[Parlens] Kind 37141 batch ${batchNum}:`, events.length, 'spots in', batchLatency, 'ms');
-
-                if (events.length > 0) {
-                    const parsedBatch = parseSpotsFromEvents(events, listing);
-                    // Append to state immediately (Progressive Loading)
-                    setSpots(prev => {
-                        const next = [...prev, ...parsedBatch];
-                        // Deduplicate just in case
-                        const unique = new Map(next.map(s => [s.d, s]));
-                        return Array.from(unique.values()).sort((a, b) => parseInt(a.spot_number) - parseInt(b.spot_number));
-                    });
-
-                    // Fetch statuses for this batch immediately
-                    await fetchStatusesForSpots(parsedBatch);
-                }
-            }
-
-            console.log(`[Parlens] All batches complete for ${listing.listing_name}`);
+            console.log(`[Parlens] Spots loaded for ${listing.listing_name}:`, parsed.length);
 
         } catch (error) {
+            DEFAULT_RELAYS.forEach(relay => relayHealthMonitor.recordFailure(relay));
             console.error('Error fetching spots:', error);
         } finally {
             setStatusLoading(false);
