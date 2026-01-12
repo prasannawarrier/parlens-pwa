@@ -12,6 +12,7 @@ import { decryptParkingLog } from '../lib/encryption';
 import type { RouteLogContent } from '../lib/nostr';
 import { getCurrencyFromLocation } from '../lib/currency'; // Import currency utility
 import * as nip19 from 'nostr-tools/nip19';
+import { relayHealthMonitor } from '../lib/relayHealth';
 import { QRCodeSVG } from 'qrcode.react';
 
 // Types for Listed Parking
@@ -481,15 +482,18 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                 for (let i = 1; i <= 10; i++) {
                     geohashPrefixes.push(fullGeohash.substring(0, i));
                 }
-                console.log('[Parlens] Phase B: Using hierarchical geohash prefixes:', geohashPrefixes);
+                console.log('[Parlens] Phase C: Using hierarchical geohash prefixes:', geohashPrefixes);
 
                 // Query with all prefixes - listings with matching g-tags at ANY level will be found
+                const phaseCStart = Date.now();
                 publicEvents = await pool.querySync(DEFAULT_RELAYS, {
                     kinds: [KINDS.LISTED_PARKING_METADATA],
                     '#g': geohashPrefixes,
                     limit: 100
                 });
-                console.log('[Parlens] Phase B: Hierarchical query returned', publicEvents.length, 'events');
+                const phaseCLatency = Date.now() - phaseCStart;
+                DEFAULT_RELAYS.forEach(relay => relayHealthMonitor.recordSuccess(relay, phaseCLatency));
+                console.log('[Parlens] Phase C: Hierarchical query returned', publicEvents.length, 'events in', phaseCLatency, 'ms');
 
                 // Fallback to global if hierarchical query returns nothing
                 if (publicEvents.length === 0) {
@@ -612,10 +616,13 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                     if (listingATags.length === 0) continue;
 
                     // Fetch Kind 1714 status logs for all spots in these listings (via root tag)
+                    const statusQueryStart = Date.now();
                     const statusEvents = await pool.querySync(DEFAULT_RELAYS, {
                         kinds: [KINDS.LISTED_SPOT_LOG],
                         '#a': listingATags
                     });
+                    const statusQueryLatency = Date.now() - statusQueryStart;
+                    DEFAULT_RELAYS.forEach(relay => relayHealthMonitor.recordSuccess(relay, statusQueryLatency));
 
                     // Create map of latest status per spot (keyed by spot a-tag)
                     const latestStatusMap = new Map();
