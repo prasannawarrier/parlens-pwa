@@ -744,14 +744,17 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                 // But for "large listings" optimization, we prefer the d-tag batching.
                 // We'll do one 'a' tag fetch if total_spots is missing.
                 const aTag = `${KINDS.LISTED_PARKING_METADATA}:${listing.pubkey}:${listing.d}`;
+                const spotFallbackStart = Date.now();
                 const events = await pool.querySync(DEFAULT_RELAYS, {
                     kinds: [KINDS.PARKING_SPOT_LISTING],
                     '#a': [aTag],
                 });
+                const spotFallbackLatency = Date.now() - spotFallbackStart;
+                DEFAULT_RELAYS.forEach(relay => relayHealthMonitor.recordSuccess(relay, spotFallbackLatency));
                 // ... (Parsing logic from before would go here, but let's standardize on this flow)
                 // For now, if total_spots is 0, we might assume 0 spots or unknown.
                 // Let's assume the user has migrated to the new counter system.
-                console.warn('[Parlens] No total_spots found for batching. Falling back to single fetch.');
+                console.warn('[Parlens] Kind 37141 fallback fetch:', events.length, 'spots in', spotFallbackLatency, 'ms');
                 const parsed = parseSpotsFromEvents(events, listing);
                 setSpots(parsed);
                 fetchStatusesForSpots(parsed);
@@ -762,12 +765,16 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             // Batched Fetching
             for (let i = 0; i < allDTags.length; i += batchSize) {
                 const batch = allDTags.slice(i, i + batchSize);
-                // console.log(`[Parlens] Fetching batch ${i / batchSize + 1}:`, batch);
+                const batchNum = Math.floor(i / batchSize) + 1;
 
+                const batchStart = Date.now();
                 const events = await pool.querySync(DEFAULT_RELAYS, {
                     kinds: [KINDS.PARKING_SPOT_LISTING],
                     '#d': batch
                 });
+                const batchLatency = Date.now() - batchStart;
+                DEFAULT_RELAYS.forEach(relay => relayHealthMonitor.recordSuccess(relay, batchLatency));
+                console.log(`[Parlens] Kind 37141 batch ${batchNum}:`, events.length, 'spots in', batchLatency, 'ms');
 
                 if (events.length > 0) {
                     const parsedBatch = parseSpotsFromEvents(events, listing);
@@ -1140,7 +1147,11 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
         try {
             // Delete spots
             const aTag = `${KINDS.LISTED_PARKING_METADATA}:${listing.pubkey}:${listing.d}`;
+            const deleteQueryStart = Date.now();
             const spotEvents = await pool.querySync(DEFAULT_RELAYS, { kinds: [KINDS.PARKING_SPOT_LISTING], '#a': [aTag] });
+            const deleteQueryLatency = Date.now() - deleteQueryStart;
+            DEFAULT_RELAYS.forEach(relay => relayHealthMonitor.recordSuccess(relay, deleteQueryLatency));
+            console.log('[Parlens] Kind 37141 delete query:', spotEvents.length, 'spots in', deleteQueryLatency, 'ms');
 
             for (const spot of spotEvents) {
                 const dTag = spot.tags.find((t: string[]) => t[0] === 'd')?.[1];
@@ -1825,10 +1836,14 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                                     try {
                                                                         // Fetch all spots for this listing
                                                                         const aTag = `${KINDS.LISTED_PARKING_METADATA}:${listing.pubkey}:${listing.d}`;
+                                                                        const toggleQueryStart = Date.now();
                                                                         const spotEvents = await pool.querySync(DEFAULT_RELAYS, {
                                                                             kinds: [KINDS.PARKING_SPOT_LISTING],
                                                                             '#a': [aTag]
                                                                         });
+                                                                        const toggleQueryLatency = Date.now() - toggleQueryStart;
+                                                                        DEFAULT_RELAYS.forEach(relay => relayHealthMonitor.recordSuccess(relay, toggleQueryLatency));
+                                                                        console.log('[Parlens] Kind 37141 toggle query:', spotEvents.length, 'spots in', toggleQueryLatency, 'ms');
 
                                                                         // Calculate new Snapshot Stats immediately
                                                                         const snapshotStats = {
