@@ -502,7 +502,7 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
             autoCreatePendingRef.current = false;
             createRoute();
         }
-    }, [waypoints.length]);
+    }, [waypoints]);
 
     // Save current route
     const saveRoute = async () => {

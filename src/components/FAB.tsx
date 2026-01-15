@@ -244,7 +244,8 @@ export const FAB: React.FC<FABProps> = ({
                             created_at: event.created_at,
                             listing_name: listingName,
                             listing_id: listingId,
-                            listing_a_tag: listingATag
+                            listing_a_tag: listingATag,
+                            tags: event.tags
                         };
                         spotsMapRef.current.set(uniqueKey, spot);
 
@@ -266,7 +267,8 @@ export const FAB: React.FC<FABProps> = ({
                             type: spotType,
                             count: 1,
                             kind: event.kind,
-                            created_at: event.created_at
+                            created_at: event.created_at,
+                            tags: event.tags
                         };
                         spotsMapRef.current.set(event.id, spot);
                     }
@@ -647,12 +649,12 @@ export const FAB: React.FC<FABProps> = ({
     };
 
     return (
-        <div className="relative flex flex-col items-end gap-4">
+        <div className="relative flex flex-col items-end gap-4 pointer-events-none">
             <div className="flex items-center gap-4">
                 {status === 'search' && (
                     <button
                         onClick={() => setStatus('idle')}
-                        className="h-14 px-8 rounded-full bg-red-500/90 text-white font-bold text-xs tracking-widest shadow-2xl backdrop-blur-md animate-in slide-in-from-left-8"
+                        className="h-14 px-8 rounded-full bg-red-500/90 text-white font-bold text-xs tracking-widest shadow-2xl backdrop-blur-md animate-in slide-in-from-left-8 pointer-events-auto"
                     >
                         CANCEL
                     </button>
@@ -668,7 +670,7 @@ export const FAB: React.FC<FABProps> = ({
 
                 <button
                     onClick={handleClick}
-                    className={`h-20 w-20 flex items-center justify-center rounded-[2.5rem] shadow-2xl transition-all active:scale-90 ${status === 'idle' ? 'bg-[#007AFF] text-white shadow-blue-500/20' :
+                    className={`h-20 w-20 flex items-center justify-center rounded-[2.5rem] shadow-2xl transition-all active:scale-90 pointer-events-auto ${status === 'idle' ? 'bg-[#007AFF] text-white shadow-blue-500/20' :
                         status === 'search' ? 'bg-[#FF9500] text-white shadow-orange-500/20' :
                             'bg-[#34C759] text-white shadow-green-500/20'
                         }`}
@@ -684,7 +686,7 @@ export const FAB: React.FC<FABProps> = ({
             </div>
 
             {showCostPopup && (
-                <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/60 backdrop-blur-xl animate-in fade-in duration-300 p-4">
+                <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/60 backdrop-blur-xl animate-in fade-in duration-300 p-4 pointer-events-auto">
                     <div className="w-full max-w-sm bg-white dark:bg-[#1c1c1e] rounded-[2rem] shadow-2xl p-6 flex flex-col items-center space-y-5 animate-in zoom-in-95 border border-black/5 dark:border-white/10 transition-colors">
                         <div className="text-center space-y-1">
                             <h3 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-white">End Session</h3>
