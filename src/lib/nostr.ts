@@ -8,7 +8,11 @@ export const KINDS = {
     PARKING_SPOT_LISTING: 37141, // Parking Spot Listing (Child - Addressable)
     LISTED_SPOT_LOG: 1714, // Listed Spot Log Update (Status - Regular)
     PRIVATE_LOG_NOTE: 1417, // Private Log Status Note (Encrypted - Regular)
+    LABEL: 1985, // NIP-32 Label for approvals
 };
+
+// Approver pubkey for public listing approval workflow
+export const APPROVER_PUBKEY = 'f8ecf5df652f567970ec6d00538cc15c4cec9d0c88760cd8b4c86acd43542e5a';
 
 export const DEFAULT_RELAYS = [
     'wss://relay.primal.net',

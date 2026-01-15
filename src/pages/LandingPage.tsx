@@ -4,7 +4,7 @@
  */
 import React, { useState, useEffect, useRef, useCallback, memo, useMemo } from 'react';
 import { MapPin, Locate, X, ChevronDown, Check, Trash, Pencil, QrCode, ArrowUp, ArrowRight, ArrowLeft, ChevronUp, ScanLine, Route } from 'lucide-react';
-import Map, { Marker, Source, Layer, type MapRef } from 'react-map-gl/maplibre';
+import MapGL, { Marker, Source, Layer, type MapRef } from 'react-map-gl/maplibre';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { FAB } from '../components/FAB';
@@ -38,7 +38,10 @@ const SpotMarkerContent = memo(({ price, emoji, currency, isHistory = false, var
     // Determine styling based on variant (if provided) or isHistory fallback
     const effectiveVariant = variant || (isHistory ? 'history' : 'default');
 
-    // Grey P for area markers (using CSS filter)
+    // Check if this is a no parking marker
+    const isNoParking = emoji === '🚫';
+
+    // Grey P for area markers (using CSS filter) - but NOT for no parking emoji
     const isArea = effectiveVariant === 'area';
     const isHistoryVariant = effectiveVariant === 'history';
 
@@ -51,17 +54,20 @@ const SpotMarkerContent = memo(({ price, emoji, currency, isHistory = false, var
 
     return (
         <div className="flex flex-col items-center justify-center transition-transform active:scale-95 pointer-events-none group">
-            <div className={`text-[32px] leading-none drop-shadow-md z-10 pointer-events-auto cursor-pointer ${isArea ? 'grayscale' : ''}`}>
+            <div className={`text-[32px] leading-none drop-shadow-md z-10 pointer-events-auto cursor-pointer ${isArea && !isNoParking ? 'grayscale' : ''}`}>
                 {emoji}
             </div>
-            <div
-                className={`
-                    px-2 py-0.5 rounded-full text-[11px] font-bold shadow-md border-[1.5px] -mt-1.5 z-0 whitespace-nowrap pointer-events-auto
-                    ${pillClasses}
-                `}
-            >
-                {symbol}{Math.round(price)}/hr
-            </div>
+            {/* Hide rate pill for no parking markers */}
+            {!isNoParking && (
+                <div
+                    className={`
+                        px-2 py-0.5 rounded-full text-[11px] font-bold shadow-md border-[1.5px] -mt-1.5 z-0 whitespace-nowrap pointer-events-auto
+                        ${pillClasses}
+                    `}
+                >
+                    {symbol}{Math.round(Number(price) || 0)}/hr
+                </div>
+            )}
         </div>
     );
 });
@@ -152,8 +158,8 @@ UserLocationMarker.displayName = 'UserLocationMarker';
 
 
 // Cluster Marker Component
-const ClusterMarkerContent = memo(({ minPrice, maxPrice, currency, type }: {
-    minPrice: number; maxPrice: number; currency: string; type: 'open' | 'history' | 'area'
+const ClusterMarkerContent = memo(({ minPrice, maxPrice, currency, type, count }: {
+    minPrice: number; maxPrice: number; currency: string; type: 'open' | 'history' | 'area'; count?: number
 }) => {
     const emoji = type === 'area' ? '🅿️' : type === 'open' ? '🅿️' : '🅟';
     const isArea = type === 'area';
@@ -172,6 +178,12 @@ const ClusterMarkerContent = memo(({ minPrice, maxPrice, currency, type }: {
         <div className="flex flex-col items-center justify-center transition-transform active:scale-95 pointer-events-none group">
             <div className={`relative text-[32px] leading-none drop-shadow-md z-10 pointer-events-auto cursor-pointer ${isArea ? 'grayscale' : ''}`}>
                 {emoji}
+                {/* Cluster count badge */}
+                {count && count > 1 && (
+                    <div className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-blue-500 text-white text-[10px] font-bold border-2 border-white shadow-sm">
+                        {count > 99 ? '99+' : count}
+                    </div>
+                )}
             </div>
             <div
                 className={`
@@ -187,14 +199,58 @@ const ClusterMarkerContent = memo(({ minPrice, maxPrice, currency, type }: {
 ClusterMarkerContent.displayName = 'ClusterMarkerContent';
 
 // Marker Popup Component for both Area and Listed markers
-const MarkerPopup = memo(({ type, items, onClose, isPinned, onTogglePin, onCreateRoute }: {
-    type: 'area' | 'listed';
+const MarkerPopup = memo(({ type, items, onClose, isPinned, onTogglePin, onCreateRoute, onFlagNoParking, isFlaggedByUser, noParkingFlagCount, isFlagging }: {
+    type: 'area' | 'listed' | 'history';
     items: any[];
     onClose: () => void;
     isPinned?: boolean;
     onTogglePin?: () => void;
     onCreateRoute?: () => void;
+    onFlagNoParking?: () => void;
+    isFlaggedByUser?: boolean;
+    noParkingFlagCount?: number;
+    isFlagging?: boolean;
 }) => {
+    // Common container classes for consistent width
+    const containerClasses = "bg-white dark:bg-zinc-800 rounded-xl shadow-xl border border-black/10 dark:border-white/10 p-3 w-[300px] animate-in zoom-in-95 fade-in duration-150 pointer-events-auto relative";
+
+    // Close button
+    const CloseButton = () => (
+        <button onClick={onClose} className="absolute top-2 right-2 p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 z-10 bg-white/50 dark:bg-black/20 rounded-full">
+            <X size={14} />
+        </button>
+    );
+
+    if (type === 'history') {
+        // History Stats - sum timesParked from deduplicated spots
+        const count = items.reduce((sum, i) => sum + (i.timesParked || 1), 0);
+        // Group by vehicle type if needed, or just show total
+
+        return (
+            <div className={containerClasses} onClick={e => e.stopPropagation()}>
+                <CloseButton />
+                <div className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
+                    Parking History
+                </div>
+
+                <div className="space-y-1.5 text-xs">
+                    <div className="flex justify-between gap-4">
+                        <span className="text-zinc-500">Times Parked:</span>
+                        <span className="font-semibold text-zinc-900 dark:text-white">{count}</span>
+                    </div>
+                </div>
+                {onCreateRoute && (
+                    <button
+                        onClick={onCreateRoute}
+                        className="mt-3 w-full py-1.5 rounded-lg text-xs font-medium bg-blue-500/10 text-blue-600 hover:bg-blue-500/20 transition-colors"
+                    >
+                        Create Route
+                    </button>
+                )}
+            </div>
+        );
+    }
+
     if (type === 'area') {
         // Parking Area Stats
         const reportCount = items.length;
@@ -210,10 +266,8 @@ const MarkerPopup = memo(({ type, items, onClose, isPinned, onTogglePin, onCreat
         };
 
         return (
-            <div className="bg-white dark:bg-zinc-800 rounded-xl shadow-xl border border-black/10 dark:border-white/10 p-3 min-w-[180px] animate-in zoom-in-95 fade-in duration-150" onClick={e => e.stopPropagation()}>
-                <button onClick={onClose} className="absolute top-1 right-1 p-1 text-zinc-400 hover:text-zinc-600">
-                    <X size={14} />
-                </button>
+            <div className={containerClasses} onClick={e => e.stopPropagation()}>
+                <CloseButton />
                 <div className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
                     Parking Area
                 </div>
@@ -228,13 +282,37 @@ const MarkerPopup = memo(({ type, items, onClose, isPinned, onTogglePin, onCreat
                             <span className="font-semibold text-zinc-900 dark:text-white">{formatTimeline()}</span>
                         </div>
                     )}
+                    {noParkingFlagCount !== undefined && (
+                        <div className="flex justify-between gap-4">
+                            <span className="text-zinc-500">Flagged No Parking:</span>
+                            <span className={`font-semibold ${noParkingFlagCount > 0 ? 'text-red-600' : 'text-zinc-400'}`}>{noParkingFlagCount}</span>
+                        </div>
+                    )}
                 </div>
+                {onFlagNoParking && (
+                    <button
+                        onClick={onFlagNoParking}
+                        disabled={isFlagging}
+                        className={`mt-3 w-full py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center justify-center gap-2 ${isFlaggedByUser
+                            ? 'bg-zinc-500/10 text-zinc-600 hover:bg-zinc-500/20 dark:text-zinc-400'
+                            : 'bg-red-500/10 text-red-600 hover:bg-red-500/20'
+                            } ${isFlagging ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                        {isFlagging && (
+                            <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                            </svg>
+                        )}
+                        {isFlagging ? 'Updating...' : (isFlaggedByUser ? 'Remove No Parking Flag' : 'Flag No Parking')}
+                    </button>
+                )}
                 {onTogglePin && (
                     <button
                         onClick={onTogglePin}
-                        className={`mt-3 w-full py-1.5 rounded-lg text-xs font-medium transition-colors ${isPinned
+                        className={`mt-2 w-full py-1.5 rounded-lg text-xs font-medium transition-colors ${isPinned
                             ? 'bg-zinc-500/10 text-zinc-600 hover:bg-zinc-500/20 dark:text-zinc-400'
-                            : 'bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20'
+                            : 'bg-amber-500/10 text-amber-600 hover:bg-amber-500/20'
                             }`}
                     >
                         {isPinned ? 'Remove from Map' : 'Keep on Map'}
@@ -254,10 +332,8 @@ const MarkerPopup = memo(({ type, items, onClose, isPinned, onTogglePin, onCreat
 
     // Listed Parking - show each listing as a row
     return (
-        <div className="bg-white dark:bg-zinc-800 rounded-xl shadow-xl border border-black/10 dark:border-white/10 p-3 min-w-[200px] max-w-[280px] animate-in zoom-in-95 fade-in duration-150" onClick={e => e.stopPropagation()}>
-            <button onClick={onClose} className="absolute top-1 right-1 p-1 text-zinc-400 hover:text-zinc-600">
-                <X size={14} />
-            </button>
+        <div className={containerClasses} onClick={e => e.stopPropagation()}>
+            <CloseButton />
             <div className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">Listed Parking</div>
             <div className="space-y-2 max-h-[200px] overflow-y-auto">
                 {items.map((item, idx) => (
@@ -428,11 +504,97 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
 
     // State for Marker Popup Bubbles
     const [selectedMarkerPopup, setSelectedMarkerPopup] = useState<{
-        type: 'area' | 'listed';
+        type: 'area' | 'listed' | 'history';
         lat: number;
         lon: number;
         items: any[];
+        id?: string;
     } | null>(null);
+
+    // State for No Parking Flags (geohash -> user's flag event id)
+    const [userNoParkingFlags, setUserNoParkingFlags] = useState<Map<string, string>>(() => new Map());
+    // Count of no-parking flags per geohash (aggregated from all users)
+    const [noParkingFlagCounts, setNoParkingFlagCounts] = useState<Map<string, number>>(() => new Map());
+    // Loading state for no-parking flag operation
+    const [isFlaggingNoParking, setIsFlaggingNoParking] = useState(false);
+
+    // Fetch user's no-parking flags on mount
+    useEffect(() => {
+        if (!pool || !pubkey) return;
+
+        const fetchUserFlags = async () => {
+            try {
+                // Fetch Kind 31714 events from this user (filter for no-parking-flag tag client-side)
+                // We query all 31714 from user and filter, since relays may not index custom tags
+                const allUserAreaEvents = await pool.querySync(DEFAULT_RELAYS, {
+                    kinds: [KINDS.PARKING_AREA_INDICATOR],
+                    authors: [pubkey]
+                } as any);
+
+                const userFlags = new Map<string, string>();
+                for (const event of allUserAreaEvents) {
+                    // Check if this event has no-parking-flag tag
+                    const hasNoParkingFlag = event.tags.some((t: string[]) => t[0] === 'no-parking-flag' && t[1] === 'true');
+                    if (!hasNoParkingFlag) continue;
+
+                    const geohash = event.tags.find((t: string[]) => t[0] === 'g')?.[1];
+                    if (geohash) {
+                        const existing = userFlags.get(geohash);
+                        // Keep most recent by created_at
+                        const existingEvent = allUserAreaEvents.find((e: any) => e.id === existing);
+                        if (!existing || event.created_at > (existingEvent?.created_at || 0)) {
+                            userFlags.set(geohash, event.id);
+                        }
+                    }
+                }
+
+                if (userFlags.size > 0) {
+                    setUserNoParkingFlags(userFlags);
+                    console.log('[Parlens] Loaded', userFlags.size, 'user no-parking flags from relays');
+                }
+            } catch (e) {
+                console.error('[Parlens] Failed to fetch user no-parking flags:', e);
+            }
+        };
+
+        fetchUserFlags();
+    }, [pool, pubkey]);
+
+    // Aggregate no-parking flags from all loaded area spots (cross-user visibility)
+    // [x] Implement Historic Parking Popup
+    //     - [x] Add "Parking History" popup with stats
+    //     - [x] Create Route option in history popup
+    //     - [x] Standardize popup widths
+    // [x] Fix UI consistency
+    //     - [x] Standardize Popup widths
+    // [x] Aggregation of "No Parking" flag counts from all users
+    useEffect(() => {
+        // Only run if we have spots to process
+        if (openSpots.length === 0) return;
+
+        const counts = new Map<string, number>();
+        let hasFlags = false;
+
+        openSpots.forEach((spot: any) => {
+            // Only count Kind 31714 with flag
+            if (spot.kind === KINDS.PARKING_AREA_INDICATOR) {
+                const isFlagged = spot.tags?.some((t: string[]) => t[0] === 'no-parking-flag' && t[1] === 'true');
+                if (isFlagged) {
+                    const geohash = spot.tags.find((t: string[]) => t[0] === 'g')?.[1];
+                    if (geohash) {
+                        counts.set(geohash, (counts.get(geohash) || 0) + 1);
+                        hasFlags = true;
+                    }
+                }
+            }
+        });
+
+        // Only update if we found flags or if we need to clear (implied by openSpots changing)
+        if (hasFlags || noParkingFlagCounts.size > 0) {
+            setNoParkingFlagCounts(counts);
+            if (hasFlags) console.log('[Parlens] Aggregated no-parking flags from', counts.size, 'areas');
+        }
+    }, [openSpots]);
 
     // Handle scanned code passed from QRScanPage via App.tsx
     useEffect(() => {
@@ -483,6 +645,28 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
         }
         return matches.slice(0, 3); // Limit to 3 results
     }, [parkingSearchQuery, cachedRoutes]);
+
+    // Search listing names from openSpots (Locality-like search)
+    const listingNameMatches = useMemo(() => {
+        if (!parkingSearchQuery || parkingSearchQuery.length < 2) return [];
+        const query = parkingSearchQuery.toLowerCase();
+        const matchesMap = new Map<string, { name: string; lat: number; lon: number }>();
+
+        for (const spot of openSpots) {
+            const listingName = spot.listing_name;
+            if (listingName && listingName.toLowerCase().includes(query)) {
+                // Avoid duplicates by listing name
+                if (!matchesMap.has(listingName.toLowerCase())) {
+                    matchesMap.set(listingName.toLowerCase(), {
+                        name: listingName,
+                        lat: spot.lat,
+                        lon: spot.lon
+                    });
+                }
+            }
+        }
+        return Array.from(matchesMap.values()).slice(0, 3); // Limit to 3 results
+    }, [parkingSearchQuery, openSpots]);
 
     // State for Pinned Markers (Keep on Map feature)
     const [pinnedMarkers, setPinnedMarkers] = useState<any[]>(() => {
@@ -569,7 +753,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             const spotParts = authData.a.split(':');
             const spotD = spotParts[2] || '';
             const listingD = spotD.replace(/-spot-\d+$/, '');
-            const listingATag = `${KINDS.LISTED_PARKING_METADATA}:${spotParts[1]}:${listingD}`;
+            const listingATag = `${KINDS.LISTED_PARKING_METADATA}:${spotParts[1]}:${listingD} `;
             // Start Session Logic (unchanged)
             const tags = [
                 ['a', authData.a],
@@ -585,7 +769,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             // Use listingLocation from authData or session, or current location as fallback if starting
             const loc = authData.listingLocation || null;
             if (loc) {
-                tags.push(['location', `${loc[0]},${loc[1]}`]);
+                tags.push(['location', `${loc[0]},${loc[1]} `]);
                 try {
                     const g = Geohash.encode(loc[0], loc[1], 5); // 5-char for search compatibility
                     tags.push(['g', g]);
@@ -615,7 +799,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             console.log('[Parlens] Status update published:', signedStatus.id);
 
             // Start parking session - create Kind 31417 with 'parked' status
-            const dTag = `parking-${Date.now()}`;
+            const dTag = `parking - ${Date.now()} `;
             const listingLocation = authData.listingLocation || location;
 
             // Encrypted content with all listing refs
@@ -691,7 +875,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             const spotParts = authData.a.split(':');
             const spotD = spotParts[2] || '';
             const listingD = spotD.replace(/-spot-\d+$/, '');
-            const listingATag = `${KINDS.LISTED_PARKING_METADATA}:${spotParts[1]}:${listingD}`;
+            const listingATag = `${KINDS.LISTED_PARKING_METADATA}:${spotParts[1]}:${listingD} `;
             const tags = [
                 ['a', authData.a],
                 ['a', listingATag, '', 'root'],
@@ -704,7 +888,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
 
             const loc = authData.listingLocation || session.listingLocation;
             if (loc) {
-                tags.push(['location', `${loc[0]},${loc[1]}`]);
+                tags.push(['location', `${loc[0]},${loc[1]} `]);
                 try {
                     const g = Geohash.encode(loc[0], loc[1], 5); // 5-char for search compatibility
                     tags.push(['g', g]);
@@ -751,7 +935,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                 kind: KINDS.PARKING_LOG,
                 created_at: Math.floor(Date.now() / 1000),
                 tags: [
-                    ['d', session.dTag || `parking-${Date.now()}`],
+                    ['d', session.dTag || `parking - ${Date.now()} `],
                     ['status', 'idle'],
                     ['client', 'parlens']
                 ],
@@ -1442,6 +1626,84 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
         localStorage.setItem('parlens_vehicle_type', type);
     };
 
+    // Handle No Parking Flag toggle for parking area markers
+    const handleNoParkingFlag = useCallback(async (items: any[], isFlagged: boolean) => {
+        if (!pool || !signEvent || !pubkey) {
+            alert('Please sign in to flag parking areas.');
+            return;
+        }
+
+        const firstItem = items[0];
+        if (!firstItem) return;
+
+        const lat = firstItem.lat;
+        const lon = firstItem.lon;
+        const geohash = Geohash.encode(lat, lon, 7); // 7-char for precision
+
+        setIsFlaggingNoParking(true);
+        try {
+            if (isFlagged) {
+                // Remove flag - publish delete event (Kind 5)
+                const existingEventId = userNoParkingFlags.get(geohash);
+                if (existingEventId) {
+                    const deleteEvent = {
+                        kind: 5,
+                        created_at: Math.floor(Date.now() / 1000),
+                        tags: [['e', existingEventId]],
+                        content: 'Removing no-parking flag'
+                    };
+                    const signedDelete = await signEvent(deleteEvent);
+                    await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedDelete));
+
+                    // Update local state (marker display only - stats from relay)
+                    setUserNoParkingFlags(prev => {
+                        const newMap = new Map(prev);
+                        newMap.delete(geohash);
+                        return newMap;
+                    });
+
+                    // Remove flag from openSpots so aggregation updates count
+                    setOpenSpots(prev => prev.filter(s => s.id !== existingEventId));
+
+                    console.log('[Parlens] No-parking flag removed for:', geohash);
+                }
+            } else {
+                // Add flag - publish Kind 31714 with no-parking-flag tag
+                const flagEvent = {
+                    kind: KINDS.PARKING_AREA_INDICATOR,
+                    created_at: Math.floor(Date.now() / 1000),
+                    tags: [
+                        ['d', geohash],
+                        ['g', geohash],
+                        ['location', `${lat},${lon}`],
+                        ['no-parking-flag', 'true'],
+                        ['client', 'parlens']
+                    ],
+                    content: ''
+                };
+                const signedFlag = await signEvent(flagEvent);
+                await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedFlag));
+
+                // Update local state (marker display only - stats from relay)
+                setUserNoParkingFlags(prev => {
+                    const newMap = new Map(prev);
+                    newMap.set(geohash, signedFlag.id);
+                    return newMap;
+                });
+
+                // Add flag event to openSpots so aggregation picks it up immediately
+                setOpenSpots(prev => [...prev, signedFlag]);
+
+                console.log('[Parlens] No-parking flag added for:', geohash);
+            }
+        } catch (e) {
+            console.error('[Parlens] Failed to toggle no-parking flag:', e);
+            alert('Failed to update no-parking flag. Please try again.');
+        } finally {
+            setIsFlaggingNoParking(false);
+        }
+    }, [pool, signEvent, pubkey, userNoParkingFlags, setOpenSpots]);
+
     // Handle route changes from RouteButton
     const handleRouteChange = useCallback((
         main: [number, number][] | null,
@@ -1492,21 +1754,45 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             const type = spot.decryptedContent?.type || 'car';
             return type === vehicleType;
         });
-        return filtered.map(s => {
+
+        // Group by unique location (lat,lon rounded to 6 decimals)
+        const locationMap = new Map<string, any>();
+        for (const s of filtered) {
             const content = s.decryptedContent;
-            return content && content.lat && content.lon ? {
-                id: s.id,
-                lat: content.lat,
-                lon: content.lon,
-                price: parseFloat(content.fee) || 0,
-                currency: content.currency || 'USD',
-                original: s
-            } : null;
-        }).filter(Boolean) as any[];
+            if (!content || !content.lat || !content.lon) continue;
+
+            const lat = parseFloat(content.lat.toFixed(6));
+            const lon = parseFloat(content.lon.toFixed(6));
+            const key = `${lat},${lon}`;
+
+            if (locationMap.has(key)) {
+                const existing = locationMap.get(key);
+                existing.timesParked += 1;
+                existing.logs.push(s);
+                // Keep most recent timestamp
+                if (s.created_at > existing.created_at) {
+                    existing.created_at = s.created_at;
+                }
+            } else {
+                locationMap.set(key, {
+                    id: s.id,
+                    lat,
+                    lon,
+                    price: parseFloat(content.fee) || 0,
+                    currency: content.currency || 'USD',
+                    original: s,
+                    timesParked: 1,
+                    logs: [s],
+                    created_at: s.created_at
+                });
+            }
+        }
+
+        return Array.from(locationMap.values());
     }, [historySpots, vehicleType]);
 
     const clusteredHistorySpots = useMemo(() =>
-        clusterSpots(processedHistorySpots, zoomLevel)
+        clusterSpots(processedHistorySpots, zoomLevel, true, 7)
         , [processedHistorySpots, zoomLevel]);
 
     // Separate Listed Parking (Kind 1714) from Parking Area Reports (Kind 31714)
@@ -1521,8 +1807,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                     id: p.id || `pinned-${p.lat}-${p.lon}`,
                     lat: p.lat,
                     lon: p.lon,
-                    price: source.price,
-                    currency: source.currency,
+                    price: source.price ?? 0,
+                    currency: source.currency || 'INR',
                     count: source.count,
                     kind: KINDS.LISTED_SPOT_LOG,
                     listing_name: source.listing_name || p.listing_name,
@@ -1542,8 +1828,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                 id: s.id,
                 lat: s.lat,
                 lon: s.lon,
-                price: s.price,
-                currency: s.currency,
+                price: s.price ?? 0,
+                currency: s.currency || 'INR',
                 count: s.count,
                 kind: s.kind,
                 listing_name: s.listing_name,
@@ -1605,14 +1891,38 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
         , [listedSpots, zoomLevel]);
 
     // Parking Area Reports: Clustered at 7-digit geohash level (capped)
+    // Parking Area Reports: Clustered at 7-digit geohash level (capped)
+    // Separate No Parking markers from regular Parking Area markers to prevent clustering them together
+    const { regularAreaSpots, noParkingSpots } = useMemo(() => {
+        const regular: typeof areaSpots = [];
+        const noParking: typeof areaSpots = [];
+
+        for (const s of areaSpots) {
+            const geohash = Geohash.encode(s.lat, s.lon, 7);
+            const isNoParking = userNoParkingFlags.has(geohash) || (noParkingFlagCounts.get(geohash) || 0) > 0;
+            if (isNoParking) {
+                noParking.push(s);
+            } else {
+                regular.push(s);
+            }
+        }
+        return { regularAreaSpots: regular, noParkingSpots: noParking };
+    }, [areaSpots, userNoParkingFlags, noParkingFlagCounts]);
+
     const clusteredAreaSpots = useMemo(() =>
-        clusterSpots(areaSpots, zoomLevel, true, 7) // Use maxPrecision 7
-        , [areaSpots, zoomLevel]);
+        clusterSpots(regularAreaSpots, zoomLevel, true, 7) // Use maxPrecision 7
+        , [regularAreaSpots, zoomLevel]);
+
+    const clusteredNoParkingSpots = useMemo(() =>
+        clusterSpots(noParkingSpots, zoomLevel, true, 7)
+        , [noParkingSpots, zoomLevel]);
 
     const activePopupItems = useMemo(() => {
         if (!selectedMarkerPopup) return [];
 
-        const sourceList = selectedMarkerPopup.type === 'listed' ? clusteredListedSpots : clusteredAreaSpots;
+        const sourceList = selectedMarkerPopup.type === 'listed'
+            ? clusteredListedSpots
+            : [...clusteredAreaSpots, ...clusteredNoParkingSpots];
 
         const targetId = selectedMarkerPopup.items[0]?.id;
         if (!targetId) return selectedMarkerPopup.items;
@@ -1624,7 +1934,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             }
         }
         return selectedMarkerPopup.items;
-    }, [selectedMarkerPopup, clusteredListedSpots, clusteredAreaSpots]);
+    }, [selectedMarkerPopup, clusteredListedSpots, clusteredAreaSpots, clusteredNoParkingSpots]);
 
     // Close popup when search ends
     useEffect(() => {
@@ -1754,7 +2064,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             >
 
 
-                <Map
+                <MapGL
                     ref={mapRef}
                     {...viewState}
                     onStyleData={(e) => {
@@ -1952,6 +2262,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                         maxPrice={item.maxPrice}
                                         currency={item.currency}
                                         type="open"
+                                        count={(item as any).spots?.length}
                                     />
                                 ) : (
                                     <SpotMarkerContent
@@ -2002,12 +2313,64 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                         maxPrice={item.maxPrice}
                                         currency={item.currency}
                                         type="area"
+                                        count={(item as any).spots?.length}
                                     />
                                 ) : (
                                     <SpotMarkerContent
                                         price={item.price}
                                         currency={item.currency}
                                         emoji="🅿️"
+                                        variant="area"
+                                    />
+                                )}
+                            </Marker>
+                        );
+                    })}
+
+                    {/* No Parking Reports (Kind 31714 with flags) - No Parking Emoji */}
+                    {clusteredNoParkingSpots.map((item: any) => {
+                        const isClusterItem = isCluster(item);
+                        return (
+                            <Marker
+                                key={`noparking-${item.id}`}
+                                longitude={item.lon}
+                                latitude={item.lat}
+                                anchor="center"
+                                style={{ willChange: 'transform' }}
+                                onClick={(e) => {
+                                    e.originalEvent.stopPropagation();
+                                    if (isClusterItem) {
+                                        // For clusters, show popup with all items
+                                        setSelectedMarkerPopup({
+                                            type: 'area',
+                                            lat: item.lat,
+                                            lon: item.lon,
+                                            items: (item as any).spots || [item]
+                                        });
+                                    } else {
+                                        // For single markers, show popup with single item
+                                        setSelectedMarkerPopup({
+                                            type: 'area',
+                                            lat: item.lat,
+                                            lon: item.lon,
+                                            items: [item]
+                                        });
+                                    }
+                                }}
+                            >
+                                {isClusterItem ? (
+                                    <ClusterMarkerContent
+                                        minPrice={item.minPrice}
+                                        maxPrice={item.maxPrice}
+                                        currency={item.currency}
+                                        type="area"
+                                        count={(item as any).spots?.length}
+                                    />
+                                ) : (
+                                    <SpotMarkerContent
+                                        price={item.price}
+                                        currency={item.currency}
+                                        emoji="🚫"
                                         variant="area"
                                     />
                                 )}
@@ -2227,7 +2590,28 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                 onClick={(e) => {
                                     e.originalEvent.stopPropagation();
                                     if (isClusterItem) {
-                                        mapRef.current?.flyTo({ center: [item.lon, item.lat], zoom: viewState.zoom + 2 });
+                                        if (viewState.zoom < 18) {
+                                            mapRef.current?.flyTo({ center: [item.lon, item.lat], zoom: viewState.zoom + 2 });
+                                        } else {
+                                            // Max zoom cluster - show popup with count
+                                            const count = (item as any).point_count || 1;
+                                            setSelectedMarkerPopup({
+                                                lat: item.lat,
+                                                lon: item.lon,
+                                                type: 'history',
+                                                id: item.id,
+                                                items: new Array(count).fill({ created_at: 0 })
+                                            });
+                                        }
+                                    } else {
+                                        // Single item
+                                        setSelectedMarkerPopup({
+                                            lat: item.lat,
+                                            lon: item.lon,
+                                            type: 'history',
+                                            id: item.id,
+                                            items: [item]
+                                        });
                                     }
                                 }}
                             >
@@ -2237,6 +2621,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                         maxPrice={item.maxPrice}
                                         currency={item.currency}
                                         type="history"
+                                        count={(item as any).spots?.length}
                                     />
                                 ) : (
                                     <SpotMarkerContent
@@ -2392,9 +2777,34 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                         waypoints.push({ lat: markerLat, lon: markerLon, name: 'Destination' });
 
                                         setPendingWaypoints(waypoints);
-                                        // Route modal is handled by auto-create logic in RouteButton
+                                        // RouteButton auto-creates route silently via autoCreatePendingRef
                                         setSelectedMarkerPopup(null);
                                     }}
+                                    onFlagNoParking={selectedMarkerPopup.type === 'area' ? () => {
+                                        const firstItem = activePopupItems[0];
+                                        if (firstItem) {
+                                            const geohash = Geohash.encode(firstItem.lat, firstItem.lon, 7);
+                                            const isFlagged = userNoParkingFlags.has(geohash);
+                                            handleNoParkingFlag(activePopupItems, isFlagged);
+                                        }
+                                    } : undefined}
+                                    isFlaggedByUser={selectedMarkerPopup.type === 'area' ? (() => {
+                                        const firstItem = activePopupItems[0];
+                                        if (firstItem) {
+                                            const geohash = Geohash.encode(firstItem.lat, firstItem.lon, 7);
+                                            return userNoParkingFlags.has(geohash);
+                                        }
+                                        return false;
+                                    })() : undefined}
+                                    noParkingFlagCount={selectedMarkerPopup.type === 'area' ? (() => {
+                                        const firstItem = activePopupItems[0];
+                                        if (firstItem) {
+                                            const geohash = Geohash.encode(firstItem.lat, firstItem.lon, 7);
+                                            return noParkingFlagCounts.get(geohash) || 0;
+                                        }
+                                        return 0;
+                                    })() : undefined}
+                                    isFlagging={isFlaggingNoParking}
                                 />
                             </div>
                         </Marker>
@@ -2469,7 +2879,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                             />
                         </Marker>
                     )}
-                </Map>
+                </MapGL>
 
                 {/* Status Bubbles Container */}
                 <div className={`absolute top-4 left-1/2 -translate-x-1/2 z-[1000] flex items-center gap-2 transition-all duration-300 pointer-events-none ${status !== 'idle' ? 'opacity-100' : ''}`}>
@@ -2988,9 +3398,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
 
             {/* Parking Search Bar Overlay */}
             {showParkingSearchBar && (
-                <div className="fixed inset-0 z-[1800] flex flex-col items-center px-4 pt-12 bg-black/50 backdrop-blur-sm animate-in fade-in">
-                    {/* Search Card */}
-                    <div className="w-full max-w-md bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl border border-black/10 dark:border-white/10 overflow-hidden">
+                <div className="fixed top-0 left-0 right-0 z-[1800] flex flex-col items-center px-4 pt-12 pointer-events-none animate-in fade-in">
+                    {/* Search Card - Explicitly enable pointer events */}
+                    <div className="w-full max-w-md bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl border border-black/10 dark:border-white/10 overflow-hidden pointer-events-auto">
                         {/* Search Input Row */}
                         <div className="flex items-center gap-2 p-3 border-b border-zinc-200 dark:border-white/10">
                             {/* Input with embedded Drop Pin button */}
@@ -3029,8 +3439,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                 <X size={20} />
                             </button>
                         </div>
-                        {/* Suggestions List - Multi-source: Coordinates, Saved Waypoints, OSM */}
-                        {(parseCoordinate(parkingSearchQuery) || savedWaypointMatches.length > 0 || parkingSearchSuggestions.length > 0) && (
+                        {/* Suggestions List - Multi-source: Coordinates, Saved Waypoints, Listing Names, OSM */}
+                        {(parseCoordinate(parkingSearchQuery) || savedWaypointMatches.length > 0 || listingNameMatches.length > 0 || parkingSearchSuggestions.length > 0) && (
                             <div className="max-h-80 overflow-y-auto">
                                 {/* Tags Header */}
                                 <div className="px-4 py-2 bg-zinc-50 dark:bg-white/5 border-b border-black/5 dark:border-white/5 flex items-center gap-2 overflow-x-auto">
@@ -3042,6 +3452,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                     {savedWaypointMatches.length > 0 && (
                                         <span className="shrink-0 inline-block px-2.5 py-1 rounded-lg bg-gradient-to-r from-emerald-500/10 to-teal-500/10 dark:from-emerald-500/20 dark:to-teal-500/20 text-[10px] font-bold text-emerald-600 dark:text-emerald-300 uppercase tracking-wider border border-emerald-200 dark:border-emerald-500/20">
                                             Saved Places
+                                        </span>
+                                    )}
+                                    {listingNameMatches.length > 0 && (
+                                        <span className="shrink-0 inline-block px-2.5 py-1 rounded-lg bg-gradient-to-r from-amber-500/10 to-orange-500/10 dark:from-amber-500/20 dark:to-orange-500/20 text-[10px] font-bold text-amber-600 dark:text-amber-300 uppercase tracking-wider border border-amber-200 dark:border-amber-500/20">
+                                            Listings
                                         </span>
                                     )}
                                     {parkingSearchSuggestions.length > 0 && (
@@ -3102,6 +3517,30 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                         </div>
                                     </button>
                                 ))}
+                                {/* Listing name matches (orange/amber) */}
+                                {listingNameMatches.map((listing, idx) => (
+                                    <button
+                                        key={`listing-${idx}`}
+                                        onClick={() => handleSelectParkingDestination({
+                                            display_name: listing.name,
+                                            lat: listing.lat,
+                                            lon: listing.lon
+                                        })}
+                                        className="w-full flex items-start gap-3 p-4 text-left hover:bg-zinc-50 dark:hover:bg-white/5 active:bg-zinc-100 transition-colors border-t border-black/5 dark:border-white/5 first:border-t-0 group"
+                                    >
+                                        <div className="mt-0.5 p-2 rounded-full bg-amber-50 dark:bg-amber-500/10 text-amber-500 group-hover:text-amber-600 dark:group-hover:text-amber-400 shrink-0 transition-colors">
+                                            <MapPin size={16} />
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="text-sm font-semibold text-zinc-900 dark:text-white truncate">
+                                                {listing.name}
+                                            </div>
+                                            <div className="text-[10px] text-zinc-400 dark:text-white/40 mt-0.5 uppercase tracking-wider">
+                                                Parking Listing
+                                            </div>
+                                        </div>
+                                    </button>
+                                ))}
                                 {/* OSM online search results (blue for locality, violet for others) */}
                                 {parkingSearchSuggestions.map((result: any, idx: number) => {
                                     // Check if result is a locality (city, town, village, etc.)
@@ -3134,15 +3573,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                             </div>
                         )}
                     </div>
-                    {/* Backdrop Click to Close */}
-                    <div
-                        className="flex-1 w-full"
-                        onClick={() => {
-                            setShowParkingSearchBar(false);
-                            setParkingSearchQuery('');
-                            setParkingSearchSuggestions([]);
-                        }}
-                    />
                 </div>
             )}
 

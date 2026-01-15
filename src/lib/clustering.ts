@@ -75,9 +75,11 @@ export function clusterSpots<T extends SpotBase>(
         // BUT if precision is capped (e.g. maxPrecision=7), we MUST use geohash regardless of zoom
         const useCoordinateRounding = zoom >= 15 && precision >= 8;
 
-        const hash = useCoordinateRounding
+        // Include currency in hash to prevent clustering different currencies
+        const locationHash = useCoordinateRounding
             ? `${spot.lat.toFixed(4)},${spot.lon.toFixed(4)}`
             : encodeGeohash(spot.lat, spot.lon, precision);
+        const hash = `${locationHash}:${spot.currency}`;
 
         const spotWeight = spot.count || 1;
 
@@ -93,8 +95,8 @@ export function clusterSpots<T extends SpotBase>(
             // "cluster.lat = cluster.spots.reduce... / cluster.spots.length"
             // Re-calculating average every time.
             const totalCount = cluster.spots.length; // Number of items, not weight
-            cluster.lat = cluster.spots.reduce((sum, s) => sum + s.lat, 0) / totalCount;
-            cluster.lon = cluster.spots.reduce((sum, s) => sum + s.lon, 0) / totalCount;
+            cluster.lat = cluster.spots.reduce((sum, s) => sum + Number(s.lat), 0) / totalCount;
+            cluster.lon = cluster.spots.reduce((sum, s) => sum + Number(s.lon), 0) / totalCount;
         } else {
             clusters.set(hash, {
                 id: `cluster-${hash}`,
@@ -109,12 +111,15 @@ export function clusterSpots<T extends SpotBase>(
         }
     }
 
-    // Return clusters with count > 1, and individual spots for single-item clusters
+    // Return clusters only when there are multiple unique spots clustered together
+    // A single spot with high count should NOT be treated as a cluster
     const result: (T | Cluster<T>)[] = [];
     for (const cluster of clusters.values()) {
-        if (cluster.count === 1) {
+        if (cluster.spots.length === 1) {
+            // Single unique spot - return as individual item (even if it has high count)
             result.push(cluster.spots[0]);
         } else {
+            // Multiple unique spots clustered together - return as cluster
             result.push(cluster);
         }
     }

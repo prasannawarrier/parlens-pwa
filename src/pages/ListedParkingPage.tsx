@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { MapPin, Plus, Trash2, X, Check, Copy, Pencil, ChevronRight, LocateFixed, Users, ArrowLeft, Search, RotateCw, EyeOff, Ban, MoreVertical, Star } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { KINDS, DEFAULT_RELAYS } from '../lib/nostr';
+import { KINDS, DEFAULT_RELAYS, APPROVER_PUBKEY } from '../lib/nostr';
 import { getSuggestions, type NominatimResult, calculateDistance, encodeGeohash } from '../lib/geo';
 import { decryptParkingLog } from '../lib/encryption';
 import type { RouteLogContent } from '../lib/nostr';
@@ -145,6 +145,13 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
     });
     const [showSavedOnly, setShowSavedOnly] = useState(false);
 
+    // Approval Workflow State
+    const isApprover = pubkey === APPROVER_PUBKEY;
+    const [approvalLabels, setApprovalLabels] = useState<Map<string, string>>(() => new Map()); // listingATag -> approval event ID
+    // Approver filter: 'all' | 'my' | 'approved' | 'pending'
+    const [approverFilter, setApproverFilter] = useState<'all' | 'my' | 'approved' | 'pending'>('all');
+    const [isApprovingListing, setIsApprovingListing] = useState(false);
+
     // Captured location - set once on mount and updated only on explicit refresh
     const capturedLocationRef = useRef<[number, number] | null>(null);
     const hasFetchedRef = useRef(false); // Tracks if initial fetch has occurred
@@ -158,6 +165,67 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             return next;
         });
     };
+
+    // Approve or revoke listing approval (approver only)
+    const toggleListingApproval = useCallback(async (listing: ListedParkingMetadata) => {
+        if (!pool || !signEvent || !isApprover) return;
+
+        const listingATag = `${KINDS.LISTED_PARKING_METADATA}:${listing.pubkey}:${listing.d}`;
+        const isApproved = approvalLabels.has(listingATag);
+
+        setIsApprovingListing(true);
+        try {
+            if (isApproved) {
+                // Revoke approval - publish Kind 5 delete event
+                const existingEventId = approvalLabels.get(listingATag);
+                if (existingEventId) {
+                    const deleteEvent = {
+                        kind: 5,
+                        created_at: Math.floor(Date.now() / 1000),
+                        tags: [['e', existingEventId]],
+                        content: 'Revoking listing approval'
+                    };
+                    const signedDelete = await signEvent(deleteEvent);
+                    await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedDelete));
+
+                    // Update local state
+                    setApprovalLabels(prev => {
+                        const newMap = new Map(prev);
+                        newMap.delete(listingATag);
+                        return newMap;
+                    });
+                    console.log('[Parlens] Approval revoked for:', listing.listing_name);
+                }
+            } else {
+                // Approve - publish Kind 1985 Label event
+                const labelEvent = {
+                    kind: KINDS.LABEL,
+                    created_at: Math.floor(Date.now() / 1000),
+                    tags: [
+                        ['l', 'approved', 'parlens'],
+                        ['a', listingATag],
+                        ['p', listing.pubkey || '']
+                    ],
+                    content: 'Approved public listing'
+                };
+                const signedLabel = await signEvent(labelEvent);
+                await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedLabel));
+
+                // Update local state
+                setApprovalLabels(prev => {
+                    const newMap = new Map(prev);
+                    newMap.set(listingATag, signedLabel.id);
+                    return newMap;
+                });
+                console.log('[Parlens] Approved listing:', listing.listing_name);
+            }
+        } catch (e) {
+            console.error('[Parlens] Failed to toggle approval:', e);
+            alert('Failed to update approval. Please try again.');
+        } finally {
+            setIsApprovingListing(false);
+        }
+    }, [pool, signEvent, isApprover, approvalLabels]);
 
     // Hidden items with human-readable names - unified structure
     interface HiddenItem {
@@ -189,6 +257,40 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             document.body.style.overflow = originalOverflow;
         };
     }, []);
+
+    // Fetch approval labels from approver on mount
+    useEffect(() => {
+        if (!pool) return;
+
+        const fetchApprovalLabels = async () => {
+            try {
+                const approvalEvents = await pool.querySync(DEFAULT_RELAYS, {
+                    kinds: [KINDS.LABEL],
+                    authors: [APPROVER_PUBKEY],
+                    '#l': ['approved']
+                } as any);
+
+                const labels = new Map<string, string>();
+                for (const event of approvalEvents) {
+                    const aTag = event.tags.find((t: string[]) => t[0] === 'a')?.[1];
+                    if (aTag) {
+                        // Keep most recent approval for each listing
+                        const existing = labels.get(aTag);
+                        if (!existing) {
+                            labels.set(aTag, event.id);
+                        }
+                    }
+                }
+
+                setApprovalLabels(labels);
+                console.log('[Parlens] Loaded', labels.size, 'approval labels from approver');
+            } catch (e) {
+                console.error('[Parlens] Failed to fetch approval labels:', e);
+            }
+        };
+
+        fetchApprovalLabels();
+    }, [pool]);
 
     const [savedRoutes, setSavedRoutes] = useState<SavedRoute[]>([]);
 
@@ -244,6 +346,33 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
         return matches.slice(0, 3);
     }, [searchTerm, savedRoutes]);
 
+    // Derived locality matches - search listings by locality/city
+    const listingMatches = useMemo(() => {
+        if (!searchTerm || searchTerm.length < 2) return [];
+        const query = searchTerm.toLowerCase();
+        const matches: Array<{ name: string; lat: number; lon: number }> = [];
+        const seenLocalities = new Set<string>();
+
+        for (const listing of listings) {
+            const locality = listing.local_area || listing.city;
+            if (!locality) continue;
+
+            const localityMatch = locality.toLowerCase().includes(query);
+            if (localityMatch && !seenLocalities.has(locality.toLowerCase())) {
+                // Parse location for coordinates (use first listing as representative)
+                const [lat, lon] = (listing.location || '').split(',').map(Number);
+                if (!isNaN(lat) && !isNaN(lon)) {
+                    seenLocalities.add(locality.toLowerCase());
+                    matches.push({
+                        name: locality,
+                        lat,
+                        lon
+                    });
+                }
+            }
+        }
+        return matches.slice(0, 3);
+    }, [searchTerm, listings]);
     // Handle Input Change & Debounce Search
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const val = e.target.value;
@@ -519,16 +648,38 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                 });
             }
 
-            // Merge, avoiding duplicates (user's listings already in rawEvents)
-            const existingIds = new Set(rawEvents.map((e: any) => e.id));
-            publicEvents.forEach((e: any) => {
-                if (!existingIds.has(e.id)) rawEvents.push(e);
+            // Phase D: (Approver Only) Fetch recent global public listings
+            // This ensures approver sees pending listings even if outside their current geohash area
+            let approverEvents: any[] = [];
+            if (isApprover) {
+                console.log('[Parlens] Phase D: Fetching global public listings for Approver');
+                try {
+                    const phaseDStart = Date.now();
+                    approverEvents = await pool.querySync(DEFAULT_RELAYS, {
+                        kinds: [KINDS.LISTED_PARKING_METADATA],
+                        limit: 100 // Fetch recent 100 public listings for moderation
+                    });
+                    const phaseDLatency = Date.now() - phaseDStart;
+                    console.log('[Parlens] Phase D: Found', approverEvents.length, 'global listings for approver in', phaseDLatency, 'ms');
+                } catch (e) {
+                    console.warn('[Parlens] Phase D failed:', e);
+                }
+            }
+
+            // Merge all events
+            const allEvents = [...rawEvents, ...publicEvents, ...approverEvents];
+
+            // Deduplicate by ID
+            const uniqueEvents = new Map<string, any>();
+            allEvents.forEach(e => {
+                if (!uniqueEvents.has(e.id)) {
+                    uniqueEvents.set(e.id, e);
+                }
             });
-            console.log('[Parlens] Phase C: Merged', publicEvents.length, 'public listings. Total:', rawEvents.length);
 
             // Deduplicate events (Addressable Kind 31147) - Keep only latest per d-tag
             const uniqueEventsMap = new Map<string, any>();
-            rawEvents.forEach((ev: any) => {
+            Array.from(uniqueEvents.values()).forEach((ev: any) => { // Use the ID-deduplicated events for d-tag deduplication
                 const d = ev.tags.find((t: string[]) => t[0] === 'd')?.[1];
                 if (!d) return;
 
@@ -1152,9 +1303,49 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
 
             // Tab filtering
             let match = false;
-            if (activeTab === 'public') match = l.listing_type === 'public';
+            if (activeTab === 'public') {
+                // Only show public listings that are:
+                // 1. Created by the approver (auto-approved), OR
+                // 2. Have an approval label from the approver
+                const isAutoApproved = l.pubkey === APPROVER_PUBKEY;
+                const listingATag = `${KINDS.LISTED_PARKING_METADATA}:${l.pubkey}:${l.d}`;
+                const hasApprovalLabel = approvalLabels.has(listingATag);
+                match = l.listing_type === 'public' && (isAutoApproved || hasApprovalLabel);
+            }
             else if (activeTab === 'private') match = l.listing_type === 'private' && (l.members.includes(pubkey!) || l.owners.includes(pubkey!) || l.managers.includes(pubkey!));
-            else if (activeTab === 'my') match = l.owners.includes(pubkey!) || l.managers.includes(pubkey!);
+            else if (activeTab === 'my') {
+                // For non-approvers: show only their own listings
+                const isOwnListing = l.owners.includes(pubkey!) || l.managers.includes(pubkey!);
+                const listingATag = `${KINDS.LISTED_PARKING_METADATA}:${l.pubkey}:${l.d}`;
+                const isAutoApproved = l.pubkey === APPROVER_PUBKEY;
+                const hasApprovalLabel = approvalLabels.has(listingATag);
+                const isPending = l.listing_type === 'public' && !isAutoApproved && !hasApprovalLabel;
+                const isApprovedListing = l.listing_type === 'public' && (isAutoApproved || hasApprovalLabel);
+
+                if (!isApprover) {
+                    match = isOwnListing;
+                } else {
+                    // Approver filter logic
+                    switch (approverFilter) {
+                        case 'my':
+                            match = isOwnListing;
+                            break;
+                        case 'approved':
+                            // Show approved findings from OTHERS (exclude own listings as they are auto-approved/don't need review)
+                            match = !isOwnListing && isApprovedListing;
+                            break;
+                        case 'pending':
+                            // Show pending findings from OTHERS force-filter
+                            match = isPending;
+                            break;
+                        case 'all':
+                        default:
+                            // Show own listings + all public listings (approved and pending)
+                            match = isOwnListing || l.listing_type === 'public';
+                            break;
+                    }
+                }
+            }
 
             if (!match) return false;
 
@@ -1222,7 +1413,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
         });
 
         return res;
-    }, [listings, activeTab, pubkey, searchTerm, listingStats, vehicleFilter, currentLocation, savedListings, showSavedOnly, confirmedSearchTerm, searchCenter]);
+    }, [listings, activeTab, pubkey, searchTerm, listingStats, vehicleFilter, currentLocation, savedListings, showSavedOnly, confirmedSearchTerm, searchCenter, approverFilter, isApprover, approvalLabels]);
 
     // Paginated listings for display (limited to displayedCount)
     const paginatedListings = useMemo(() => {
@@ -1259,7 +1450,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                 if (spotStatus !== statusFilter) return false;
             }
             return true;
-        });
+        }).sort((a, b) => parseInt(a.spot_number || '0') - parseInt(b.spot_number || '0'));
     }, [spots, vehicleFilter, floorFilter, statusFilter, spotStatuses, selectedListing, pubkey]);
 
     return (
@@ -1455,7 +1646,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                     onChange={handleInputChange}
                                     onKeyDown={e => { if (e.key === 'Enter') handleSearch(); }}
                                     placeholder="Search for listings near..."
-                                    className={`w-full pl-10 pr-10 py-3 bg-zinc-100 dark:bg-zinc-800 text-sm font-medium text-zinc-900 dark:text-white border-none focus:ring-2 focus:ring-blue-500/50 transition-all placeholder:text-zinc-400 dark:placeholder:text-zinc-500 ${(suggestions.length > 0 || savedMatches.length > 0)
+                                    className={`w-full pl-10 pr-10 py-3 bg-zinc-100 dark:bg-zinc-800 text-sm font-medium text-zinc-900 dark:text-white border-none focus:ring-2 focus:ring-blue-500/50 transition-all placeholder:text-zinc-400 dark:placeholder:text-zinc-500 ${(suggestions.length > 0 || savedMatches.length > 0 || listingMatches.length > 0)
                                         ? 'rounded-t-xl rounded-b-none'
                                         : 'rounded-xl'
                                         }`}
@@ -1476,17 +1667,17 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                 )}
 
                                 {/* Suggestions Dropdown */}
-                                {(suggestions.length > 0 || savedMatches.length > 0) && (
+                                {(suggestions.length > 0 || savedMatches.length > 0 || listingMatches.length > 0) && (
                                     <div className="absolute top-full left-0 right-0 bg-white dark:bg-zinc-900 rounded-b-xl shadow-xl border-x border-b border-black/5 dark:border-white/5 overflow-hidden z-[4000] mt-0">
                                         <div className="max-h-[60vh] overflow-y-auto">
                                             {/* Tags Header */}
                                             <div className="px-4 py-2 bg-zinc-50 dark:bg-white/5 border-t border-black/5 dark:border-white/5 flex items-center gap-2">
-                                                {suggestions.some((s: any) => ['city', 'borough', 'suburb', 'quarter', 'neighbourhood', 'town', 'village', 'hamlet', 'locality', 'residential', 'administrative'].includes(s.type)) && (
+                                                {listingMatches.length > 0 && (
                                                     <span className="inline-block px-2.5 py-1 rounded-lg bg-gradient-to-r from-blue-500/10 to-cyan-500/10 dark:from-blue-500/20 dark:to-cyan-500/20 text-[10px] font-bold text-blue-600 dark:text-blue-300 uppercase tracking-wider border border-blue-200 dark:border-blue-500/20">
                                                         Locality
                                                     </span>
                                                 )}
-                                                {suggestions.some((s: any) => !['city', 'borough', 'suburb', 'quarter', 'neighbourhood', 'town', 'village', 'hamlet', 'locality', 'residential', 'administrative'].includes(s.type)) && (
+                                                {suggestions.length > 0 && (
                                                     <span className="inline-block px-2.5 py-1 rounded-lg bg-gradient-to-r from-violet-500/10 to-fuchsia-500/10 dark:from-violet-500/20 dark:to-fuchsia-500/20 text-[10px] font-bold text-violet-600 dark:text-violet-300 uppercase tracking-wider border border-violet-200 dark:border-violet-500/20">
                                                         OSM Search
                                                     </span>
@@ -1497,6 +1688,36 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                     </span>
                                                 )}
                                             </div>
+
+                                            {/* Listing Matches (Blue) */}
+                                            {listingMatches.map((match, index) => (
+                                                <button
+                                                    key={`listing-${index}`}
+                                                    onClick={() => {
+                                                        const suggestion: NominatimResult = {
+                                                            place_id: parseInt(match.lat.toString().replace('.', '')),
+                                                            display_name: match.name,
+                                                            lat: match.lat.toString(),
+                                                            lon: match.lon.toString(),
+                                                            type: 'listing'
+                                                        };
+                                                        handleSelectSuggestion(suggestion);
+                                                    }}
+                                                    className="w-full flex items-start gap-3 p-4 text-left hover:bg-zinc-50 dark:hover:bg-white/5 active:bg-zinc-100 transition-colors border-t border-black/5 dark:border-white/5 first:border-t-0 group"
+                                                >
+                                                    <div className="mt-0.5 p-2 rounded-full bg-blue-50 dark:bg-blue-500/10 text-blue-500 group-hover:text-blue-600 dark:group-hover:text-blue-400 shrink-0 transition-colors">
+                                                        <MapPin size={16} />
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="text-sm font-semibold text-zinc-900 dark:text-white truncate">
+                                                            {match.name}
+                                                        </div>
+                                                        <div className="text-xs text-zinc-500 dark:text-zinc-400 truncate">
+                                                            Parking listings nearby
+                                                        </div>
+                                                    </div>
+                                                </button>
+                                            ))}
 
                                             {/* Saved Matches */}
                                             {savedMatches.map((match, index) => (
@@ -1528,33 +1749,26 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                 </button>
                                             ))}
 
-                                            {/* Online Matches */}
-                                            {suggestions.map((item) => {
-                                                const localityTypes = ['city', 'borough', 'suburb', 'quarter', 'neighbourhood', 'town', 'village', 'hamlet', 'locality', 'residential', 'administrative'];
-                                                const isLocality = localityTypes.includes(item.type);
-                                                return (
-                                                    <button
-                                                        key={item.place_id}
-                                                        onClick={() => handleSelectSuggestion(item)}
-                                                        className="w-full flex items-start gap-3 p-4 text-left hover:bg-zinc-50 dark:hover:bg-white/5 active:bg-zinc-100 transition-colors border-t border-black/5 dark:border-white/5 group"
-                                                    >
-                                                        <div className={`mt-0.5 p-2 rounded-full shrink-0 transition-colors ${isLocality
-                                                            ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-500 group-hover:text-blue-600 dark:group-hover:text-blue-400'
-                                                            : 'bg-violet-50 dark:bg-violet-500/10 text-violet-500 group-hover:text-violet-600 dark:group-hover:text-violet-400'
-                                                            }`}>
-                                                            <MapPin size={16} />
+                                            {/* Online Matches (Purple) */}
+                                            {suggestions.map((item) => (
+                                                <button
+                                                    key={item.place_id}
+                                                    onClick={() => handleSelectSuggestion(item)}
+                                                    className="w-full flex items-start gap-3 p-4 text-left hover:bg-zinc-50 dark:hover:bg-white/5 active:bg-zinc-100 transition-colors border-t border-black/5 dark:border-white/5 group"
+                                                >
+                                                    <div className="mt-0.5 p-2 rounded-full shrink-0 transition-colors bg-violet-50 dark:bg-violet-500/10 text-violet-500 group-hover:text-violet-600 dark:group-hover:text-violet-400">
+                                                        <MapPin size={16} />
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="text-sm font-semibold text-zinc-900 dark:text-white truncate">
+                                                            {item.display_name.split(',')[0]}
                                                         </div>
-                                                        <div className="flex-1 min-w-0">
-                                                            <div className="text-sm font-semibold text-zinc-900 dark:text-white truncate">
-                                                                {item.display_name.split(',')[0]}
-                                                            </div>
-                                                            <div className="text-xs text-zinc-500 dark:text-zinc-400 truncate">
-                                                                {item.display_name.split(',').slice(1).join(',')}
-                                                            </div>
+                                                        <div className="text-xs text-zinc-500 dark:text-zinc-400 truncate">
+                                                            {item.display_name.split(',').slice(1).join(',')}
                                                         </div>
-                                                    </button>
-                                                );
-                                            })}
+                                                    </div>
+                                                </button>
+                                            ))}
                                         </div>
                                     </div>
                                 )}
@@ -1572,17 +1786,39 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                     </>
                                 )}
                             </div>
+                            {/* Approver: Dropdown filter for listings view */}
+                            {isApprover && activeTab === 'my' && (
+                                <select
+                                    value={approverFilter}
+                                    onChange={(e) => setApproverFilter(e.target.value as 'all' | 'my' | 'approved' | 'pending')}
+                                    className="pl-2 pr-6 py-1 rounded-full border border-transparent bg-zinc-100 dark:bg-white/5 text-zinc-500 dark:text-zinc-400 text-[10px] font-bold uppercase tracking-wider appearance-none cursor-pointer transition-colors hover:bg-zinc-200 dark:hover:bg-white/10 outline-none"
+                                    style={{
+                                        backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%239ca3af'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`,
+                                        backgroundRepeat: 'no-repeat',
+                                        backgroundPosition: 'right 6px center',
+                                        backgroundSize: '12px'
+                                    }}
+                                >
+                                    <option value="all">All</option>
+                                    <option value="my">Mine</option>
+                                    <option value="approved">Approved</option>
+                                    <option value="pending">Pending</option>
+                                </select>
+                            )}
 
-                            <button
-                                onClick={() => setShowSavedOnly(!showSavedOnly)}
-                                className={`flex items-center gap-1 px-2 py-1 rounded-full border transition-colors text-[10px] font-bold uppercase tracking-wider ${showSavedOnly
-                                    ? 'bg-yellow-500/10 border-yellow-500/20 text-yellow-600 dark:text-yellow-400'
-                                    : 'bg-zinc-100 dark:bg-white/5 border-transparent text-zinc-500 hover:bg-zinc-200 dark:hover:bg-white/10'
-                                    }`}
-                            >
-                                <Star size={12} className={showSavedOnly ? 'fill-yellow-500 stroke-yellow-500' : 'fill-transparent stroke-zinc-400'} />
-                                {showSavedOnly ? 'Saved' : 'All'}
-                            </button>
+                            {/* Saved Filter - Only show on public/private tabs, not my listings */}
+                            {activeTab !== 'my' && (
+                                <button
+                                    onClick={() => setShowSavedOnly(!showSavedOnly)}
+                                    className={`flex items-center gap-1 px-2 py-1 rounded-full border transition-colors text-[10px] font-bold uppercase tracking-wider ${showSavedOnly
+                                        ? 'bg-yellow-500/10 border-yellow-500/20 text-yellow-600 dark:text-yellow-400'
+                                        : 'bg-zinc-100 dark:bg-white/5 border-transparent text-zinc-500 hover:bg-zinc-200 dark:hover:bg-white/10'
+                                        }`}
+                                >
+                                    <Star size={12} className={showSavedOnly ? 'fill-yellow-500 stroke-yellow-500' : 'fill-transparent stroke-zinc-400'} />
+                                    {showSavedOnly ? 'Saved' : 'All'}
+                                </button>
+                            )}
                         </div>
 
                         <div className="flex-1 overflow-y-auto pt-2 px-4 pb-4 space-y-3">
@@ -1623,16 +1859,19 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
 
                                                         {/* Access List Button */}
                                                         <div className="flex items-center gap-1 h-full">
-                                                            <button
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    toggleSaved(listing.id);
-                                                                }}
-                                                                className="p-2 rounded-full active:scale-95 transition-transform flex items-center justify-center"
-                                                                style={{ WebkitTapHighlightColor: 'transparent' }}
-                                                            >
-                                                                <Star size={16} className={savedListings.has(listing.id) ? 'fill-yellow-500 stroke-yellow-500 text-yellow-500' : 'text-zinc-400'} />
-                                                            </button>
+                                                            {/* Save Button - Only on public/private tabs */}
+                                                            {activeTab !== 'my' && (
+                                                                <button
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        toggleSaved(listing.id);
+                                                                    }}
+                                                                    className="p-2 rounded-full active:scale-95 transition-transform flex items-center justify-center"
+                                                                    style={{ WebkitTapHighlightColor: 'transparent' }}
+                                                                >
+                                                                    <Star size={16} className={savedListings.has(listing.id) ? 'fill-yellow-500 stroke-yellow-500 text-yellow-500' : 'text-zinc-400'} />
+                                                                </button>
+                                                            )}
                                                             <button
                                                                 onClick={(e) => {
                                                                     e.stopPropagation();
@@ -1777,6 +2016,27 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                         );
                                                     })}
                                                 </div>
+
+                                                {/* Approver: Approval Toggle - In footer for public listings */}
+                                                {isApprover && listing.listing_type === 'public' && listing.pubkey !== APPROVER_PUBKEY && (() => {
+                                                    const listingATag = `${KINDS.LISTED_PARKING_METADATA}:${listing.pubkey}:${listing.d}`;
+                                                    const isListingApproved = approvalLabels.has(listingATag);
+                                                    return (
+                                                        <div className="mt-3 pt-3 border-t border-black/5 dark:border-white/5 flex items-center justify-between" onClick={(e) => e.stopPropagation()}>
+                                                            <span className={`text-sm font-semibold ${isListingApproved ? 'text-blue-600 dark:text-blue-400' : 'text-zinc-500 dark:text-white/50'}`}>
+                                                                {isListingApproved ? 'Approved' : 'Pending Approval'}
+                                                            </span>
+                                                            <button
+                                                                onClick={() => toggleListingApproval(listing)}
+                                                                disabled={isApprovingListing}
+                                                                className={`relative h-7 w-12 rounded-full transition-colors ${isListingApproved ? 'bg-blue-500' : 'bg-zinc-200 dark:bg-white/10'} ${isApprovingListing ? 'opacity-50 cursor-wait' : ''}`}
+                                                                style={{ WebkitTapHighlightColor: 'transparent' }}
+                                                            >
+                                                                <span className={`block h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${isListingApproved ? 'translate-x-[26px]' : 'translate-x-[4px]'}`} />
+                                                            </button>
+                                                        </div>
+                                                    );
+                                                })()}
 
                                                 {/* Close All Toggle */}
                                                 {
@@ -2486,6 +2746,7 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
 
 const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isManager, listingStats, setListingStats, setSpotStatuses, onSpotUpdate, ...props }) => {
     const { pubkey, signEvent, pool } = useAuth();
+    const isApprover = pubkey === APPROVER_PUBKEY;
     // QR contains a-tag, authorizer (owner/manager pubkey), auth token, and metadata for Kind 1714 publishing
     const spotATag = `${KINDS.PARKING_SPOT_LISTING}:${spot.pubkey}:${spot.d}`;
     // For static QR, auth token is fixed; for dynamic, it would regenerate
@@ -2562,8 +2823,8 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
 
     // Fetch on mount
     useEffect(() => {
-        if (isManager) fetchData();
-    }, [fetchData, isManager]);
+        if (isManager || isApprover) fetchData();
+    }, [fetchData, isManager, isApprover]);
 
     const update = async (s: 'occupied' | 'open' | 'closed') => {
         setIsUpdating(true);
@@ -2779,42 +3040,46 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
                                                 {authorizer && <div>Auth: {authorizer.slice(0, 8)}...</div>}
                                             </div>
 
-                                            {/* Note Input for specific log */}
-                                            <div className="mt-2 flex gap-2">
-                                                <input
-                                                    id={`note-input-${log.id}`}
-                                                    placeholder="Add a note"
-                                                    className="flex-1 p-2.5 bg-white dark:bg-white/10 rounded-xl text-sm text-zinc-900 dark:text-white border border-black/5 dark:border-white/10 focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder:text-zinc-400"
-                                                    onKeyDown={(e) => {
-                                                        if (e.key === 'Enter' && (e.target as HTMLInputElement).value.trim()) {
-                                                            addQuickNote(log.id, (e.target as HTMLInputElement).value);
-                                                            (e.target as HTMLInputElement).value = '';
-                                                        }
-                                                    }}
-                                                />
-                                                <button
-                                                    onClick={() => {
-                                                        const input = document.getElementById(`note-input-${log.id}`) as HTMLInputElement;
-                                                        if (input && input.value.trim()) {
-                                                            addQuickNote(log.id, input.value);
-                                                            input.value = '';
-                                                        }
-                                                    }}
-                                                    className="p-2.5 bg-[#007AFF] text-white rounded-xl"
-                                                >
-                                                    <Plus size={20} />
-                                                </button>
-                                            </div>
+                                            {/* Note Input for specific log - Only for Managers (not Approvers) */}
+                                            {isManager && (
+                                                <>
+                                                    <div className="mt-2 flex gap-2">
+                                                        <input
+                                                            id={`note-input-${log.id}`}
+                                                            placeholder="Add a note"
+                                                            className="flex-1 p-2.5 bg-white dark:bg-white/10 rounded-xl text-sm text-zinc-900 dark:text-white border border-black/5 dark:border-white/10 focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder:text-zinc-400"
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter' && (e.target as HTMLInputElement).value.trim()) {
+                                                                    addQuickNote(log.id, (e.target as HTMLInputElement).value);
+                                                                    (e.target as HTMLInputElement).value = '';
+                                                                }
+                                                            }}
+                                                        />
+                                                        <button
+                                                            onClick={() => {
+                                                                const input = document.getElementById(`note-input-${log.id}`) as HTMLInputElement;
+                                                                if (input && input.value.trim()) {
+                                                                    addQuickNote(log.id, input.value);
+                                                                    input.value = '';
+                                                                }
+                                                            }}
+                                                            className="p-2.5 bg-[#007AFF] text-white rounded-xl"
+                                                        >
+                                                            <Plus size={20} />
+                                                        </button>
+                                                    </div>
 
-                                            {/* Notes attached to this log */}
-                                            {logNotes.length > 0 && (
-                                                <div className="mt-3 space-y-2 pt-3 border-t border-black/5 dark:border-white/5">
-                                                    {logNotes.map((n: any) => (
-                                                        <div key={n.id} className="text-xs bg-yellow-50 dark:bg-yellow-900/10 p-2 rounded-lg text-zinc-700 dark:text-yellow-100/80">
-                                                            {n.content}
+                                                    {/* Notes attached to this log */}
+                                                    {logNotes.length > 0 && (
+                                                        <div className="mt-3 space-y-2 pt-3 border-t border-black/5 dark:border-white/5">
+                                                            {logNotes.map((n: any) => (
+                                                                <div key={n.id} className="text-xs bg-yellow-50 dark:bg-yellow-900/10 p-2 rounded-lg text-zinc-700 dark:text-yellow-100/80">
+                                                                    {n.content}
+                                                                </div>
+                                                            ))}
                                                         </div>
-                                                    ))}
-                                                </div>
+                                                    )}
+                                                </>
                                             )}
                                         </div>
                                     );
@@ -2931,13 +3196,16 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
                             </div>
                         )}
 
-                        {isManager && (
+                        {(isManager || isApprover) && (
                             <div className="space-y-4 pt-2">
-                                <div className="flex gap-2">
-                                    <button onClick={() => update('open')} className="flex-1 py-3 bg-green-500/10 border border-green-500/20 text-green-600 dark:text-green-400 font-bold text-sm rounded-xl active:scale-95 transition-all">Open</button>
-                                    <button onClick={() => update('occupied')} className="flex-1 py-3 bg-red-500/10 border border-red-500/20 text-red-500 font-bold text-sm rounded-xl active:scale-95 transition-all">Occupied</button>
-                                    <button onClick={() => update('closed')} className="flex-1 py-3 bg-zinc-500/10 border border-zinc-500/20 text-zinc-500 dark:text-zinc-400 font-bold text-sm rounded-xl active:scale-95 transition-all">Closed</button>
-                                </div>
+                                {/* Spot Control Buttons - Manager Only */}
+                                {isManager && (
+                                    <div className="flex gap-2">
+                                        <button onClick={() => update('open')} className="flex-1 py-3 bg-green-500/10 border border-green-500/20 text-green-600 dark:text-green-400 font-bold text-sm rounded-xl active:scale-95 transition-all">Open</button>
+                                        <button onClick={() => update('occupied')} className="flex-1 py-3 bg-red-500/10 border border-red-500/20 text-red-500 font-bold text-sm rounded-xl active:scale-95 transition-all">Occupied</button>
+                                        <button onClick={() => update('closed')} className="flex-1 py-3 bg-zinc-500/10 border border-zinc-500/20 text-zinc-500 dark:text-zinc-400 font-bold text-sm rounded-xl active:scale-95 transition-all">Closed</button>
+                                    </div>
+                                )}
 
                                 {/* Status Log Button - Main Entry Point for Notes/History */}
                                 <button
@@ -2947,50 +3215,37 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
                                     View Status Log <ChevronRight size={18} />
                                 </button>
 
-                                {/* Edit/Delete Buttons */}
-                                <div className="flex gap-3 pt-2 border-t border-black/5 dark:border-white/5">
-                                    <button onClick={() => setIsEditing(true)} style={{ WebkitTapHighlightColor: 'transparent' }} className="flex-1 py-3 bg-zinc-100 dark:bg-white/10 border border-zinc-200 dark:border-white/10 text-zinc-600 dark:text-zinc-300 font-bold text-sm flex items-center justify-center gap-2 rounded-xl transition-transform active:scale-95">
-                                        <Pencil size={16} /> Edit
-                                    </button>
-                                    <button onClick={async () => {
-                                        if (!confirm('Delete this spot?')) return;
-
-                                        // Delete the spot (Kind 5 deletion event)
-                                        const deleteSpot = {
-                                            kind: 5, created_at: Math.floor(Date.now() / 1000),
-                                            tags: [['e', spot.id], ['a', `${KINDS.PARKING_SPOT_LISTING}:${pubkey}:${spot.d}`]],
-                                            content: 'Deleted'
-                                        };
-                                        await Promise.allSettled(pool.publish(DEFAULT_RELAYS, await signEvent(deleteSpot)));
-
-                                        // Update listing's total_spots count (Kind 31147)
-                                        if (listing.originalEvent && listing.total_spots) {
-                                            const newTotalSpots = Math.max(0, (listing.total_spots || 1) - 1);
-                                            const updatedTags = listing.originalEvent.tags
-                                                .filter((t: string[]) => t[0] !== 'total_spots')
-                                                .concat([['total_spots', String(newTotalSpots)]]);
-
-                                            const updatedMetadata = {
-                                                kind: KINDS.LISTED_PARKING_METADATA,
-                                                created_at: Math.floor(Date.now() / 1000),
-                                                tags: updatedTags,
-                                                content: listing.originalEvent.content
-                                            };
-                                            await Promise.allSettled(pool.publish(DEFAULT_RELAYS, await signEvent(updatedMetadata)));
-                                            console.log(`[Parlens] Updated total_spots to ${newTotalSpots} after spot deletion`);
-                                        }
-
-                                        onClose(); // Just close - parent will refresh if needed
-                                    }} style={{ WebkitTapHighlightColor: 'transparent' }} className="flex-1 py-3 bg-zinc-100 dark:bg-white/10 border border-zinc-200 dark:border-white/10 text-red-500 font-bold text-sm flex items-center justify-center gap-2 rounded-xl transition-transform active:scale-95">
-                                        <Trash2 size={16} /> Delete
-                                    </button>
-                                </div>
+                                {/* Edit/Delete Buttons - Manager Only */}
+                                {isManager && (
+                                    <div className="flex gap-3 pt-2 border-t border-black/5 dark:border-white/5">
+                                        <button onClick={() => setIsEditing(true)} style={{ WebkitTapHighlightColor: 'transparent' }} className="flex-1 py-3 bg-zinc-100 dark:bg-white/10 border border-zinc-200 dark:border-white/10 text-zinc-600 dark:text-zinc-300 font-bold text-sm flex items-center justify-center gap-2 rounded-xl transition-transform active:scale-95">
+                                            <Pencil size={16} /> Edit
+                                        </button>
+                                        <button onClick={async () => {
+                                            if (!confirm('Delete this spot?')) return;
+                                            try {
+                                                const del = {
+                                                    kind: 5,
+                                                    pubkey: pubkey,
+                                                    created_at: Math.floor(Date.now() / 1000),
+                                                    tags: [['e', spot.id]],
+                                                    content: 'deleted'
+                                                };
+                                                await Promise.allSettled(pool.publish(DEFAULT_RELAYS, await signEvent(del)));
+                                                onClose();
+                                            } catch (e) { alert('Failed to delete'); }
+                                        }} style={{ WebkitTapHighlightColor: 'transparent' }} className="mt-0 p-3 bg-red-500/10 border border-red-500/20 text-red-500 rounded-xl active:scale-95 transition-transform flex items-center justify-center">
+                                            <Trash2 size={20} /> <span className="hidden sm:inline">Delete</span>
+                                        </button>
+                                    </div>
+                                )}
                             </div>
                         )}
                     </>
-                )}
-            </div>
-        </div>
+                )
+                }
+            </div >
+        </div >
     );
 };
 

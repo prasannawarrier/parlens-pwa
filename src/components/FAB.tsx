@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, MapPin, ArrowRight, ChevronUp, ChevronDown } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { KINDS, DEFAULT_RELAYS } from '../lib/nostr';
+import { KINDS, DEFAULT_RELAYS, APPROVER_PUBKEY } from '../lib/nostr';
 import { encodeGeohash, getGeohashNeighbors } from '../lib/geo';
 import { encryptParkingLog } from '../lib/encryption';
 import { getCurrencyFromLocation, getCurrencySymbol, getLocalCurrency } from '../lib/currency';
@@ -52,6 +52,8 @@ export const FAB: React.FC<FABProps> = ({
     const spotsMapRef = useRef<Map<string, any>>(new Map());
     // Track last search geohash to prevent unnecessary re-searches on iOS GPS drift
     const lastSearchGeohashRef = useRef<string | null>(null);
+    // Track approved listing a-tags (fetched from approver's Kind 1985 labels)
+    const approvedListingATagsRef = useRef<Set<string>>(new Set());
 
     // Load hidden items
     useEffect(() => {
@@ -223,7 +225,7 @@ export const FAB: React.FC<FABProps> = ({
                         const listingNameTag = event.tags.find((t: string[]) => t[0] === 'listing_name');
 
                         spotType = typeTag?.[1] || 'car';
-                        price = rateTag ? parseFloat(rateTag[1]) : 0;
+                        price = rateTag ? (Number(rateTag[1]) || 0) : 0;
                         spotCurrency = currencyTag?.[1] || 'USD';
                         listingName = listingNameTag?.[1];
 
@@ -251,7 +253,7 @@ export const FAB: React.FC<FABProps> = ({
                         const priceTag = event.tags.find((t: string[]) => t[0] === 'hourly_rate');
                         const currencyTag = event.tags.find((t: string[]) => t[0] === 'currency');
                         const typeTag = event.tags.find((t: string[]) => t[0] === 'type');
-                        price = priceTag ? parseFloat(priceTag[1]) : 0;
+                        price = priceTag ? (Number(priceTag[1]) || 0) : 0;
                         spotCurrency = currencyTag ? currencyTag[1] : 'USD';
                         spotType = typeTag ? typeTag[1] : 'car';
 
@@ -391,12 +393,39 @@ export const FAB: React.FC<FABProps> = ({
                             if (d) validAddresses.add(`${KINDS.LISTED_PARKING_METADATA}:${e.pubkey}:${d}`);
                         });
 
-                        // Filter Process loop - only add valid (non-orphaned) spots
+                        // === APPROVAL FILTER ===
+                        // Fetch Kind 1985 (Label) from APPROVER_PUBKEY to get approved listing a-tags
+                        try {
+                            const approvalEvents = await pool.querySync(DEFAULT_RELAYS, {
+                                kinds: [KINDS.LABEL],
+                                authors: [APPROVER_PUBKEY],
+                                '#l': ['approved']
+                            } as any);
+
+                            // Build set of approved listing a-tags
+                            approvedListingATagsRef.current = new Set();
+                            for (const event of approvalEvents) {
+                                const aTag = event.tags.find((t: string[]) => t[0] === 'a')?.[1];
+                                if (aTag) approvedListingATagsRef.current.add(aTag);
+                            }
+                            console.log('[Parlens] Found', approvedListingATagsRef.current.size, 'approved listings from approver');
+                        } catch (e) {
+                            console.error('[Parlens] Failed to fetch approval labels:', e);
+                        }
+
+                        // Filter Process loop - only add valid (non-orphaned) AND approved spots
                         // Events without root a-tags (legacy) are skipped
                         for (const event of latestBySpot.values()) {
                             const rootATag = event.tags.find((t: string[]) => t[0] === 'a' && t[3] === 'root')?.[1];
                             if (rootATag && validAddresses.has(rootATag)) {
-                                processSpotEvent(event);
+                                // Check if listing is approved (from APPROVER or has approval label)
+                                const listingPubkey = rootATag.split(':')[1];
+                                const isAutoApproved = listingPubkey === APPROVER_PUBKEY;
+                                const hasApprovalLabel = approvedListingATagsRef.current.has(rootATag);
+
+                                if (isAutoApproved || hasApprovalLabel) {
+                                    processSpotEvent(event);
+                                }
                             }
                         }
                     }

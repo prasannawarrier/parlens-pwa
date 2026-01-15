@@ -464,20 +464,20 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
             if (pendingWaypoints.length > 0) {
                 const newWaypoints = pendingWaypoints.map((wp, index) => ({
                     id: crypto.randomUUID(),
-                    name: wp.name || `Pin ${waypoints.length + index + 1}`,
+                    name: wp.name || `Pin ${index + 1}`,
                     lat: wp.lat,
                     lon: wp.lon
                 }));
 
-                const totalAfterAdd = waypoints.length + newWaypoints.length;
+                const totalAfterAdd = newWaypoints.length;
 
-                setWaypoints(prev => [...prev, ...newWaypoints]);
+                // Clear existing route and replace with new waypoints
+                setWaypoints(newWaypoints);
                 setRouteCoords(null);
                 setAlternateRouteCoords(null);
                 setShowOnMap(false);
-                // Pass UPDATED waypoints list (current + new) to parent so they appear on map
-                // Note: 'waypoints' state is stale here, so we construct the new list
-                onRouteChange(null, null, [...waypoints, ...newWaypoints], false);
+                // Pass new waypoints to parent so they appear on map
+                onRouteChange(null, null, newWaypoints, false);
                 setSnappedWaypoints({});
 
                 // If we now have 2+ waypoints, auto-create route (no modal needed)
