@@ -297,6 +297,7 @@ const MarkerPopup = memo(({ type, items, onClose, isPinned, onTogglePin, onCreat
                             ? 'bg-zinc-500/10 text-zinc-600 hover:bg-zinc-500/20 dark:text-zinc-400'
                             : 'bg-red-500/10 text-red-600 hover:bg-red-500/20'
                             } ${isFlagging ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        style={{ touchAction: 'manipulation' }}
                     >
                         {isFlagging && (
                             <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24">
@@ -314,6 +315,7 @@ const MarkerPopup = memo(({ type, items, onClose, isPinned, onTogglePin, onCreat
                             ? 'bg-zinc-500/10 text-zinc-600 hover:bg-zinc-500/20 dark:text-zinc-400'
                             : 'bg-amber-500/10 text-amber-600 hover:bg-amber-500/20'
                             }`}
+                        style={{ touchAction: 'manipulation' }}
                     >
                         {isPinned ? 'Remove from Map' : 'Keep on Map'}
                     </button>
@@ -322,6 +324,7 @@ const MarkerPopup = memo(({ type, items, onClose, isPinned, onTogglePin, onCreat
                     <button
                         onClick={onCreateRoute}
                         className="mt-2 w-full py-1.5 rounded-lg text-xs font-medium bg-blue-500/10 text-blue-600 hover:bg-blue-500/20 transition-colors"
+                        style={{ touchAction: 'manipulation' }}
                     >
                         Create Route
                     </button>
@@ -401,7 +404,7 @@ const VehicleToggle = memo(({
     const emojis = { bicycle: '🚲', motorcycle: '🏍️', car: '🚗' };
 
     return (
-        <div className="flex flex-col rounded-[2rem] bg-white/80 dark:bg-white/10 backdrop-blur-md border border-black/5 dark:border-white/10 shadow-lg overflow-hidden transition-all duration-300">
+        <div className="flex flex-col rounded-[2rem] bg-white/80 dark:bg-white/10 backdrop-blur-md border border-black/5 dark:border-white/10 shadow-lg overflow-hidden transition-all duration-300 pointer-events-auto">
             {isExpanded ? (
                 // Expanded: show all vehicle options
                 <div className="flex flex-col gap-1 p-1">
@@ -1691,8 +1694,19 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                     return newMap;
                 });
 
-                // Add flag event to openSpots so aggregation picks it up immediately
-                setOpenSpots(prev => [...prev, signedFlag]);
+                // Add processed spot object to openSpots for aggregation (not raw event)
+                const processedFlagSpot = {
+                    id: signedFlag.id,
+                    lat,
+                    lon,
+                    price: 0,
+                    currency: 'USD',
+                    type: vehicleType,
+                    kind: KINDS.PARKING_AREA_INDICATOR,
+                    created_at: signedFlag.created_at,
+                    tags: signedFlag.tags
+                };
+                setOpenSpots(prev => [...prev, processedFlagSpot]);
 
                 console.log('[Parlens] No-parking flag added for:', geohash);
             }
@@ -2067,6 +2081,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                 <MapGL
                     ref={mapRef}
                     {...viewState}
+                    maxPitch={0}
+                    pitchWithRotate={false}
                     onStyleData={(e) => {
                         const map = e.target;
                         if (map) {
@@ -2776,6 +2792,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                         }
                                         waypoints.push({ lat: markerLat, lon: markerLon, name: 'Destination' });
 
+                                        // Clear existing route before creating new one
+                                        handleRouteChange(null, null, [], false);
                                         setPendingWaypoints(waypoints);
                                         // RouteButton auto-creates route silently via autoCreatePendingRef
                                         setSelectedMarkerPopup(null);
@@ -2960,7 +2978,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
 
 
             {/* Bottom Left Controls */}
-            <div className={`absolute z-[1000] flex flex-col items-start gap-3 animate-in slide-in-from-left-6 transition-opacity duration-300 ${(dropPinMode || isPickingLocation) ? 'opacity-0 pointer-events-none' : 'opacity-100'}`} style={{
+            <div className={`absolute z-[1000] flex flex-col items-start gap-3 animate-in slide-in-from-left-6 transition-opacity duration-300 pointer-events-none ${(dropPinMode || isPickingLocation) ? 'opacity-0' : 'opacity-100'}`} style={{
                 bottom: 'max(1.5rem, calc(env(safe-area-inset-bottom) + 0.5rem))',
                 left: 'max(1rem, env(safe-area-inset-left))'
             }}>
@@ -2980,7 +2998,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                         const code = prompt("Enter Parking Code manually:");
                         if (code) handleScannedCode(code);
                     }}
-                    className="h-12 w-12 flex items-center justify-center rounded-[1.5rem] bg-white/80 dark:bg-zinc-800/80 backdrop-blur-md border border-black/5 dark:border-white/10 shadow-lg text-zinc-600 dark:text-white/70 transition-all active:scale-95"
+                    className="h-12 w-12 flex items-center justify-center rounded-[1.5rem] bg-white/80 dark:bg-zinc-800/80 backdrop-blur-md border border-black/5 dark:border-white/10 shadow-lg text-zinc-600 dark:text-white/70 transition-all active:scale-95 pointer-events-auto"
                     title="Scan QR Code (Long press for manual)"
                 >
                     <div className="relative">
@@ -2997,7 +3015,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                         }
                         setShowListedParking(true);
                     }}
-                    className="h-12 w-12 flex items-center justify-center rounded-[1.5rem] bg-white/80 dark:bg-zinc-800/80 backdrop-blur-md border border-black/5 dark:border-white/10 shadow-lg text-zinc-600 dark:text-white/70 transition-all active:scale-95"
+                    className="h-12 w-12 flex items-center justify-center rounded-[1.5rem] bg-white/80 dark:bg-zinc-800/80 backdrop-blur-md border border-black/5 dark:border-white/10 shadow-lg text-zinc-600 dark:text-white/70 transition-all active:scale-95 pointer-events-auto"
                     title="Listed Parking"
                 >
                     <span className="text-3xl font-light leading-none pb-1">‽</span>
@@ -3005,7 +3023,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             </div>
 
             {/* Bottom Right Controls - Positioned ABOVE Drop Pin 'Done' button if needed? No, Done is top right. */}
-            <div className={`absolute z-[1000] flex flex-col items-end gap-3 animate-in slide-in-from-right-6 transition-opacity duration-300 ${(dropPinMode || isPickingLocation) ? 'opacity-0 pointer-events-none' : 'opacity-100'}`} style={{
+            <div className={`absolute z-[1000] flex flex-col items-end gap-3 animate-in slide-in-from-right-6 transition-opacity duration-300 pointer-events-none ${(dropPinMode || isPickingLocation) ? 'opacity-0' : 'opacity-100'}`} style={{
                 bottom: 'max(1.5rem, calc(env(safe-area-inset-bottom) + 0.5rem))',
                 right: 'max(1rem, env(safe-area-inset-right))'
             }}>
@@ -3020,7 +3038,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                             mapRef.current?.rotateTo(nearestNorth, { duration: 400 });
                             setViewState(prev => ({ ...prev, pitch: 0 }));
                         }}
-                        className="h-12 w-12 flex items-center justify-center rounded-[1.5rem] backdrop-blur-md transition-all active:scale-95 border shadow-lg bg-white/80 dark:bg-zinc-800/80 border-black/5 dark:border-white/10"
+                        className="h-12 w-12 flex items-center justify-center rounded-[1.5rem] backdrop-blur-md transition-all active:scale-95 border shadow-lg bg-white/80 dark:bg-zinc-800/80 border-black/5 dark:border-white/10 pointer-events-auto"
                         title="Reset to true north"
                     >
                         <div
@@ -3185,7 +3203,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                             return 'recentre';
                         });
                     }}
-                    className={`h-12 w-12 flex items-center justify-center rounded-[1.5rem] backdrop-blur-md transition-all active:scale-95 border shadow-lg ${orientationNeedsPermission
+                    className={`h-12 w-12 flex items-center justify-center rounded-[1.5rem] backdrop-blur-md transition-all active:scale-95 border shadow-lg pointer-events-auto ${orientationNeedsPermission
                         ? 'bg-orange-500/20 border-orange-500/50 text-orange-500 animate-pulse'
                         : 'bg-white/80 dark:bg-zinc-800/80 border-black/5 dark:border-white/10 text-zinc-600 dark:text-white/70'
                         }`}
@@ -3207,7 +3225,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                 {!dropPinMode && (
                     <button
                         onClick={() => setRouteModalOpen(true)}
-                        className="h-12 w-12 flex items-center justify-center rounded-[1.5rem] bg-white/80 dark:bg-zinc-800/80 backdrop-blur-md text-zinc-600 dark:text-white/70 active:scale-95 transition-all shadow-lg border border-black/5 dark:border-white/10"
+                        className="h-12 w-12 flex items-center justify-center rounded-[1.5rem] bg-white/80 dark:bg-zinc-800/80 backdrop-blur-md text-zinc-600 dark:text-white/70 active:scale-95 transition-all shadow-lg border border-black/5 dark:border-white/10 pointer-events-auto"
                         title="Create Route"
                     >
                         <Route size={20} />
@@ -3216,7 +3234,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
 
                 {/* Profile Button - Hidden in Drop Pin Mode */}
                 {!dropPinMode && (
-                    <div className="relative z-[1010]">
+                    <div className="relative z-[1010] pointer-events-auto">
                         <ProfileButton
                             setHistorySpots={setHistorySpots}
                             onHelpClick={() => setShowHelp(true)}

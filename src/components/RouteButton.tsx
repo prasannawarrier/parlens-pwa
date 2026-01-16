@@ -462,22 +462,28 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
     useEffect(() => {
         if (pendingWaypoints) {
             if (pendingWaypoints.length > 0) {
+                // Detect if this is a "Create Route" from popup (starts with Current Location)
+                // vs drop-pin mode (should append to existing waypoints)
+                const isFromPopup = pendingWaypoints.some(wp => wp.name === 'Current Location');
+
                 const newWaypoints = pendingWaypoints.map((wp, index) => ({
                     id: crypto.randomUUID(),
-                    name: wp.name || `Pin ${index + 1}`,
+                    name: wp.name || `Pin ${(isFromPopup ? 0 : waypoints.length) + index + 1}`,
                     lat: wp.lat,
                     lon: wp.lon
                 }));
 
-                const totalAfterAdd = newWaypoints.length;
+                // From popup: replace waypoints entirely for fresh route
+                // From drop-pin: append to existing waypoints
+                const finalWaypoints = isFromPopup ? newWaypoints : [...waypoints, ...newWaypoints];
+                const totalAfterAdd = finalWaypoints.length;
 
-                // Clear existing route and replace with new waypoints
-                setWaypoints(newWaypoints);
+                // Clear existing route visualization
+                setWaypoints(finalWaypoints);
                 setRouteCoords(null);
                 setAlternateRouteCoords(null);
                 setShowOnMap(false);
-                // Pass new waypoints to parent so they appear on map
-                onRouteChange(null, null, newWaypoints, false);
+                onRouteChange(null, null, finalWaypoints, false);
                 setSnappedWaypoints({});
 
                 // If we now have 2+ waypoints, auto-create route (no modal needed)

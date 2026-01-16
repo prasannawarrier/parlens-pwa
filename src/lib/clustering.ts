@@ -30,11 +30,11 @@ export interface Cluster<T extends SpotBase> {
  * Lower zoom = lower precision = bigger clusters.
  */
 function getClusterPrecision(zoom: number): number {
-    if (zoom >= 17) return 8;  // ~20m - no clustering
-    if (zoom >= 15) return 7;  // ~150m
-    if (zoom >= 13) return 6;  // ~600m
-    if (zoom >= 11) return 5;  // ~2.4km
-    if (zoom >= 9) return 4;   // ~20km
+    if (zoom >= 14) return 8;  // ~20m - no clustering (was 17)
+    if (zoom >= 12) return 7;  // ~150m (was 15)
+    if (zoom >= 10) return 6;  // ~600m (was 13)
+    if (zoom >= 8) return 5;   // ~2.4km (was 11)
+    if (zoom >= 6) return 4;   // ~20km (was 9)
     return 3;                   // ~150km
 }
 
