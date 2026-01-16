@@ -1694,19 +1694,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                     return newMap;
                 });
 
-                // Add processed spot object to openSpots for aggregation (not raw event)
-                const processedFlagSpot = {
-                    id: signedFlag.id,
-                    lat,
-                    lon,
-                    price: 0,
-                    currency: 'USD',
-                    type: vehicleType,
-                    kind: KINDS.PARKING_AREA_INDICATOR,
-                    created_at: signedFlag.created_at,
-                    tags: signedFlag.tags
-                };
-                setOpenSpots(prev => [...prev, processedFlagSpot]);
+                // Note: Not adding to openSpots here - the userNoParkingFlags map update
+                // will trigger re-render and separation logic will show 🚫 for this geohash
 
                 console.log('[Parlens] No-parking flag added for:', geohash);
             }
@@ -1913,15 +1902,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
 
         for (const s of areaSpots) {
             const geohash = Geohash.encode(s.lat, s.lon, 7);
-            const isNoParking = userNoParkingFlags.has(geohash) || (noParkingFlagCounts.get(geohash) || 0) > 0;
-            if (isNoParking) {
+            // Only show 🚫 for spots that THIS USER has flagged
+            // Other users' flags are shown in popup stats, not as emoji change
+            const isNoParkingForUser = userNoParkingFlags.has(geohash);
+            if (isNoParkingForUser) {
                 noParking.push(s);
             } else {
                 regular.push(s);
             }
         }
         return { regularAreaSpots: regular, noParkingSpots: noParking };
-    }, [areaSpots, userNoParkingFlags, noParkingFlagCounts]);
+    }, [areaSpots, userNoParkingFlags]);
 
     const clusteredAreaSpots = useMemo(() =>
         clusterSpots(regularAreaSpots, zoomLevel, true, 7) // Use maxPrecision 7

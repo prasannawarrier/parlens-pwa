@@ -131,5 +131,7 @@ export function clusterSpots<T extends SpotBase>(
  * Helper to check if an item is a cluster.
  */
 export function isCluster<T extends SpotBase>(item: T | Cluster<T>): item is Cluster<T> {
-    return typeof item.count === 'number' && item.count > 1;
+    // Check for spots array with multiple items (true zoom-level clustering)
+    // This ensures single spots with high report count don't show cluster badge
+    return 'spots' in item && Array.isArray((item as any).spots) && (item as any).spots.length > 1;
 }
