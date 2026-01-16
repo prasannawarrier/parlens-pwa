@@ -158,8 +158,8 @@ UserLocationMarker.displayName = 'UserLocationMarker';
 
 
 // Cluster Marker Component
-const ClusterMarkerContent = memo(({ minPrice, maxPrice, currency, type, count }: {
-    minPrice: number; maxPrice: number; currency: string; type: 'open' | 'history' | 'area'; count?: number
+const ClusterMarkerContent = memo(({ minPrice, maxPrice, currency, type }: {
+    minPrice: number; maxPrice: number; currency: string; type: 'open' | 'history' | 'area'
 }) => {
     const emoji = type === 'area' ? '🅿️' : type === 'open' ? '🅿️' : '🅟';
     const isArea = type === 'area';
@@ -178,12 +178,6 @@ const ClusterMarkerContent = memo(({ minPrice, maxPrice, currency, type, count }
         <div className="flex flex-col items-center justify-center transition-transform active:scale-95 pointer-events-none group">
             <div className={`relative text-[32px] leading-none drop-shadow-md z-10 pointer-events-auto cursor-pointer ${isArea ? 'grayscale' : ''}`}>
                 {emoji}
-                {/* Cluster count badge */}
-                {count && count > 1 && (
-                    <div className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-blue-500 text-white text-[10px] font-bold border-2 border-white shadow-sm">
-                        {count > 99 ? '99+' : count}
-                    </div>
-                )}
             </div>
             <div
                 className={`
@@ -212,11 +206,11 @@ const MarkerPopup = memo(({ type, items, onClose, isPinned, onTogglePin, onCreat
     isFlagging?: boolean;
 }) => {
     // Common container classes for consistent width
-    const containerClasses = "bg-white dark:bg-zinc-800 rounded-xl shadow-xl border border-black/10 dark:border-white/10 p-3 w-[300px] animate-in zoom-in-95 fade-in duration-150 pointer-events-auto relative";
+    const containerClasses = "bg-white dark:bg-zinc-800 rounded-xl shadow-xl border border-black/10 dark:border-white/10 p-3 w-[260px] animate-in zoom-in-95 fade-in duration-150 pointer-events-auto relative";
 
     // Close button
     const CloseButton = () => (
-        <button onClick={onClose} className="absolute top-2 right-2 p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 z-10 bg-white/50 dark:bg-black/20 rounded-full">
+        <button onClick={onClose} className="absolute top-2 right-2 p-1 text-zinc-400 active:text-zinc-600 dark:active:text-zinc-300 z-10 bg-white/50 dark:bg-black/20 rounded-full">
             <X size={14} />
         </button>
     );
@@ -2280,7 +2274,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                         maxPrice={item.maxPrice}
                                         currency={item.currency}
                                         type="open"
-                                        count={(item as any).spots?.length}
                                     />
                                 ) : (
                                     <SpotMarkerContent
@@ -2331,7 +2324,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                         maxPrice={item.maxPrice}
                                         currency={item.currency}
                                         type="area"
-                                        count={(item as any).spots?.length}
                                     />
                                 ) : (
                                     <SpotMarkerContent
@@ -2382,7 +2374,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                         maxPrice={item.maxPrice}
                                         currency={item.currency}
                                         type="area"
-                                        count={(item as any).spots?.length}
                                     />
                                 ) : (
                                     <SpotMarkerContent
@@ -2634,7 +2625,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                         maxPrice={item.maxPrice}
                                         currency={item.currency}
                                         type="history"
-                                        count={(item as any).spots?.length}
                                     />
                                 ) : (
                                     <SpotMarkerContent
