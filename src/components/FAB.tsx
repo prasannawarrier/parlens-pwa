@@ -12,6 +12,7 @@ interface FABProps {
     status: 'idle' | 'search' | 'parked';
     setStatus: (s: 'idle' | 'search' | 'parked') => void;
     searchLocation: [number, number] | null; // Allow null to prevent premptive searches
+    userLocation: [number, number] | null; // User's actual GPS location for parked marker
     vehicleType: 'bicycle' | 'motorcycle' | 'car';
     setOpenSpots: React.Dispatch<React.SetStateAction<any[]>>;
     parkLocation: [number, number] | null;
@@ -26,6 +27,7 @@ export const FAB: React.FC<FABProps> = ({
     status,
     setStatus,
     searchLocation,
+    userLocation,
     vehicleType,
     setOpenSpots,
     parkLocation,
@@ -507,7 +509,8 @@ export const FAB: React.FC<FABProps> = ({
             setStatus('search');
         } else if (status === 'search') {
             setSessionStart(Math.floor(Date.now() / 1000));
-            setParkLocation(searchLocation ? [searchLocation[0], searchLocation[1]] : null);
+            // Use user's actual GPS location for parked marker, not screen center
+            setParkLocation(userLocation ? [userLocation[0], userLocation[1]] : null);
             setStatus('parked');
         } else if (status === 'parked') {
             if (listedParkingSession) {

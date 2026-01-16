@@ -242,7 +242,7 @@ const MarkerPopup = memo(({ type, items, onClose, isPinned, onTogglePin, onCreat
                 {onCreateRoute && (
                     <button
                         onClick={onCreateRoute}
-                        className="mt-3 w-full py-1.5 rounded-lg text-xs font-medium bg-blue-500/10 text-blue-600 hover:bg-blue-500/20 transition-colors"
+                        className="mt-3 w-full py-1.5 rounded-lg text-xs font-medium bg-blue-500/10 text-blue-600 active:bg-blue-500/20 transition-colors"
                     >
                         Create Route
                     </button>
@@ -294,8 +294,8 @@ const MarkerPopup = memo(({ type, items, onClose, isPinned, onTogglePin, onCreat
                         onClick={onFlagNoParking}
                         disabled={isFlagging}
                         className={`mt-3 w-full py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center justify-center gap-2 ${isFlaggedByUser
-                            ? 'bg-zinc-500/10 text-zinc-600 hover:bg-zinc-500/20 dark:text-zinc-400'
-                            : 'bg-red-500/10 text-red-600 hover:bg-red-500/20'
+                            ? 'bg-zinc-500/10 text-zinc-600 active:bg-zinc-500/20 dark:text-zinc-400'
+                            : 'bg-red-500/10 text-red-600 active:bg-red-500/20'
                             } ${isFlagging ? 'opacity-50 cursor-not-allowed' : ''}`}
                         style={{ touchAction: 'manipulation' }}
                     >
@@ -312,8 +312,8 @@ const MarkerPopup = memo(({ type, items, onClose, isPinned, onTogglePin, onCreat
                     <button
                         onClick={onTogglePin}
                         className={`mt-2 w-full py-1.5 rounded-lg text-xs font-medium transition-colors ${isPinned
-                            ? 'bg-zinc-500/10 text-zinc-600 hover:bg-zinc-500/20 dark:text-zinc-400'
-                            : 'bg-amber-500/10 text-amber-600 hover:bg-amber-500/20'
+                            ? 'bg-zinc-500/10 text-zinc-600 active:bg-zinc-500/20 dark:text-zinc-400'
+                            : 'bg-amber-500/10 text-amber-600 active:bg-amber-500/20'
                             }`}
                         style={{ touchAction: 'manipulation' }}
                     >
@@ -323,7 +323,7 @@ const MarkerPopup = memo(({ type, items, onClose, isPinned, onTogglePin, onCreat
                 {onCreateRoute && (
                     <button
                         onClick={onCreateRoute}
-                        className="mt-2 w-full py-1.5 rounded-lg text-xs font-medium bg-blue-500/10 text-blue-600 hover:bg-blue-500/20 transition-colors"
+                        className="mt-2 w-full py-1.5 rounded-lg text-xs font-medium bg-blue-500/10 text-blue-600 active:bg-blue-500/20 transition-colors"
                         style={{ touchAction: 'manipulation' }}
                     >
                         Create Route
@@ -357,8 +357,8 @@ const MarkerPopup = memo(({ type, items, onClose, isPinned, onTogglePin, onCreat
                 <button
                     onClick={onTogglePin}
                     className={`mt-3 w-full py-1.5 rounded-lg text-xs font-medium transition-colors ${isPinned
-                        ? 'bg-zinc-500/10 text-zinc-600 hover:bg-zinc-500/20 dark:text-zinc-400'
-                        : 'bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20'
+                        ? 'bg-zinc-500/10 text-zinc-600 active:bg-zinc-500/20 dark:text-zinc-400'
+                        : 'bg-emerald-500/10 text-emerald-600 active:bg-emerald-500/20'
                         }`}
                 >
                     {isPinned ? 'Remove from Map' : 'Keep on Map'}
@@ -367,7 +367,7 @@ const MarkerPopup = memo(({ type, items, onClose, isPinned, onTogglePin, onCreat
             {onCreateRoute && (
                 <button
                     onClick={onCreateRoute}
-                    className="mt-2 w-full py-1.5 rounded-lg text-xs font-medium bg-blue-500/10 text-blue-600 hover:bg-blue-500/20 transition-colors"
+                    className="mt-2 w-full py-1.5 rounded-lg text-xs font-medium bg-blue-500/10 text-blue-600 active:bg-blue-500/20 transition-colors"
                 >
                     Create Route
                 </button>
@@ -527,24 +527,24 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
 
         const fetchUserFlags = async () => {
             try {
-                // Fetch Kind 31714 events from this user (filter for no-parking-flag tag client-side)
-                // We query all 31714 from user and filter, since relays may not index custom tags
-                const allUserAreaEvents = await pool.querySync(DEFAULT_RELAYS, {
-                    kinds: [KINDS.PARKING_AREA_INDICATOR],
-                    authors: [pubkey]
+                // Fetch Kind 1985 (Label) events from this user with parlens namespace
+                const allUserLabelEvents = await pool.querySync(DEFAULT_RELAYS, {
+                    kinds: [KINDS.LABEL],
+                    authors: [pubkey],
+                    '#L': ['parlens']
                 } as any);
 
                 const userFlags = new Map<string, string>();
-                for (const event of allUserAreaEvents) {
-                    // Check if this event has no-parking-flag tag
-                    const hasNoParkingFlag = event.tags.some((t: string[]) => t[0] === 'no-parking-flag' && t[1] === 'true');
-                    if (!hasNoParkingFlag) continue;
+                for (const event of allUserLabelEvents) {
+                    // Check if this is a no-parking label
+                    const hasNoParkingLabel = event.tags.some((t: string[]) => t[0] === 'l' && t[1] === 'no-parking' && t[2] === 'parlens');
+                    if (!hasNoParkingLabel) continue;
 
                     const geohash = event.tags.find((t: string[]) => t[0] === 'g')?.[1];
                     if (geohash) {
                         const existing = userFlags.get(geohash);
                         // Keep most recent by created_at
-                        const existingEvent = allUserAreaEvents.find((e: any) => e.id === existing);
+                        const existingEvent = allUserLabelEvents.find((e: any) => e.id === existing);
                         if (!existing || event.created_at > (existingEvent?.created_at || 0)) {
                             userFlags.set(geohash, event.id);
                         }
@@ -579,7 +579,18 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
         let hasFlags = false;
 
         openSpots.forEach((spot: any) => {
-            // Only count Kind 31714 with flag
+            // Count Kind 1985 labels with no-parking label
+            if (spot.kind === KINDS.LABEL) {
+                const isNoParkingLabel = spot.tags?.some((t: string[]) => t[0] === 'l' && t[1] === 'no-parking' && t[2] === 'parlens');
+                if (isNoParkingLabel) {
+                    const geohash = spot.tags.find((t: string[]) => t[0] === 'g')?.[1];
+                    if (geohash) {
+                        counts.set(geohash, (counts.get(geohash) || 0) + 1);
+                        hasFlags = true;
+                    }
+                }
+            }
+            // Legacy: Also count Kind 31714 with no-parking-flag tag (for backwards compatibility)
             if (spot.kind === KINDS.PARKING_AREA_INDICATOR) {
                 const isFlagged = spot.tags?.some((t: string[]) => t[0] === 'no-parking-flag' && t[1] === 'true');
                 if (isFlagged) {
@@ -1671,15 +1682,15 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                     console.log('[Parlens] No-parking flag removed for:', geohash);
                 }
             } else {
-                // Add flag - publish Kind 31714 with no-parking-flag tag
+                // Add flag - publish Kind 1985 (NIP-32 Label) for no-parking
                 const flagEvent = {
-                    kind: KINDS.PARKING_AREA_INDICATOR,
+                    kind: KINDS.LABEL,
                     created_at: Math.floor(Date.now() / 1000),
                     tags: [
-                        ['d', geohash],
+                        ['L', 'parlens'],
+                        ['l', 'no-parking', 'parlens'],
                         ['g', geohash],
                         ['location', `${lat},${lon}`],
-                        ['no-parking-flag', 'true'],
                         ['client', 'parlens']
                     ],
                     content: ''
@@ -2597,19 +2608,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                 onClick={(e) => {
                                     e.originalEvent.stopPropagation();
                                     if (isClusterItem) {
-                                        if (viewState.zoom < 18) {
-                                            mapRef.current?.flyTo({ center: [item.lon, item.lat], zoom: viewState.zoom + 2 });
-                                        } else {
-                                            // Max zoom cluster - show popup with count
-                                            const count = (item as any).point_count || 1;
-                                            setSelectedMarkerPopup({
-                                                lat: item.lat,
-                                                lon: item.lon,
-                                                type: 'history',
-                                                id: item.id,
-                                                items: new Array(count).fill({ created_at: 0 })
-                                            });
-                                        }
+                                        // Show popup directly with actual spots from cluster
+                                        setSelectedMarkerPopup({
+                                            lat: item.lat,
+                                            lon: item.lon,
+                                            type: 'history',
+                                            id: item.id,
+                                            items: (item as any).spots || [item]
+                                        });
                                     } else {
                                         // Single item
                                         setSelectedMarkerPopup({
@@ -3239,6 +3245,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                         status={status}
                         setStatus={setStatus}
                         searchLocation={status === 'search' ? [viewState.latitude, viewState.longitude] : location}
+                        userLocation={location}
                         vehicleType={vehicleType}
                         setOpenSpots={setOpenSpots}
                         parkLocation={parkLocation}
