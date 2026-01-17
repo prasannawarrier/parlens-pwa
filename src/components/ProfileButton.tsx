@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Key, X, Shield, ChevronRight, MapPin, Clock, User, Trash2, Plus, Radio, Pencil, Check, EyeOff, Share2 } from 'lucide-react';
+import { Key, X, Shield, ChevronRight, MapPin, Clock, User, Trash2, Plus, Radio, Pencil, Check, EyeOff, Share2, QrCode, ArrowLeft } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useParkingLogs } from '../hooks/useParkingLogs';
 import { nip19 } from 'nostr-tools';
 import { decryptParkingLog, encryptParkingLog } from '../lib/encryption';
 import { getCurrencySymbol, getCountryFlag } from '../lib/currency';
 import { DEFAULT_RELAYS, KINDS } from '../lib/nostr';
+import { QRCodeSVG } from 'qrcode.react';
 
 interface ProfileButtonProps {
     setHistorySpots?: (spots: any[]) => void;
@@ -18,6 +19,7 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
     const { logs, refetch, markDeleted } = useParkingLogs();
     const [isOpen, setIsOpen] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
+    const [showNpubQr, setShowNpubQr] = useState(false);
 
     // Preferred Relays state
     const [preferredRelays, setPreferredRelays] = useState<string[]>([]);
@@ -391,11 +393,20 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
 
                     <div className="relative z-10 w-full max-w-md bg-white dark:bg-[#1c1c1e] rounded-[2rem] shadow-2xl p-6 flex flex-col gap-6 animate-in slide-in-from-bottom-10 duration-300 h-[calc(100vh-1.5rem)] overflow-y-auto no-scrollbar border border-black/5 dark:border-white/5 transition-colors">
 
-                        {/* Header - Username Only */}
+                        {/* Header - Username with QR */}
                         <div className="flex items-center justify-between">
-                            <h2 className="text-xl font-bold bg-gradient-to-r from-blue-500 to-purple-500 dark:from-blue-400 dark:to-purple-400 bg-clip-text text-transparent">
-                                {profile?.name || 'Nostr User'}
-                            </h2>
+                            <div className="flex items-center gap-2 min-w-0">
+                                <h2 className="text-xl font-bold bg-gradient-to-r from-blue-500 to-purple-500 dark:from-blue-400 dark:to-purple-400 bg-clip-text text-transparent truncate max-w-[180px]">
+                                    {profile?.name || 'Nostr User'}
+                                </h2>
+                                <button
+                                    onClick={() => setShowNpubQr(true)}
+                                    className="p-2 rounded-full bg-black/5 dark:bg-white/10 text-zinc-600 dark:text-white/60 active:scale-95 transition-transform shrink-0"
+                                    title="Show npub QR Code"
+                                >
+                                    <QrCode size={18} />
+                                </button>
+                            </div>
                             <div className="flex gap-4 items-center">
                                 <button
                                     onClick={() => onHelpClick?.()} // Don't close profile
@@ -412,443 +423,480 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                             </div>
                         </div>
 
-                        <div className="space-y-4">
-                            <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-white/20 ml-2">My Keys</h4>
-                            <div className="space-y-0.5 rounded-[2rem] overflow-hidden bg-zinc-50 dark:bg-white/[0.03] border border-black/5 dark:border-white/5">
-                                <div className="p-5 flex items-center justify-between transition-colors cursor-pointer" onClick={() => {
-                                    navigator.clipboard.writeText(profile?.npub);
-                                    alert('Copied to clipboard');
-                                }}>
-                                    <div className="flex items-center gap-3">
-                                        <div className="p-2.5 rounded-xl bg-blue-500/10 dark:bg-blue-500/20 text-blue-500 dark:text-blue-400"><Key size={20} /></div>
-                                        <span className="font-semibold text-sm text-zinc-700 dark:text-white">Copy Nostr Public Key (Npub)</span>
-                                    </div>
-                                    <ChevronRight size={18} className="text-zinc-400 dark:text-white/20" />
+                        {/* Npub QR Code Overlay */}
+                        {showNpubQr ? (
+                            <div className="flex-1 flex flex-col items-center justify-center gap-6">
+                                <div className="flex items-center justify-between w-full">
+                                    <h3 className="text-lg font-bold text-zinc-900 dark:text-white">Your npub QR Code</h3>
+                                    <button
+                                        onClick={() => setShowNpubQr(false)}
+                                        className="p-2 rounded-full bg-black/5 dark:bg-white/10 text-zinc-600 dark:text-white/60 active:scale-95 transition-transform"
+                                    >
+                                        <ArrowLeft size={20} />
+                                    </button>
                                 </div>
-                                {localStorage.getItem('parlens_privkey') && (
-                                    <>
-                                        <div className="h-[1px] bg-black/5 dark:bg-white/5 mx-4" />
-                                        <div
-                                            onClick={handleBackupKey}
-                                            className="flex items-center justify-between p-4 cursor-pointer transition-colors active:bg-black/10 dark:active:bg-white/10"
-                                        >
+                                <div className="p-6 bg-white rounded-3xl shadow-lg">
+                                    <QRCodeSVG
+                                        value={profile?.npub || ''}
+                                        size={200}
+                                        level="M"
+                                        includeMargin={true}
+                                    />
+                                </div>
+                                <p className="text-xs text-zinc-500 dark:text-zinc-400 text-center max-w-[240px]">
+                                    Scan this QR code to share your public key (npub)
+                                </p>
+                                <button
+                                    onClick={() => {
+                                        navigator.clipboard.writeText(profile?.npub || '');
+                                        alert('npub copied to clipboard!');
+                                    }}
+                                    className="px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-500 text-white font-bold rounded-full active:scale-95 transition-transform"
+                                >
+                                    Copy npub
+                                </button>
+                            </div>
+                        ) : (
+                            <>
+                                <div className="space-y-4">
+                                    <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-white/20 ml-2">My Keys</h4>
+                                    <div className="space-y-0.5 rounded-[2rem] overflow-hidden bg-zinc-50 dark:bg-white/[0.03] border border-black/5 dark:border-white/5">
+                                        <div className="p-5 flex items-center justify-between transition-colors cursor-pointer" onClick={() => {
+                                            navigator.clipboard.writeText(profile?.npub);
+                                            alert('Copied to clipboard');
+                                        }}>
                                             <div className="flex items-center gap-3">
-                                                <div className="p-2.5 rounded-xl bg-red-500/10 dark:bg-red-500/20 text-red-500"><Shield size={20} /></div>
-                                                <span className="font-semibold text-sm text-zinc-700 dark:text-white">Copy Nostr Secret Key (Nsec)</span>
+                                                <div className="p-2.5 rounded-xl bg-blue-500/10 dark:bg-blue-500/20 text-blue-500 dark:text-blue-400"><Key size={20} /></div>
+                                                <span className="font-semibold text-sm text-zinc-700 dark:text-white">Copy Nostr Public Key (Npub)</span>
                                             </div>
                                             <ChevronRight size={18} className="text-zinc-400 dark:text-white/20" />
                                         </div>
-                                    </>
-                                )}
-                            </div>
-                            <p className="text-xs text-zinc-400 dark:text-white/30 mt-2 ml-2 leading-relaxed">
-                                ⚠️ Store your npub and nsec securely. These are your account access keys and cannot be recovered if lost. Use these keys to login to any Nostr client.
-                            </p>
-                        </div>
-
-                        {/* Preferred Relays Section */}
-                        <div className="space-y-4">
-                            <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-white/20 ml-2">Preferred Relays</h4>
-                            <div className="space-y-0.5 rounded-[2rem] overflow-hidden bg-zinc-50 dark:bg-white/[0.03] border border-black/5 dark:border-white/5">
-                                <button
-                                    onClick={() => setShowPreferredRelays(!showPreferredRelays)}
-                                    className="w-full p-5 flex items-center justify-between transition-colors"
-                                >
-                                    <div className="flex items-center gap-3">
-                                        <div className="p-2.5 rounded-xl bg-green-500/10 dark:bg-green-500/20 text-green-500 dark:text-green-400"><Radio size={20} /></div>
-                                        <span className="font-semibold text-sm text-zinc-700 dark:text-white">Manage Relays ({preferredRelays.length})</span>
-                                    </div>
-                                    <span className="text-xs text-zinc-400 dark:text-white/40">
-                                        {showPreferredRelays ? 'Hide' : 'Show'}
-                                    </span>
-                                </button>
-
-                                {showPreferredRelays && (
-                                    <>
-                                        <div className="h-[1px] bg-black/5 dark:bg-white/5 mx-4" />
-                                        <div className="p-4 space-y-2">
-                                            {isRelayLoading && preferredRelays.length === 0 ? (
-                                                <div className="text-center text-zinc-400 dark:text-white/40 text-sm py-4">
-                                                    Loading...
-                                                </div>
-                                            ) : (
-                                                <>
-                                                    {preferredRelays.map((relay) => (
-                                                        <div
-                                                            key={relay}
-                                                            className="flex items-center justify-between p-3 rounded-xl bg-white dark:bg-white/5 border border-black/5 dark:border-white/10"
-                                                        >
-                                                            <div className="flex items-center gap-3 flex-1 min-w-0">
-                                                                <Radio size={16} className="text-green-500 shrink-0" />
-                                                                <span className="text-sm text-zinc-700 dark:text-white truncate">
-                                                                    {relay.replace('wss://', '')}
-                                                                </span>
-                                                            </div>
-                                                            <button
-                                                                onClick={() => handleRemoveRelay(relay)}
-                                                                disabled={preferredRelays.length <= 1} // Enforce at least one relay
-                                                                className="p-2 rounded-lg text-zinc-400 dark:text-white/40 active:scale-95 transition-transform disabled:opacity-30 disabled:cursor-not-allowed"
-                                                                title={preferredRelays.length <= 1 ? 'At least one relay is required' : 'Remove relay'}
-                                                            >
-                                                                <Trash2 size={16} />
-                                                            </button>
-                                                        </div>
-                                                    ))}
-                                                    <button
-                                                        onClick={() => {
-                                                            setIsAddingRelay(true);
-                                                            setRelayError(null);
-                                                            setNewRelayUrl('');
-                                                        }}
-                                                        className="w-full p-3 flex items-center justify-center gap-2 rounded-xl bg-blue-500/10 dark:bg-blue-500/20 border border-blue-500/20 transition-colors active:scale-[0.98]"
-                                                    >
-                                                        <Plus size={16} className="text-blue-500" />
-                                                        <span className="text-sm font-medium text-blue-600 dark:text-blue-400">Add Relay</span>
-                                                    </button>
-                                                </>
-                                            )}
-                                        </div>
-                                    </>
-                                )}
-                            </div>
-                            <p className="text-xs text-zinc-400 dark:text-white/30 mt-2 ml-2 leading-relaxed">
-                                📡 Relay address(es) listed in this section tell Parlens where to look for and store data. Parlens requires a connection to at least one relay to work.
-                            </p>
-                            {/* Add Relay Modal */}
-                            {isAddingRelay && (
-                                <div
-                                    className="fixed inset-0 z-[3000] flex items-center justify-center bg-black/70 backdrop-blur-sm"
-                                    onClick={() => setIsAddingRelay(false)}
-                                >
-                                    <div
-                                        className="w-[90%] max-w-sm bg-white dark:bg-[#2c2c2e] rounded-2xl p-5 space-y-4 animate-in zoom-in-95 duration-200"
-                                        onClick={(e) => e.stopPropagation()}
-                                    >
-                                        <h3 className="text-lg font-bold text-zinc-900 dark:text-white">
-                                            Add Relay
-                                        </h3>
-                                        <div className="space-y-2">
-                                            <input
-                                                type="text"
-                                                value={newRelayUrl}
-                                                onChange={(e) => {
-                                                    setNewRelayUrl(e.target.value);
-                                                    setRelayError(null);
-                                                }}
-                                                placeholder="wss://relay.example.com"
-                                                className="w-full h-12 rounded-xl bg-zinc-100 dark:bg-white/5 border border-black/5 dark:border-white/10 px-4 text-zinc-900 dark:text-white placeholder:text-zinc-400 dark:placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                                autoFocus
-                                                onKeyDown={(e) => {
-                                                    if (e.key === 'Enter') handleAddRelay();
-                                                    if (e.key === 'Escape') setIsAddingRelay(false);
-                                                }}
-                                            />
-                                            {relayError && (
-                                                <p className="text-xs text-red-500 ml-1">{relayError}</p>
-                                            )}
-                                        </div>
-                                        <div className="flex gap-3">
-                                            <button
-                                                onClick={() => setIsAddingRelay(false)}
-                                                className="flex-1 h-11 rounded-xl bg-zinc-200 dark:bg-white/10 text-zinc-600 dark:text-white/70 font-medium transition-all active:scale-95"
-                                            >
-                                                Cancel
-                                            </button>
-                                            <button
-                                                onClick={handleAddRelay}
-                                                disabled={isRelayLoading || !newRelayUrl.trim()}
-                                                className="flex-1 h-11 rounded-xl bg-[#007AFF] text-white font-medium disabled:opacity-50 transition-all active:scale-95"
-                                            >
-                                                {isRelayLoading ? '...' : 'Add'}
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-
-
-                            {/* Hide List Section */}
-                            <div className="space-y-4">
-                                <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-white/20 ml-2">Hide List</h4>
-                                <div className="space-y-0.5 rounded-[2rem] overflow-hidden bg-zinc-50 dark:bg-white/[0.03] border border-black/5 dark:border-white/5">
-                                    <button
-                                        onClick={() => setShowHideList(!showHideList)}
-                                        className="w-full p-5 flex items-center justify-between transition-colors"
-                                        style={{ WebkitTapHighlightColor: 'transparent' }}
-                                    >
-                                        <div className="flex items-center gap-3">
-                                            <div className="p-2.5 rounded-xl bg-amber-500/10 dark:bg-amber-500/20 text-amber-500"><EyeOff size={20} /></div>
-                                            <span className="font-semibold text-sm text-zinc-700 dark:text-white">Manage List ({hiddenItems.length})</span>
-                                        </div>
-                                        <span className="text-xs text-zinc-400 dark:text-white/40">{showHideList ? 'Hide' : 'Show'}</span>
-                                    </button>
-
-                                    {showHideList && (
-                                        <>
-                                            <div className="h-[1px] bg-black/5 dark:bg-white/5 mx-4" />
-                                            <div className="p-4 space-y-2">
-                                                {hiddenItems.length === 0 ? (
-                                                    <p className="text-sm text-zinc-400 dark:text-white/40 text-center py-2">No hidden items</p>
-                                                ) : (
-                                                    hiddenItems.map(item => (
-                                                        <div key={item.id} className="flex items-center justify-between p-3 rounded-xl bg-white dark:bg-white/5 border border-black/5 dark:border-white/10">
-                                                            <div className="flex items-center gap-2 min-w-0">
-                                                                <span className="shrink-0">{item.type === 'listing' ? '📄' : '👤'}</span>
-                                                                <span className="text-sm text-zinc-600 dark:text-white/70 truncate">{item.name}</span>
-                                                                <span className="shrink-0 text-[10px] uppercase px-1.5 py-0.5 rounded-full bg-zinc-100 dark:bg-white/10 text-zinc-400">{item.type}</span>
-                                                            </div>
-                                                            <button
-                                                                onClick={() => unhideItem(item.id)}
-                                                                className="p-2 text-zinc-400 hover:text-green-500 transition-colors shrink-0"
-                                                                style={{ WebkitTapHighlightColor: 'transparent' }}
-                                                            >
-                                                                <Check size={16} />
-                                                            </button>
-                                                        </div>
-                                                    ))
-                                                )}
-                                            </div>
-                                        </>
-                                    )}
-                                </div>
-                                <p className="text-xs text-zinc-400 dark:text-white/30 text-left ml-2">
-                                    🚫 Items you hide in the listed parking page can be managed here.
-                                </p>
-                            </div>
-
-                            {/* Parking Areas Section */}
-                            <div className="space-y-4">
-                                <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-white/20 ml-2">Parking Areas</h4>
-
-                                {/* Show parking areas on map toggle */}
-                                <div className="flex items-center justify-between p-4 bg-zinc-50 dark:bg-white/5 rounded-[2rem] border border-black/5 dark:border-white/5">
-                                    <div className="flex items-center gap-3">
-                                        <div className="w-10 h-10 flex items-center justify-center rounded-xl bg-zinc-500/10 dark:bg-zinc-500/20 text-zinc-500 dark:text-zinc-400">
-                                            <span className="text-base font-bold">P</span>
-                                        </div>
-                                        <span className="font-semibold text-sm text-zinc-700 dark:text-white">Show parking areas on map</span>
-                                    </div>
-                                    <button
-                                        onClick={() => {
-                                            const newValue = !showParkingAreas;
-                                            setShowParkingAreas(newValue);
-                                            localStorage.setItem('parlens_show_parking_areas', JSON.stringify(newValue));
-                                        }}
-                                        className={`w-12 h-7 rounded-full transition-colors relative ${showParkingAreas ? 'bg-[#007AFF]' : 'bg-zinc-200 dark:bg-white/20'}`}
-                                    >
-                                        <div className={`absolute top-1 bottom-1 w-5 h-5 rounded-full bg-white transition-transform ${showParkingAreas ? 'left-[calc(100%-1.25rem-0.25rem)]' : 'left-1'}`} />
-                                    </button>
-                                </div>
-
-                                {/* Time Filter - Inline with label, only if enabled */}
-                                {showParkingAreas && (
-                                    <div className="flex items-center justify-between ml-2">
-                                        <span className="text-xs text-zinc-400 dark:text-white/30">See areas reported since:</span>
-                                        <select
-                                            value={parkingAreaTimeFilter}
-                                            onChange={(e) => {
-                                                const value = e.target.value as 'today' | 'week' | 'month' | 'year' | 'all';
-                                                setParkingAreaTimeFilter(value);
-                                                localStorage.setItem('parlens_parking_area_filter', value);
-                                            }}
-                                            className="px-2 py-1.5 bg-white dark:bg-zinc-800 border border-black/10 dark:border-white/20 rounded-xl text-[11px] font-medium text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2212%22%20height%3D%2212%22%20viewBox%3D%220%200%2012%2012%22%3E%3Cpath%20fill%3D%22%23888%22%20d%3D%22M2%204l4%204%204-4z%22%2F%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[right_0.5rem_center] pr-6"
-                                        >
-                                            <option value="today">Today</option>
-                                            <option value="week">This Week</option>
-                                            <option value="month">This Month</option>
-                                            <option value="year">This Year</option>
-                                            <option value="all">All Time</option>
-                                        </select>
-                                    </div>
-                                )}
-
-                                {/* Share parking area reports toggle - with Share icon and green highlight */}
-                                <div className="flex items-center justify-between p-4 bg-zinc-50 dark:bg-white/5 rounded-[2rem] border border-black/5 dark:border-white/5">
-                                    <div className="flex items-center gap-3">
-                                        <div className="w-10 h-10 flex items-center justify-center rounded-xl bg-green-500/10 dark:bg-green-500/20 text-green-500 dark:text-green-400">
-                                            <Share2 size={20} />
-                                        </div>
-                                        <span className="font-semibold text-sm text-zinc-700 dark:text-white">Share parking area reports</span>
-                                    </div>
-                                    <button
-                                        onClick={() => {
-                                            const newValue = !shareParkingAreaReports;
-                                            setShareParkingAreaReports(newValue);
-                                            localStorage.setItem('parlens_share_parking_areas', JSON.stringify(newValue));
-                                        }}
-                                        className={`w-12 h-7 rounded-full transition-colors relative ${shareParkingAreaReports ? 'bg-[#007AFF]' : 'bg-zinc-200 dark:bg-white/20'}`}
-                                    >
-                                        <div className={`absolute top-1 bottom-1 w-5 h-5 rounded-full bg-white transition-transform ${shareParkingAreaReports ? 'left-[calc(100%-1.25rem-0.25rem)]' : 'left-1'}`} />
-                                    </button>
-                                </div>
-
-                                {/* Privacy note - outside container */}
-                                <p className="text-xs text-zinc-400 dark:text-white/30 text-left ml-2 leading-relaxed">
-                                    🅿️ Parking areas are reported anonymously shortly after you complete a session. Sharing reports will help other users know where to find parking when visiting the area.
-                                </p>
-                            </div>
-
-                            <div className="space-y-4">
-                                <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-white/20 ml-2">Parking History</h4>
-
-                                {setHistorySpots && (
-                                    <div className="flex items-center justify-between p-4 bg-zinc-50 dark:bg-white/5 rounded-[2rem] border border-black/5 dark:border-white/5">
-                                        <div className="flex items-center gap-3">
-                                            <div className="p-2.5 rounded-xl bg-purple-500/10 dark:bg-purple-500/20 text-purple-500 dark:text-purple-400"><MapPin size={20} /></div>
-                                            <span className="font-semibold text-sm text-zinc-700 dark:text-white">Show logs on map</span>
-                                        </div>
-                                        <button
-                                            onClick={() => setShowHistoryOnMap(!showHistoryOnMap)}
-                                            className={`w-12 h-7 rounded-full transition-colors relative ${showHistoryOnMap ? 'bg-[#007AFF]' : 'bg-zinc-200 dark:bg-white/20'}`}
-                                        >
-                                            <div className={`absolute top-1 bottom-1 w-5 h-5 rounded-full bg-white transition-transform ${showHistoryOnMap ? 'left-[calc(100%-1.25rem-0.25rem)]' : 'left-1'}`} />
-                                        </button>
-                                    </div>
-                                )}
-
-                                {/* Filters Container */}
-                                <div className="space-y-3">
-                                    <div className="flex justify-between items-center gap-2 p-1 bg-zinc-100 dark:bg-white/5 rounded-[1.5rem] border border-black/5 dark:border-white/5">
-                                        {(['all', 'bicycle', 'motorcycle', 'car'] as const).map((type) => (
-                                            <button
-                                                key={type}
-                                                onClick={() => setFilterType(type)}
-                                                className={`flex-1 flex items-center justify-center py-2.5 rounded-[1.2rem] text-sm transition-all active:scale-95 ${filterType === type
-                                                    ? 'bg-white dark:bg-white/10 text-zinc-900 dark:text-white font-bold shadow-sm'
-                                                    : 'text-zinc-400 dark:text-white/40 hover:text-zinc-600 dark:hover:text-white/60'
-                                                    }`}
-                                            >
-                                                {type === 'all' ? 'All' : <span className="text-xl">{type === 'bicycle' ? '🚲' : type === 'motorcycle' ? '🏍️' : '🚗'}</span>}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-
-                                {filteredLogs.length > 0 ? (
-                                    filteredLogs.map((log) => {
-                                        const content = log.decryptedContent;
-                                        const currencySymbol = getCurrencySymbol(content.currency || 'USD');
-                                        const startTime = content.started_at ? new Date(content.started_at * 1000) : null;
-                                        const endTime = content.finished_at ? new Date(content.finished_at * 1000) : new Date(log.created_at * 1000);
-                                        const coords = content.lat && content.lon ? `${content.lat.toFixed(5)}, ${content.lon.toFixed(5)}` : null;
-                                        const duration = formatDuration(startTime, endTime);
-                                        const dateStr = startTime ? startTime.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : endTime.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-
-                                        // Read type from encrypted content (not public tags for privacy)
-                                        const type = content.type || 'car';
-                                        const typeEmoji = type === 'bicycle' ? '🚲' : type === 'motorcycle' ? '🏍️' : '🚗';
-                                        const isEditingNote = editingNoteLogId === log.id;
-
-                                        return (
-                                            <div key={log.id} className="p-5 rounded-[2rem] bg-zinc-50 dark:bg-white/[0.03] space-y-3 border border-black/5 dark:border-white/5 text-zinc-900 dark:text-white">
-                                                <div className="flex items-center justify-between">
+                                        {localStorage.getItem('parlens_privkey') && (
+                                            <>
+                                                <div className="h-[1px] bg-black/5 dark:bg-white/5 mx-4" />
+                                                <div
+                                                    onClick={handleBackupKey}
+                                                    className="flex items-center justify-between p-4 cursor-pointer transition-colors active:bg-black/10 dark:active:bg-white/10"
+                                                >
                                                     <div className="flex items-center gap-3">
-                                                        <span className="text-2xl">{typeEmoji}</span>
-                                                        <p className="font-bold text-xl">{`${currencySymbol}${content.fee || '0'}`}</p>
+                                                        <div className="p-2.5 rounded-xl bg-red-500/10 dark:bg-red-500/20 text-red-500"><Shield size={20} /></div>
+                                                        <span className="font-semibold text-sm text-zinc-700 dark:text-white">Copy Nostr Secret Key (Nsec)</span>
                                                     </div>
-                                                    <div className="flex items-center gap-2">
-                                                        <span className="text-2xl">{getCountryFlag(content.currency || 'USD')}</span>
-                                                        <button
-                                                            onClick={() => handleDeleteLog(log)}
-                                                            className="p-1.5 text-zinc-400 dark:text-white/30 transition-colors"
-                                                            title="Delete entry"
-                                                        >
-                                                            <Trash2 size={16} />
-                                                        </button>
-                                                    </div>
+                                                    <ChevronRight size={18} className="text-zinc-400 dark:text-white/20" />
                                                 </div>
+                                            </>
+                                        )}
+                                    </div>
+                                    <p className="text-xs text-zinc-400 dark:text-white/30 mt-2 ml-2 leading-relaxed">
+                                        ⚠️ Store your npub and nsec securely. These are your account access keys and cannot be recovered if lost. Use these keys to login to any Nostr client.
+                                    </p>
+                                </div>
 
-                                                {/* Duration and Date */}
-                                                <div className="flex items-center gap-4 text-xs">
-                                                    <div className="flex items-center gap-2 text-zinc-500 dark:text-white/50">
-                                                        <Clock size={12} className="text-green-500 dark:text-green-400" />
-                                                        <span className="font-semibold">{duration}</span>
-                                                    </div>
-                                                    <span className="text-zinc-400 dark:text-white/30">{dateStr}</span>
-                                                </div>
+                                {/* Preferred Relays Section */}
+                                <div className="space-y-4">
+                                    <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-white/20 ml-2">Preferred Relays</h4>
+                                    <div className="space-y-0.5 rounded-[2rem] overflow-hidden bg-zinc-50 dark:bg-white/[0.03] border border-black/5 dark:border-white/5">
+                                        <button
+                                            onClick={() => setShowPreferredRelays(!showPreferredRelays)}
+                                            className="w-full p-5 flex items-center justify-between transition-colors"
+                                        >
+                                            <div className="flex items-center gap-3">
+                                                <div className="p-2.5 rounded-xl bg-green-500/10 dark:bg-green-500/20 text-green-500 dark:text-green-400"><Radio size={20} /></div>
+                                                <span className="font-semibold text-sm text-zinc-700 dark:text-white">Manage Relays ({preferredRelays.length})</span>
+                                            </div>
+                                            <span className="text-xs text-zinc-400 dark:text-white/40">
+                                                {showPreferredRelays ? 'Hide' : 'Show'}
+                                            </span>
+                                        </button>
 
-                                                {coords && (
-                                                    <div className="flex items-center gap-2 text-xs text-zinc-400 dark:text-white/40">
-                                                        <MapPin size={12} className="text-[#007AFF]" />
-                                                        <span className="font-mono">{coords}</span>
-                                                    </div>
-                                                )}
-
-                                                {/* Note Section */}
-                                                <div className="flex items-center gap-2 text-xs text-zinc-500 dark:text-white/50 bg-zinc-100 dark:bg-white/5 rounded-lg px-3 py-2">
-                                                    {isEditingNote ? (
-                                                        <>
-                                                            <input
-                                                                type="text"
-                                                                value={editingNoteValue}
-                                                                onChange={(e) => setEditingNoteValue(e.target.value)}
-                                                                placeholder="Add note"
-                                                                className="flex-1 min-w-0 text-sm bg-white dark:bg-white/10 rounded-lg px-2 py-1 text-zinc-700 dark:text-white border border-[#007AFF]"
-                                                                autoFocus
-                                                                onFocus={(e) => e.currentTarget.select()}
-                                                                onKeyDown={(e) => {
-                                                                    if (e.key === 'Enter') handleUpdateNote(log, editingNoteValue);
-                                                                    if (e.key === 'Escape') setEditingNoteLogId(null);
-                                                                }}
-                                                            />
-                                                            <button
-                                                                onClick={() => handleUpdateNote(log, editingNoteValue)}
-                                                                disabled={isSavingNote}
-                                                                className="p-2 rounded-xl text-green-500 bg-green-500/10 transition-colors disabled:opacity-50"
-                                                            >
-                                                                <Check size={16} />
-                                                            </button>
-                                                            <button
-                                                                onClick={() => setEditingNoteLogId(null)}
-                                                                className="p-2 rounded-xl text-zinc-400 bg-zinc-500/10 transition-colors"
-                                                            >
-                                                                <X size={16} />
-                                                            </button>
-                                                        </>
+                                        {showPreferredRelays && (
+                                            <>
+                                                <div className="h-[1px] bg-black/5 dark:bg-white/5 mx-4" />
+                                                <div className="p-4 space-y-2">
+                                                    {isRelayLoading && preferredRelays.length === 0 ? (
+                                                        <div className="text-center text-zinc-400 dark:text-white/40 text-sm py-4">
+                                                            Loading...
+                                                        </div>
                                                     ) : (
                                                         <>
-                                                            <span
-                                                                className={`flex-1 text-left cursor-pointer ${content.note ? '' : 'text-zinc-400 dark:text-white/30'}`}
-                                                                onClick={() => {
-                                                                    setEditingNoteLogId(log.id);
-                                                                    setEditingNoteValue(content.note || '');
-                                                                }}
-                                                            >
-                                                                {content.note || 'Add note'}
-                                                            </span>
+                                                            {preferredRelays.map((relay) => (
+                                                                <div
+                                                                    key={relay}
+                                                                    className="flex items-center justify-between p-3 rounded-xl bg-white dark:bg-white/5 border border-black/5 dark:border-white/10"
+                                                                >
+                                                                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                                                                        <Radio size={16} className="text-green-500 shrink-0" />
+                                                                        <span className="text-sm text-zinc-700 dark:text-white truncate">
+                                                                            {relay.replace('wss://', '')}
+                                                                        </span>
+                                                                    </div>
+                                                                    <button
+                                                                        onClick={() => handleRemoveRelay(relay)}
+                                                                        disabled={preferredRelays.length <= 1} // Enforce at least one relay
+                                                                        className="p-2 rounded-lg text-zinc-400 dark:text-white/40 active:scale-95 transition-transform disabled:opacity-30 disabled:cursor-not-allowed"
+                                                                        title={preferredRelays.length <= 1 ? 'At least one relay is required' : 'Remove relay'}
+                                                                    >
+                                                                        <Trash2 size={16} />
+                                                                    </button>
+                                                                </div>
+                                                            ))}
                                                             <button
                                                                 onClick={() => {
-                                                                    setEditingNoteLogId(log.id);
-                                                                    setEditingNoteValue(content.note || '');
+                                                                    setIsAddingRelay(true);
+                                                                    setRelayError(null);
+                                                                    setNewRelayUrl('');
                                                                 }}
-                                                                className="p-1 text-zinc-400 dark:text-white/30 shrink-0"
+                                                                className="w-full p-3 flex items-center justify-center gap-2 rounded-xl bg-blue-500/10 dark:bg-blue-500/20 border border-blue-500/20 transition-colors active:scale-[0.98]"
                                                             >
-                                                                <Pencil size={12} />
+                                                                <Plus size={16} className="text-blue-500" />
+                                                                <span className="text-sm font-medium text-blue-600 dark:text-blue-400">Add Relay</span>
                                                             </button>
                                                         </>
                                                     )}
                                                 </div>
+                                            </>
+                                        )}
+                                    </div>
+                                    <p className="text-xs text-zinc-400 dark:text-white/30 mt-2 ml-2 leading-relaxed">
+                                        📡 Relay address(es) listed in this section tell Parlens where to look for and store data. Parlens requires a connection to at least one relay to work.
+                                    </p>
+                                    {/* Add Relay Modal */}
+                                    {isAddingRelay && (
+                                        <div
+                                            className="fixed inset-0 z-[3000] flex items-center justify-center bg-black/70 backdrop-blur-sm"
+                                            onClick={() => setIsAddingRelay(false)}
+                                        >
+                                            <div
+                                                className="w-[90%] max-w-sm bg-white dark:bg-[#2c2c2e] rounded-2xl p-5 space-y-4 animate-in zoom-in-95 duration-200"
+                                                onClick={(e) => e.stopPropagation()}
+                                            >
+                                                <h3 className="text-lg font-bold text-zinc-900 dark:text-white">
+                                                    Add Relay
+                                                </h3>
+                                                <div className="space-y-2">
+                                                    <input
+                                                        type="text"
+                                                        value={newRelayUrl}
+                                                        onChange={(e) => {
+                                                            setNewRelayUrl(e.target.value);
+                                                            setRelayError(null);
+                                                        }}
+                                                        placeholder="wss://relay.example.com"
+                                                        className="w-full h-12 rounded-xl bg-zinc-100 dark:bg-white/5 border border-black/5 dark:border-white/10 px-4 text-zinc-900 dark:text-white placeholder:text-zinc-400 dark:placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                        autoFocus
+                                                        onKeyDown={(e) => {
+                                                            if (e.key === 'Enter') handleAddRelay();
+                                                            if (e.key === 'Escape') setIsAddingRelay(false);
+                                                        }}
+                                                    />
+                                                    {relayError && (
+                                                        <p className="text-xs text-red-500 ml-1">{relayError}</p>
+                                                    )}
+                                                </div>
+                                                <div className="flex gap-3">
+                                                    <button
+                                                        onClick={() => setIsAddingRelay(false)}
+                                                        className="flex-1 h-11 rounded-xl bg-zinc-200 dark:bg-white/10 text-zinc-600 dark:text-white/70 font-medium transition-all active:scale-95"
+                                                    >
+                                                        Cancel
+                                                    </button>
+                                                    <button
+                                                        onClick={handleAddRelay}
+                                                        disabled={isRelayLoading || !newRelayUrl.trim()}
+                                                        className="flex-1 h-11 rounded-xl bg-[#007AFF] text-white font-medium disabled:opacity-50 transition-all active:scale-95"
+                                                    >
+                                                        {isRelayLoading ? '...' : 'Add'}
+                                                    </button>
+                                                </div>
                                             </div>
-                                        );
-                                    })
-                                ) : (
-                                    <div className="p-10 rounded-[2.5rem] border-2 border-dashed border-black/5 dark:border-white/5 text-center">
-                                        <p className="text-sm font-medium text-zinc-400 dark:text-white/10">
-                                            {decryptedLogs.length > 0 ? 'No entries match filters' : 'No recent activity'}
+                                        </div>
+                                    )}
+
+
+                                    {/* Hide List Section */}
+                                    <div className="space-y-4">
+                                        <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-white/20 ml-2">Hide List</h4>
+                                        <div className="space-y-0.5 rounded-[2rem] overflow-hidden bg-zinc-50 dark:bg-white/[0.03] border border-black/5 dark:border-white/5">
+                                            <button
+                                                onClick={() => setShowHideList(!showHideList)}
+                                                className="w-full p-5 flex items-center justify-between transition-colors"
+                                                style={{ WebkitTapHighlightColor: 'transparent' }}
+                                            >
+                                                <div className="flex items-center gap-3">
+                                                    <div className="p-2.5 rounded-xl bg-amber-500/10 dark:bg-amber-500/20 text-amber-500"><EyeOff size={20} /></div>
+                                                    <span className="font-semibold text-sm text-zinc-700 dark:text-white">Manage List ({hiddenItems.length})</span>
+                                                </div>
+                                                <span className="text-xs text-zinc-400 dark:text-white/40">{showHideList ? 'Hide' : 'Show'}</span>
+                                            </button>
+
+                                            {showHideList && (
+                                                <>
+                                                    <div className="h-[1px] bg-black/5 dark:bg-white/5 mx-4" />
+                                                    <div className="p-4 space-y-2">
+                                                        {hiddenItems.length === 0 ? (
+                                                            <p className="text-sm text-zinc-400 dark:text-white/40 text-center py-2">No hidden items</p>
+                                                        ) : (
+                                                            hiddenItems.map(item => (
+                                                                <div key={item.id} className="flex items-center justify-between p-3 rounded-xl bg-white dark:bg-white/5 border border-black/5 dark:border-white/10">
+                                                                    <div className="flex items-center gap-2 min-w-0">
+                                                                        <span className="shrink-0">{item.type === 'listing' ? '📄' : '👤'}</span>
+                                                                        <span className="text-sm text-zinc-600 dark:text-white/70 truncate">{item.name}</span>
+                                                                        <span className="shrink-0 text-[10px] uppercase px-1.5 py-0.5 rounded-full bg-zinc-100 dark:bg-white/10 text-zinc-400">{item.type}</span>
+                                                                    </div>
+                                                                    <button
+                                                                        onClick={() => unhideItem(item.id)}
+                                                                        className="p-2 text-zinc-400 hover:text-green-500 transition-colors shrink-0"
+                                                                        style={{ WebkitTapHighlightColor: 'transparent' }}
+                                                                    >
+                                                                        <Check size={16} />
+                                                                    </button>
+                                                                </div>
+                                                            ))
+                                                        )}
+                                                    </div>
+                                                </>
+                                            )}
+                                        </div>
+                                        <p className="text-xs text-zinc-400 dark:text-white/30 text-left ml-2">
+                                            🚫 Items you hide in the listed parking page can be managed here.
                                         </p>
                                     </div>
-                                )}
-                            </div>
-                        </div>
 
-                        <button
-                            onClick={() => { logout(); setIsOpen(false); }}
-                            className="w-full py-5 rounded-[2rem] bg-zinc-100 dark:bg-zinc-800 text-red-500 font-bold tracking-wide border border-black/5 dark:border-white/5 transition-all active:scale-95 text-center mt-4"
-                        >
-                            Logout
-                        </button>
+                                    {/* Parking Areas Section */}
+                                    <div className="space-y-4">
+                                        <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-white/20 ml-2">Parking Areas</h4>
+
+                                        {/* Show parking areas on map toggle */}
+                                        <div className="flex items-center justify-between p-4 bg-zinc-50 dark:bg-white/5 rounded-[2rem] border border-black/5 dark:border-white/5">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-10 h-10 flex items-center justify-center rounded-xl bg-zinc-500/10 dark:bg-zinc-500/20 text-zinc-500 dark:text-zinc-400">
+                                                    <span className="text-base font-bold">P</span>
+                                                </div>
+                                                <span className="font-semibold text-sm text-zinc-700 dark:text-white">Show parking areas on map</span>
+                                            </div>
+                                            <button
+                                                onClick={() => {
+                                                    const newValue = !showParkingAreas;
+                                                    setShowParkingAreas(newValue);
+                                                    localStorage.setItem('parlens_show_parking_areas', JSON.stringify(newValue));
+                                                }}
+                                                className={`w-12 h-7 rounded-full transition-colors relative ${showParkingAreas ? 'bg-[#007AFF]' : 'bg-zinc-200 dark:bg-white/20'}`}
+                                            >
+                                                <div className={`absolute top-1 bottom-1 w-5 h-5 rounded-full bg-white transition-transform ${showParkingAreas ? 'left-[calc(100%-1.25rem-0.25rem)]' : 'left-1'}`} />
+                                            </button>
+                                        </div>
+
+                                        {/* Time Filter - Inline with label, only if enabled */}
+                                        {showParkingAreas && (
+                                            <div className="flex items-center justify-between ml-2">
+                                                <span className="text-xs text-zinc-400 dark:text-white/30">See areas reported since:</span>
+                                                <select
+                                                    value={parkingAreaTimeFilter}
+                                                    onChange={(e) => {
+                                                        const value = e.target.value as 'today' | 'week' | 'month' | 'year' | 'all';
+                                                        setParkingAreaTimeFilter(value);
+                                                        localStorage.setItem('parlens_parking_area_filter', value);
+                                                    }}
+                                                    className="px-2 py-1.5 bg-white dark:bg-zinc-800 border border-black/10 dark:border-white/20 rounded-xl text-[11px] font-medium text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2212%22%20height%3D%2212%22%20viewBox%3D%220%200%2012%2012%22%3E%3Cpath%20fill%3D%22%23888%22%20d%3D%22M2%204l4%204%204-4z%22%2F%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[right_0.5rem_center] pr-6"
+                                                >
+                                                    <option value="today">Today</option>
+                                                    <option value="week">This Week</option>
+                                                    <option value="month">This Month</option>
+                                                    <option value="year">This Year</option>
+                                                    <option value="all">All Time</option>
+                                                </select>
+                                            </div>
+                                        )}
+
+                                        {/* Share parking area reports toggle - with Share icon and green highlight */}
+                                        <div className="flex items-center justify-between p-4 bg-zinc-50 dark:bg-white/5 rounded-[2rem] border border-black/5 dark:border-white/5">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-10 h-10 flex items-center justify-center rounded-xl bg-green-500/10 dark:bg-green-500/20 text-green-500 dark:text-green-400">
+                                                    <Share2 size={20} />
+                                                </div>
+                                                <span className="font-semibold text-sm text-zinc-700 dark:text-white">Share parking area reports</span>
+                                            </div>
+                                            <button
+                                                onClick={() => {
+                                                    const newValue = !shareParkingAreaReports;
+                                                    setShareParkingAreaReports(newValue);
+                                                    localStorage.setItem('parlens_share_parking_areas', JSON.stringify(newValue));
+                                                }}
+                                                className={`w-12 h-7 rounded-full transition-colors relative ${shareParkingAreaReports ? 'bg-[#007AFF]' : 'bg-zinc-200 dark:bg-white/20'}`}
+                                            >
+                                                <div className={`absolute top-1 bottom-1 w-5 h-5 rounded-full bg-white transition-transform ${shareParkingAreaReports ? 'left-[calc(100%-1.25rem-0.25rem)]' : 'left-1'}`} />
+                                            </button>
+                                        </div>
+
+                                        {/* Privacy note - outside container */}
+                                        <p className="text-xs text-zinc-400 dark:text-white/30 text-left ml-2 leading-relaxed">
+                                            🅿️ Parking areas are reported anonymously shortly after you complete a session. Sharing reports will help other users know where to find parking when visiting the area.
+                                        </p>
+                                    </div>
+
+                                    <div className="space-y-4">
+                                        <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-white/20 ml-2">Parking History</h4>
+
+                                        {setHistorySpots && (
+                                            <div className="flex items-center justify-between p-4 bg-zinc-50 dark:bg-white/5 rounded-[2rem] border border-black/5 dark:border-white/5">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="p-2.5 rounded-xl bg-purple-500/10 dark:bg-purple-500/20 text-purple-500 dark:text-purple-400"><MapPin size={20} /></div>
+                                                    <span className="font-semibold text-sm text-zinc-700 dark:text-white">Show logs on map</span>
+                                                </div>
+                                                <button
+                                                    onClick={() => setShowHistoryOnMap(!showHistoryOnMap)}
+                                                    className={`w-12 h-7 rounded-full transition-colors relative ${showHistoryOnMap ? 'bg-[#007AFF]' : 'bg-zinc-200 dark:bg-white/20'}`}
+                                                >
+                                                    <div className={`absolute top-1 bottom-1 w-5 h-5 rounded-full bg-white transition-transform ${showHistoryOnMap ? 'left-[calc(100%-1.25rem-0.25rem)]' : 'left-1'}`} />
+                                                </button>
+                                            </div>
+                                        )}
+
+                                        {/* Filters Container */}
+                                        <div className="space-y-3">
+                                            <div className="flex justify-between items-center gap-2 p-1 bg-zinc-100 dark:bg-white/5 rounded-[1.5rem] border border-black/5 dark:border-white/5">
+                                                {(['all', 'bicycle', 'motorcycle', 'car'] as const).map((type) => (
+                                                    <button
+                                                        key={type}
+                                                        onClick={() => setFilterType(type)}
+                                                        className={`flex-1 flex items-center justify-center py-2.5 rounded-[1.2rem] text-sm transition-all active:scale-95 ${filterType === type
+                                                            ? 'bg-white dark:bg-white/10 text-zinc-900 dark:text-white font-bold shadow-sm'
+                                                            : 'text-zinc-400 dark:text-white/40 hover:text-zinc-600 dark:hover:text-white/60'
+                                                            }`}
+                                                    >
+                                                        {type === 'all' ? 'All' : <span className="text-xl">{type === 'bicycle' ? '🚲' : type === 'motorcycle' ? '🏍️' : '🚗'}</span>}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        {filteredLogs.length > 0 ? (
+                                            filteredLogs.map((log) => {
+                                                const content = log.decryptedContent;
+                                                const currencySymbol = getCurrencySymbol(content.currency || 'USD');
+                                                const startTime = content.started_at ? new Date(content.started_at * 1000) : null;
+                                                const endTime = content.finished_at ? new Date(content.finished_at * 1000) : new Date(log.created_at * 1000);
+                                                const coords = content.lat && content.lon ? `${content.lat.toFixed(5)}, ${content.lon.toFixed(5)}` : null;
+                                                const duration = formatDuration(startTime, endTime);
+                                                const dateStr = startTime ? startTime.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : endTime.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+
+                                                // Read type from encrypted content (not public tags for privacy)
+                                                const type = content.type || 'car';
+                                                const typeEmoji = type === 'bicycle' ? '🚲' : type === 'motorcycle' ? '🏍️' : '🚗';
+                                                const isEditingNote = editingNoteLogId === log.id;
+
+                                                return (
+                                                    <div key={log.id} className="p-5 rounded-[2rem] bg-zinc-50 dark:bg-white/[0.03] space-y-3 border border-black/5 dark:border-white/5 text-zinc-900 dark:text-white">
+                                                        <div className="flex items-center justify-between">
+                                                            <div className="flex items-center gap-3">
+                                                                <span className="text-2xl">{typeEmoji}</span>
+                                                                <p className="font-bold text-xl">{`${currencySymbol}${content.fee || '0'}`}</p>
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-2xl">{getCountryFlag(content.currency || 'USD')}</span>
+                                                                <button
+                                                                    onClick={() => handleDeleteLog(log)}
+                                                                    className="p-1.5 text-zinc-400 dark:text-white/30 transition-colors"
+                                                                    title="Delete entry"
+                                                                >
+                                                                    <Trash2 size={16} />
+                                                                </button>
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Duration and Date */}
+                                                        <div className="flex items-center gap-4 text-xs">
+                                                            <div className="flex items-center gap-2 text-zinc-500 dark:text-white/50">
+                                                                <Clock size={12} className="text-green-500 dark:text-green-400" />
+                                                                <span className="font-semibold">{duration}</span>
+                                                            </div>
+                                                            <span className="text-zinc-400 dark:text-white/30">{dateStr}</span>
+                                                        </div>
+
+                                                        {coords && (
+                                                            <div className="flex items-center gap-2 text-xs text-zinc-400 dark:text-white/40">
+                                                                <MapPin size={12} className="text-[#007AFF]" />
+                                                                <span className="font-mono">{coords}</span>
+                                                            </div>
+                                                        )}
+
+                                                        {/* Note Section */}
+                                                        <div className="flex items-center gap-2 text-xs text-zinc-500 dark:text-white/50 bg-zinc-100 dark:bg-white/5 rounded-lg px-3 py-2">
+                                                            {isEditingNote ? (
+                                                                <>
+                                                                    <input
+                                                                        type="text"
+                                                                        value={editingNoteValue}
+                                                                        onChange={(e) => setEditingNoteValue(e.target.value)}
+                                                                        placeholder="Add note"
+                                                                        className="flex-1 min-w-0 text-sm bg-white dark:bg-white/10 rounded-lg px-2 py-1 text-zinc-700 dark:text-white border border-[#007AFF]"
+                                                                        autoFocus
+                                                                        onFocus={(e) => e.currentTarget.select()}
+                                                                        onKeyDown={(e) => {
+                                                                            if (e.key === 'Enter') handleUpdateNote(log, editingNoteValue);
+                                                                            if (e.key === 'Escape') setEditingNoteLogId(null);
+                                                                        }}
+                                                                    />
+                                                                    <button
+                                                                        onClick={() => handleUpdateNote(log, editingNoteValue)}
+                                                                        disabled={isSavingNote}
+                                                                        className="p-2 rounded-xl text-green-500 bg-green-500/10 transition-colors disabled:opacity-50"
+                                                                    >
+                                                                        <Check size={16} />
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={() => setEditingNoteLogId(null)}
+                                                                        className="p-2 rounded-xl text-zinc-400 bg-zinc-500/10 transition-colors"
+                                                                    >
+                                                                        <X size={16} />
+                                                                    </button>
+                                                                </>
+                                                            ) : (
+                                                                <>
+                                                                    <span
+                                                                        className={`flex-1 text-left cursor-pointer ${content.note ? '' : 'text-zinc-400 dark:text-white/30'}`}
+                                                                        onClick={() => {
+                                                                            setEditingNoteLogId(log.id);
+                                                                            setEditingNoteValue(content.note || '');
+                                                                        }}
+                                                                    >
+                                                                        {content.note || 'Add note'}
+                                                                    </span>
+                                                                    <button
+                                                                        onClick={() => {
+                                                                            setEditingNoteLogId(log.id);
+                                                                            setEditingNoteValue(content.note || '');
+                                                                        }}
+                                                                        className="p-1 text-zinc-400 dark:text-white/30 shrink-0"
+                                                                    >
+                                                                        <Pencil size={12} />
+                                                                    </button>
+                                                                </>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })
+                                        ) : (
+                                            <div className="p-10 rounded-[2.5rem] border-2 border-dashed border-black/5 dark:border-white/5 text-center">
+                                                <p className="text-sm font-medium text-zinc-400 dark:text-white/10">
+                                                    {decryptedLogs.length > 0 ? 'No entries match filters' : 'No recent activity'}
+                                                </p>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <button
+                                    onClick={() => { logout(); setIsOpen(false); }}
+                                    className="w-full py-5 rounded-[2rem] bg-zinc-100 dark:bg-zinc-800 text-red-500 font-bold tracking-wide border border-black/5 dark:border-white/5 transition-all active:scale-95 text-center mt-4"
+                                >
+                                    Logout
+                                </button>
+                            </>
+                        )}
                     </div>
-                </div>
+                </div >
             )}
         </>
     );

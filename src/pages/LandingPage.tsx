@@ -654,28 +654,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
         return matches.slice(0, 3); // Limit to 3 results
     }, [parkingSearchQuery, cachedRoutes]);
 
-    // Search listing names from openSpots (Locality-like search)
-    const listingNameMatches = useMemo(() => {
-        if (!parkingSearchQuery || parkingSearchQuery.length < 2) return [];
-        const query = parkingSearchQuery.toLowerCase();
-        const matchesMap = new Map<string, { name: string; lat: number; lon: number }>();
-
-        for (const spot of openSpots) {
-            const listingName = spot.listing_name;
-            if (listingName && listingName.toLowerCase().includes(query)) {
-                // Avoid duplicates by listing name
-                if (!matchesMap.has(listingName.toLowerCase())) {
-                    matchesMap.set(listingName.toLowerCase(), {
-                        name: listingName,
-                        lat: spot.lat,
-                        lon: spot.lon
-                    });
-                }
-            }
-        }
-        return Array.from(matchesMap.values()).slice(0, 3); // Limit to 3 results
-    }, [parkingSearchQuery, openSpots]);
-
     // State for Pinned Markers (Keep on Map feature)
     const [pinnedMarkers, setPinnedMarkers] = useState<any[]>(() => {
         try {
@@ -936,6 +914,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                 shortName: session.shortName || '',
                 ended_at: Date.now(),
                 fee: endSessionCost,
+                note: endSessionNote, // User's personal note for their parking log
                 currency: 'USD' // TODO: Detect or use listing currency? Default USD for now matching FAB simple logic
             });
 
@@ -1009,6 +988,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
     // Listed Session End Popup State
     const [showListedEndPopup, setShowListedEndPopup] = useState(false);
     const [endSessionCost, setEndSessionCost] = useState('0');
+    const [endSessionNote, setEndSessionNote] = useState('');
     const [pendingEndSession, setPendingEndSession] = useState<any>(null);
 
     // Listed Parking Picker State
@@ -2200,7 +2180,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                     maxZoom={20}
                     renderWorldCopies={true}
                     // Improve tile loading performance - larger cache for faster zoom out
-                    maxTileCacheSize={500}
+                    maxTileCacheSize={1000}
                 >
                     {/* Routes */}
                     {showRoute && alternateRouteCoords && alternateRouteCoords.length > 1 && (
@@ -3445,8 +3425,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                 <X size={20} />
                             </button>
                         </div>
-                        {/* Suggestions List - Multi-source: Coordinates, Saved Waypoints, Listing Names, OSM */}
-                        {(parseCoordinate(parkingSearchQuery) || savedWaypointMatches.length > 0 || listingNameMatches.length > 0 || parkingSearchSuggestions.length > 0) && (
+                        {/* Suggestions List - Multi-source: Coordinates, Saved Waypoints, OSM */}
+                        {(parseCoordinate(parkingSearchQuery) || savedWaypointMatches.length > 0 || parkingSearchSuggestions.length > 0) && (
                             <div className="max-h-80 overflow-y-auto">
                                 {/* Tags Header */}
                                 <div className="px-4 py-2 bg-zinc-50 dark:bg-white/5 border-b border-black/5 dark:border-white/5 flex items-center gap-2 overflow-x-auto">
@@ -3458,11 +3438,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                     {savedWaypointMatches.length > 0 && (
                                         <span className="shrink-0 inline-block px-2.5 py-1 rounded-lg bg-gradient-to-r from-emerald-500/10 to-teal-500/10 dark:from-emerald-500/20 dark:to-teal-500/20 text-[10px] font-bold text-emerald-600 dark:text-emerald-300 uppercase tracking-wider border border-emerald-200 dark:border-emerald-500/20">
                                             Saved Places
-                                        </span>
-                                    )}
-                                    {listingNameMatches.length > 0 && (
-                                        <span className="shrink-0 inline-block px-2.5 py-1 rounded-lg bg-gradient-to-r from-amber-500/10 to-orange-500/10 dark:from-amber-500/20 dark:to-orange-500/20 text-[10px] font-bold text-amber-600 dark:text-amber-300 uppercase tracking-wider border border-amber-200 dark:border-amber-500/20">
-                                            Listings
                                         </span>
                                     )}
                                     {parkingSearchSuggestions.length > 0 && (
@@ -3519,30 +3494,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                             </div>
                                             <div className="text-[10px] text-zinc-400 dark:text-white/40 mt-0.5 uppercase tracking-wider">
                                                 Saved Waypoint
-                                            </div>
-                                        </div>
-                                    </button>
-                                ))}
-                                {/* Listing name matches (orange/amber) */}
-                                {listingNameMatches.map((listing, idx) => (
-                                    <button
-                                        key={`listing-${idx}`}
-                                        onClick={() => handleSelectParkingDestination({
-                                            display_name: listing.name,
-                                            lat: listing.lat,
-                                            lon: listing.lon
-                                        })}
-                                        className="w-full flex items-start gap-3 p-4 text-left hover:bg-zinc-50 dark:hover:bg-white/5 active:bg-zinc-100 transition-colors border-t border-black/5 dark:border-white/5 first:border-t-0 group"
-                                    >
-                                        <div className="mt-0.5 p-2 rounded-full bg-amber-50 dark:bg-amber-500/10 text-amber-500 group-hover:text-amber-600 dark:group-hover:text-amber-400 shrink-0 transition-colors">
-                                            <MapPin size={16} />
-                                        </div>
-                                        <div className="flex-1 min-w-0">
-                                            <div className="text-sm font-semibold text-zinc-900 dark:text-white truncate">
-                                                {listing.name}
-                                            </div>
-                                            <div className="text-[10px] text-zinc-400 dark:text-white/40 mt-0.5 uppercase tracking-wider">
-                                                Parking Listing
                                             </div>
                                         </div>
                                     </button>
@@ -3670,6 +3621,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                         </div>
 
                         <div className="w-full space-y-3">
+                            {/* Note Input */}
+                            <input
+                                type="text"
+                                value={endSessionNote}
+                                onChange={(e) => setEndSessionNote(e.target.value)}
+                                placeholder="Add a note (optional)"
+                                className="w-full px-4 py-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400 dark:placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                            />
                             <button
                                 onClick={handleConfirmEndListedSession}
                                 className="w-full h-14 rounded-[1.5rem] bg-[#007AFF] text-white text-lg font-bold flex items-center justify-center gap-2 shadow-xl active:scale-95 transition-all"
@@ -3682,6 +3641,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                     setShowListedEndPopup(false);
                                     setPendingEndSession(null);
                                     setEndSessionCost('0');
+                                    setEndSessionNote('');
                                 }}
                                 className="w-full text-xs font-bold text-zinc-400 dark:text-white/30 tracking-widest uppercase py-3 transition-colors"
                             >

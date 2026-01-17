@@ -1660,7 +1660,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                             setConfirmedSearchTerm('');
                                             if (currentLocation) setSearchCenter(currentLocation);
                                         }}
-                                        className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-full text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 z-10"
+                                        className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-full text-zinc-400 active:text-zinc-600 dark:active:text-zinc-200 z-10"
                                     >
                                         <X size={16} />
                                     </button>
@@ -1791,7 +1791,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                 <select
                                     value={approverFilter}
                                     onChange={(e) => setApproverFilter(e.target.value as 'all' | 'my' | 'approved' | 'pending')}
-                                    className="pl-2 pr-6 py-1 rounded-full border border-transparent bg-zinc-100 dark:bg-white/5 text-zinc-500 dark:text-zinc-400 text-[10px] font-bold uppercase tracking-wider appearance-none cursor-pointer transition-colors hover:bg-zinc-200 dark:hover:bg-white/10 outline-none"
+                                    className="pl-2 pr-6 py-1 rounded-full border border-transparent bg-zinc-100 dark:bg-white/5 text-zinc-500 dark:text-zinc-400 text-[10px] font-bold uppercase tracking-wider appearance-none cursor-pointer transition-colors active:bg-zinc-200 dark:active:bg-white/10 outline-none"
                                     style={{
                                         backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%239ca3af'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`,
                                         backgroundRepeat: 'no-repeat',
@@ -1812,7 +1812,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                     onClick={() => setShowSavedOnly(!showSavedOnly)}
                                     className={`flex items-center gap-1 px-2 py-1 rounded-full border transition-colors text-[10px] font-bold uppercase tracking-wider ${showSavedOnly
                                         ? 'bg-yellow-500/10 border-yellow-500/20 text-yellow-600 dark:text-yellow-400'
-                                        : 'bg-zinc-100 dark:bg-white/5 border-transparent text-zinc-500 hover:bg-zinc-200 dark:hover:bg-white/10'
+                                        : 'bg-zinc-100 dark:bg-white/5 border-transparent text-zinc-500 active:bg-zinc-200 dark:active:bg-white/10'
                                         }`}
                                 >
                                     <Star size={12} className={showSavedOnly ? 'fill-yellow-500 stroke-yellow-500' : 'fill-transparent stroke-zinc-400'} />
