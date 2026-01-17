@@ -1,43 +1,50 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
+import NoSleep from 'nosleep.js';
 
+/**
+ * useWakeLock - Prevents screen from sleeping
+ * Uses NoSleep.js for cross-browser support (iOS, Android, Desktop)
+ * NoSleep.js uses hidden video playback on iOS and native Wake Lock API where available
+ */
 export const useWakeLock = () => {
-    const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+    const noSleepRef = useRef<NoSleep | null>(null);
     const shouldBeLockedRef = useRef(false); // Track intent separately from actual state
     const [isLocked, setIsLocked] = useState(false);
 
+    // Initialize NoSleep instance
+    useEffect(() => {
+        noSleepRef.current = new NoSleep();
+        return () => {
+            // Cleanup on unmount
+            if (noSleepRef.current) {
+                noSleepRef.current.disable();
+            }
+        };
+    }, []);
+
     const requestLock = useCallback(async () => {
         shouldBeLockedRef.current = true; // Mark intent to be locked
-        if ('wakeLock' in navigator) {
+        if (noSleepRef.current) {
             try {
-                const lock = await navigator.wakeLock.request('screen');
-                wakeLockRef.current = lock;
+                await noSleepRef.current.enable();
                 setIsLocked(true);
-
-                lock.addEventListener('release', () => {
-                    setIsLocked(false);
-                    wakeLockRef.current = null;
-                    // Note: shouldBeLockedRef remains true if user didn't explicitly release
-                });
-                console.log('[Parlens] Screen Wake Lock acquired');
+                console.log('[Parlens] NoSleep Wake Lock acquired (cross-browser)');
             } catch (err) {
-                console.warn('[Parlens] Failed to acquire Wake Lock:', err);
+                console.warn('[Parlens] Failed to acquire NoSleep Wake Lock:', err);
                 setIsLocked(false);
             }
-        } else {
-            console.warn('[Parlens] Wake Lock API not supported');
         }
     }, []);
 
     const releaseLock = useCallback(async () => {
         shouldBeLockedRef.current = false; // Clear intent when explicitly released
-        if (wakeLockRef.current) {
+        if (noSleepRef.current) {
             try {
-                await wakeLockRef.current.release();
-                wakeLockRef.current = null;
+                noSleepRef.current.disable();
                 setIsLocked(false);
-                console.log('[Parlens] Screen Wake Lock released');
+                console.log('[Parlens] NoSleep Wake Lock released');
             } catch (err) {
-                console.warn('[Parlens] Failed to release Wake Lock:', err);
+                console.warn('[Parlens] Failed to release NoSleep Wake Lock:', err);
             }
         }
     }, []);
@@ -57,7 +64,7 @@ export const useWakeLock = () => {
         return () => {
             document.removeEventListener('visibilitychange', handleVisibilityChange);
         };
-    }, [requestLock]); // Removed isLocked dependency as we now use ref
+    }, [requestLock]);
 
     return { requestLock, releaseLock, isLocked };
 };

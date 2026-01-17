@@ -30,6 +30,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         console.log('[Parlens] Relay health monitor initialized for:', DEFAULT_RELAYS);
     }, []);
 
+    // Reset relay health when app comes back from background (iOS reliability)
+    useEffect(() => {
+        let lastHiddenTime = 0;
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'hidden') {
+                lastHiddenTime = Date.now();
+            } else if (document.visibilityState === 'visible' && lastHiddenTime > 0) {
+                const hiddenDuration = Date.now() - lastHiddenTime;
+                // If backgrounded for more than 5 seconds, reset relay health
+                // This helps reconnect stale connections on iOS
+                if (hiddenDuration > 5000) {
+                    console.log('[Parlens] App resumed after', hiddenDuration, 'ms - resetting relay health');
+                    relayHealthMonitor.resetAll();
+                }
+            }
+        };
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+    }, []);
+
     const login = async (method: 'extension' | 'nsec' | 'bunker' | 'create', value?: string, username?: string) => {
         let key = '';
         let privateKey: Uint8Array | null = null;
