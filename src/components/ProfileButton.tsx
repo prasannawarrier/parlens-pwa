@@ -400,11 +400,11 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                                     {profile?.name || 'Nostr User'}
                                 </h2>
                                 <button
-                                    onClick={() => setShowNpubQr(true)}
-                                    className="p-2 rounded-full bg-black/5 dark:bg-white/10 text-zinc-600 dark:text-white/60 active:scale-95 transition-transform shrink-0"
-                                    title="Show npub QR Code"
+                                    onClick={() => setShowNpubQr(!showNpubQr)}
+                                    className="w-10 h-10 flex items-center justify-center rounded-full bg-black/5 dark:bg-white/10 text-zinc-600 dark:text-white/60 active:scale-95 transition-transform shrink-0"
+                                    title={showNpubQr ? "Back to profile" : "Show npub QR Code"}
                                 >
-                                    <QrCode size={18} />
+                                    {showNpubQr ? <ArrowLeft size={20} /> : <QrCode size={20} />}
                                 </button>
                             </div>
                             <div className="flex gap-4 items-center">
@@ -425,36 +425,15 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
 
                         {/* Npub QR Code Overlay */}
                         {showNpubQr ? (
-                            <div className="flex-1 flex flex-col items-center justify-center gap-6">
-                                <div className="flex items-center justify-between w-full">
-                                    <h3 className="text-lg font-bold text-zinc-900 dark:text-white">Your npub QR Code</h3>
-                                    <button
-                                        onClick={() => setShowNpubQr(false)}
-                                        className="p-2 rounded-full bg-black/5 dark:bg-white/10 text-zinc-600 dark:text-white/60 active:scale-95 transition-transform"
-                                    >
-                                        <ArrowLeft size={20} />
-                                    </button>
-                                </div>
-                                <div className="p-6 bg-white rounded-3xl shadow-lg">
-                                    <QRCodeSVG
-                                        value={profile?.npub || ''}
-                                        size={200}
-                                        level="M"
-                                        includeMargin={true}
-                                    />
-                                </div>
-                                <p className="text-xs text-zinc-500 dark:text-zinc-400 text-center max-w-[240px]">
-                                    Scan this QR code to share your public key (npub)
-                                </p>
-                                <button
-                                    onClick={() => {
-                                        navigator.clipboard.writeText(profile?.npub || '');
-                                        alert('npub copied to clipboard!');
-                                    }}
-                                    className="px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-500 text-white font-bold rounded-full active:scale-95 transition-transform"
-                                >
-                                    Copy npub
-                                </button>
+                            <div className="flex-1 flex items-center justify-center">
+                                <QRCodeSVG
+                                    value={profile?.npub || ''}
+                                    size={240}
+                                    level="M"
+                                    bgColor="transparent"
+                                    fgColor="currentColor"
+                                    className="text-zinc-900 dark:text-white"
+                                />
                             </div>
                         ) : (
                             <>

@@ -1286,11 +1286,6 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
             await Promise.allSettled(pool.publish(DEFAULT_RELAYS, await signEvent(deleteEvent)));
             setListings(prev => prev.filter(l => l.id !== listing.id));
 
-            // Also add to hidden items to ensure spots disappear from map implementation immediately
-            const newHidden = [...hiddenItems, { id: listing.d, name: listing.listing_name, type: 'listing' as const }];
-            setHiddenItems(newHidden);
-            localStorage.setItem('parlens-hidden-items', JSON.stringify(newHidden));
-
             setSelectedListing(null);
         } catch (e) { console.error(e); } finally { setIsDeleting(false); }
     };

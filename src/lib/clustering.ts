@@ -31,10 +31,10 @@ export interface Cluster<T extends SpotBase> {
  */
 function getClusterPrecision(zoom: number): number {
     if (zoom >= 16) return 8;  // ~20m - no clustering at max zoom
-    if (zoom >= 14) return 7;  // ~150m (was 8 at 14, now groups overlapping markers)
-    if (zoom >= 12) return 6;  // ~600m (was 7)
-    if (zoom >= 10) return 5;  // ~2.4km (was 6)
-    if (zoom >= 8) return 4;   // ~20km (was 5)
+    if (zoom >= 15) return 7;  // ~50m at high zoom
+    if (zoom >= 12) return 6;  // ~150m
+    if (zoom >= 10) return 5;  // ~600m
+    if (zoom >= 8) return 4;   // ~2.4km
     return 3;                   // ~150km
 }
 

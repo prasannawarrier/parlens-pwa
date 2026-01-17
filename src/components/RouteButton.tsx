@@ -486,8 +486,9 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                 onRouteChange(null, null, finalWaypoints, false);
                 setSnappedWaypoints({});
 
-                // If we now have 2+ waypoints, auto-create route (no modal needed)
-                if (totalAfterAdd >= 2) {
+                // If we now have 2+ waypoints AND from popup, auto-create route
+                // Don't auto-create in drop-pin mode - let user manually create when ready
+                if (isFromPopup && totalAfterAdd >= 2) {
                     autoCreatePendingRef.current = true;
                 }
             }

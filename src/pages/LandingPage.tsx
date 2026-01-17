@@ -1679,8 +1679,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                     return newMap;
                 });
 
-                // Note: Not adding to openSpots here - the userNoParkingFlags map update
-                // will trigger re-render and separation logic will show 🚫 for this geohash
+                // Add to openSpots for immediate count aggregation
+                setOpenSpots(prev => [...prev, {
+                    id: signedFlag.id,
+                    kind: KINDS.LABEL,
+                    tags: signedFlag.tags,
+                    lat, lon,
+                    price: 0,
+                    currency: 'INR',
+                    created_at: signedFlag.created_at,
+                    pubkey
+                }]);
 
                 console.log('[Parlens] No-parking flag added for:', geohash);
             }
@@ -3270,7 +3279,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                         >
                             <button
                                 onClick={() => setShowHelp(false)}
-                                className="absolute top-6 left-6 p-2 rounded-full transition-colors text-black/60 dark:text-white/60 hover:bg-black/10 dark:hover:bg-white/20"
+                                className="absolute top-6 right-6 p-2 rounded-full bg-black/5 dark:bg-white/10 text-zinc-600 dark:text-white/60 active:scale-95 transition-transform"
                             >
                                 <ArrowLeft size={20} />
                             </button>
