@@ -3404,7 +3404,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
 
             {/* Parking Search Bar Overlay */}
             {showParkingSearchBar && (
-                <div className="fixed top-0 left-0 right-0 z-[1800] flex flex-col items-center px-4 pt-12 pointer-events-none animate-in fade-in">
+                <div className="fixed top-0 left-0 right-0 z-[1800] flex flex-col items-center px-4 pt-16 pointer-events-none animate-in fade-in">
                     {/* Search Card - Explicitly enable pointer events */}
                     <div className="w-full max-w-md bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl border border-black/10 dark:border-white/10 overflow-hidden pointer-events-auto">
                         {/* Search Input Row */}

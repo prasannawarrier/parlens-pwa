@@ -329,6 +329,48 @@ export const FAB: React.FC<FABProps> = ({
                     console.error('[Parlens] Batch 1 (Kind 31714) failed:', e);
                 }
 
+                // === BATCH 1.5: No-Parking Labels (Kind 1985) ===
+                // Fetch Kind 1985 labels with no-parking tag for visible area
+                try {
+                    const noParkingLabelEvents = await pool.querySync(
+                        DEFAULT_RELAYS,
+                        {
+                            kinds: [KINDS.LABEL],
+                            '#g': queryGeohashes,
+                            '#L': ['parlens'],
+                            '#l': ['no-parking']
+                        } as any
+                    );
+
+                    // Add no-parking labels to openSpots for aggregation
+                    for (const event of noParkingLabelEvents) {
+                        const geohash = event.tags.find((t: string[]) => t[0] === 'g')?.[1];
+                        const locationTag = event.tags.find((t: string[]) => t[0] === 'location')?.[1];
+                        if (!geohash) continue;
+
+                        // Create a spot-like object for aggregation
+                        const labelSpot = {
+                            id: event.id,
+                            kind: KINDS.LABEL,
+                            tags: event.tags,
+                            lat: locationTag ? parseFloat(locationTag.split(',')[0]) : 0,
+                            lon: locationTag ? parseFloat(locationTag.split(',')[1]) : 0,
+                            price: 0,
+                            currency: 'INR',
+                            created_at: event.created_at,
+                            pubkey: event.pubkey
+                        };
+                        spotsMapRef.current.set(event.id, labelSpot);
+                    }
+
+                    if (noParkingLabelEvents.length > 0) {
+                        setOpenSpots(Array.from(spotsMapRef.current.values()));
+                        console.log('[Parlens] Batch 1.5 (Kind 1985 no-parking) loaded:', noParkingLabelEvents.length, 'labels');
+                    }
+                } catch (e) {
+                    console.error('[Parlens] Batch 1.5 (Kind 1985 no-parking) failed:', e);
+                }
+
                 // === BATCH 2: Listed Spot Logs (Kind 1714) + Orphan Validation ===
                 // Combined to ensure orphans never appear temporarily on the map
                 try {
