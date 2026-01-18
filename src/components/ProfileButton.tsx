@@ -68,7 +68,7 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
     // Parking Area Reporting settings
     const [showParkingAreas, setShowParkingAreas] = useState(() => {
         const saved = localStorage.getItem('parlens_show_parking_areas');
-        return saved ? JSON.parse(saved) : false;
+        return saved ? JSON.parse(saved) : true;
     });
     const [parkingAreaTimeFilter, setParkingAreaTimeFilter] = useState<'today' | 'week' | 'month' | 'year' | 'all'>(() => {
         const saved = localStorage.getItem('parlens_parking_area_filter');
@@ -477,17 +477,6 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                         {/* Npub QR Code Overlay */}
                         {showNpubQr ? (
                             <div className="flex-1 flex flex-col items-center justify-center gap-4">
-                                {/* Edit Username Button */}
-                                <button
-                                    onClick={() => {
-                                        setEditedName(profile?.name || '');
-                                        setEditingUsername(true);
-                                    }}
-                                    className="flex items-center gap-2 px-4 py-2 rounded-full bg-black/5 dark:bg-white/10 text-zinc-600 dark:text-white/60 active:scale-95 transition-transform text-sm font-medium"
-                                >
-                                    <Pencil size={14} />
-                                    Edit Username
-                                </button>
                                 <QRCodeSVG
                                     value={profile?.npub || ''}
                                     size={200}
@@ -504,6 +493,17 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                                     className="text-xs text-zinc-500 dark:text-zinc-400 font-mono break-all text-center px-4 active:text-zinc-900 dark:active:text-white transition-colors"
                                 >
                                     {profile?.npub?.slice(0, 20)}...{profile?.npub?.slice(-8)}
+                                </button>
+                                {/* Edit Username Button */}
+                                <button
+                                    onClick={() => {
+                                        setEditedName(profile?.name || '');
+                                        setEditingUsername(true);
+                                    }}
+                                    className="flex items-center gap-2 px-4 py-2 rounded-full bg-black/5 dark:bg-white/10 text-zinc-600 dark:text-white/60 active:scale-95 transition-transform text-sm font-medium"
+                                >
+                                    <Pencil size={14} />
+                                    Edit Username
                                 </button>
                             </div>
                         ) : (
@@ -790,7 +790,7 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                                         {setHistorySpots && (
                                             <div className="flex items-center justify-between p-4 bg-zinc-50 dark:bg-white/5 rounded-[2rem] border border-black/5 dark:border-white/5">
                                                 <div className="flex items-center gap-3">
-                                                    <div className="p-2.5 rounded-xl bg-purple-500/10 dark:bg-purple-500/20 text-purple-500 dark:text-purple-400"><MapPin size={20} /></div>
+                                                    <div className="w-10 h-10 flex items-center justify-center rounded-xl bg-purple-500/10 dark:bg-purple-500/20 text-purple-500 dark:text-purple-400"><MapPin size={20} /></div>
                                                     <span className="font-semibold text-sm text-zinc-700 dark:text-white">Show logs on map</span>
                                                 </div>
                                                 <button

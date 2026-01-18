@@ -352,7 +352,7 @@ const MarkerPopup = memo(({ type, items, onClose, isPinned, onTogglePin, onCreat
                     onClick={onTogglePin}
                     className={`mt-3 w-full py-1.5 rounded-lg text-xs font-medium transition-colors ${isPinned
                         ? 'bg-zinc-500/10 text-zinc-600 active:bg-zinc-500/20 dark:text-zinc-400'
-                        : 'bg-emerald-500/10 text-emerald-600 active:bg-emerald-500/20'
+                        : 'bg-amber-500/10 text-amber-600 active:bg-amber-500/20'
                         }`}
                 >
                     {isPinned ? 'Remove from Map' : 'Keep on Map'}
@@ -493,6 +493,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
         authorizer?: string;
         tempPubkey?: string;
         listingLocation?: [number, number];
+        spotType?: string;
+        hourlyRate?: number;
+        currency?: string;
     } | null>(() => {
         const saved = localStorage.getItem('parlens_listed_parking_session');
         return saved ? JSON.parse(saved) : null;
@@ -1663,14 +1666,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                     // Remove flag from openSpots so aggregation updates count
                     setOpenSpots(prev => prev.filter(s => s.id !== existingEventId));
 
-                    // Also decrement count directly for immediate feedback
-                    setNoParkingFlagCounts(prev => {
-                        const newCounts = new Map(prev);
-                        const current = newCounts.get(geohash) || 0;
-                        if (current > 1) newCounts.set(geohash, current - 1);
-                        else newCounts.delete(geohash);
-                        return newCounts;
-                    });
+                    // Count will update automatically via openSpots aggregation effect
 
                     console.log('[Parlens] No-parking flag removed for:', geohash);
                 }
@@ -1710,12 +1706,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                     pubkey
                 }]);
 
-                // Also update count directly for immediate feedback
-                setNoParkingFlagCounts(prev => {
-                    const newCounts = new Map(prev);
-                    newCounts.set(geohash, (newCounts.get(geohash) || 0) + 1);
-                    return newCounts;
-                });
+                // Count will update automatically via openSpots aggregation effect
 
                 console.log('[Parlens] No-parking flag added for:', geohash);
             }
@@ -1889,7 +1880,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
 
         // Check toggle setting
         try {
-            const showAreas = JSON.parse(localStorage.getItem('parlens_show_parking_areas') || 'false');
+            const showAreas = JSON.parse(localStorage.getItem('parlens_show_parking_areas') || 'true');
             if (!showAreas) return pinnedAreaItems;
         } catch { }
 
@@ -2703,18 +2694,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                     >
                                         <X size={14} />
                                     </button>
-                                    <div className="flex items-start gap-2 pr-5">
-                                        <div className="mt-0.5 p-1.5 rounded-full bg-amber-500/10 text-amber-500 shrink-0">
-                                            <MapPin size={14} />
-                                        </div>
-                                        <div className="flex-1 min-w-0">
-                                            <div className="text-sm font-semibold text-zinc-900 dark:text-white truncate">
-                                                {parkingSearchMarker.name.split(',')[0]}
-                                            </div>
-                                            <div className="text-[10px] text-zinc-400 dark:text-white/40 truncate">
-                                                {parkingSearchMarker.name.split(',').slice(1).join(',').trim() || 'Search destination'}
-                                            </div>
-                                        </div>
+                                    <div className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">Location Pin</div>
+                                    <div className="font-semibold text-sm text-zinc-900 dark:text-white truncate">
+                                        {parkingSearchMarker.name.split(',')[0]}
+                                    </div>
+                                    <div className="text-[10px] text-zinc-400 dark:text-white/40 truncate mt-0.5">
+                                        {parkingSearchMarker.name.split(',').slice(1).join(',').trim() || `${parkingSearchMarker.lat.toFixed(5)}, ${parkingSearchMarker.lon.toFixed(5)}`}
                                     </div>
                                     <div className="mt-2 flex gap-2">
                                         <button
@@ -2722,7 +2707,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                                 // Just close popup - marker stays
                                                 setParkingSearchMarker(null);
                                             }}
-                                            className="flex-1 py-2 rounded-lg bg-zinc-100 dark:bg-white/10 text-zinc-600 dark:text-white/70 text-xs font-semibold active:bg-zinc-200 dark:active:bg-white/20 transition-colors flex items-center justify-center gap-1.5"
+                                            className="flex-1 py-2 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 text-xs font-semibold active:bg-amber-500/20 transition-colors flex items-center justify-center gap-1.5"
                                         >
                                             <MapPin size={14} />
                                             Keep on Map
@@ -2737,7 +2722,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                                     { lat, lon, name: name.split(',')[0] }
                                                 ]);
                                             }}
-                                            className="flex-1 py-2 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 text-xs font-semibold active:bg-amber-500/20 transition-colors flex items-center justify-center gap-1.5"
+                                            className="flex-1 py-2 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 text-xs font-semibold active:bg-blue-500/20 transition-colors flex items-center justify-center gap-1.5"
                                         >
                                             <Route size={14} />
                                             Create Route
@@ -3600,14 +3585,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                         </div>
                                     </button>
                                 ))}
-                                {/* OSM online search results (amber for parking search) */}
+                                {/* OSM online search results (violet for parking search, matching waypoint search) */}
                                 {parkingSearchSuggestions.map((result: any, idx: number) => (
                                     <button
                                         key={`osm-${idx}`}
                                         onClick={() => handleSelectParkingDestination(result)}
                                         className="w-full flex items-start gap-3 p-4 text-left hover:bg-zinc-50 dark:hover:bg-white/5 active:bg-zinc-100 transition-colors border-t border-black/5 dark:border-white/5 first:border-t-0 group"
                                     >
-                                        <div className="mt-0.5 p-2 rounded-full shrink-0 transition-colors bg-amber-50 dark:bg-amber-500/10 text-amber-500 group-hover:text-amber-600 dark:group-hover:text-amber-400">
+                                        <div className="mt-0.5 p-2 rounded-full shrink-0 transition-colors bg-violet-50 dark:bg-violet-500/10 text-violet-500 group-hover:text-violet-600 dark:group-hover:text-violet-400">
                                             <MapPin size={16} />
                                         </div>
                                         <div className="flex-1 min-w-0">
@@ -3685,7 +3670,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
 
                         <div className="flex items-center gap-4">
                             <div className="flex items-center gap-3 bg-zinc-100 dark:bg-white/5 px-5 py-4 rounded-[1.5rem] border border-black/5 dark:border-white/5">
-                                <span className="text-2xl font-bold text-blue-500">$</span>
+                                <span className="text-2xl font-bold text-blue-500">{listedParkingSession?.currency === 'INR' ? '₹' : listedParkingSession?.currency === 'EUR' ? '€' : listedParkingSession?.currency === 'GBP' ? '£' : '$'}</span>
                                 <input
                                     type="number"
                                     value={endSessionCost}
@@ -3694,7 +3679,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                     className="w-20 bg-transparent text-4xl font-black text-center text-zinc-900 dark:text-white focus:outline-none placeholder:text-zinc-300 dark:placeholder:text-white/10 appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]"
                                     min="0"
                                 />
-                                <span className="text-sm font-bold text-zinc-400 dark:text-white/20">USD</span>
+                                <span className="text-sm font-bold text-zinc-400 dark:text-white/20">{listedParkingSession?.currency || 'USD'}</span>
                             </div>
 
                             <div className="flex flex-col gap-1.5">
