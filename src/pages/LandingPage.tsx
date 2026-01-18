@@ -206,7 +206,7 @@ const MarkerPopup = memo(({ type, items, onClose, isPinned, onTogglePin, onCreat
     isFlagging?: boolean;
 }) => {
     // Common container classes for consistent width
-    const containerClasses = "bg-white dark:bg-zinc-800 rounded-xl shadow-xl border border-black/10 dark:border-white/10 p-3 w-[260px] animate-in zoom-in-95 fade-in duration-150 pointer-events-auto relative";
+    const containerClasses = "bg-white dark:bg-zinc-800 rounded-xl shadow-xl border border-black/10 dark:border-white/10 p-3 w-[240px] animate-in zoom-in-95 fade-in duration-150 pointer-events-auto relative";
 
     // Close button
     const CloseButton = () => (
@@ -1653,6 +1653,15 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                     // Remove flag from openSpots so aggregation updates count
                     setOpenSpots(prev => prev.filter(s => s.id !== existingEventId));
 
+                    // Also decrement count directly for immediate feedback
+                    setNoParkingFlagCounts(prev => {
+                        const newCounts = new Map(prev);
+                        const current = newCounts.get(geohash) || 0;
+                        if (current > 1) newCounts.set(geohash, current - 1);
+                        else newCounts.delete(geohash);
+                        return newCounts;
+                    });
+
                     console.log('[Parlens] No-parking flag removed for:', geohash);
                 }
             } else {
@@ -1690,6 +1699,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                     created_at: signedFlag.created_at,
                     pubkey
                 }]);
+
+                // Also update count directly for immediate feedback
+                setNoParkingFlagCounts(prev => {
+                    const newCounts = new Map(prev);
+                    newCounts.set(geohash, (newCounts.get(geohash) || 0) + 1);
+                    return newCounts;
+                });
 
                 console.log('[Parlens] No-parking flag added for:', geohash);
             }
@@ -2998,8 +3014,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                 </button>
             </div>
 
-            {/* Bottom Right Controls - Positioned ABOVE Drop Pin 'Done' button if needed? No, Done is top right. */}
-            <div className={`absolute z-[1000] flex flex-col items-end gap-3 animate-in slide-in-from-right-6 transition-opacity duration-300 pointer-events-none ${(dropPinMode || isPickingLocation) ? 'opacity-0' : 'opacity-100'}`} style={{
+            {/* Bottom Right Controls - Show compass and location in drop pin mode */}
+            <div className={`absolute z-[1000] flex flex-col items-end gap-3 animate-in slide-in-from-right-6 transition-opacity duration-300 pointer-events-none ${isPickingLocation ? 'opacity-0' : 'opacity-100'}`} style={{
                 bottom: 'max(1.5rem, calc(env(safe-area-inset-bottom) + 0.5rem))',
                 right: 'max(1rem, env(safe-area-inset-right))'
             }}>

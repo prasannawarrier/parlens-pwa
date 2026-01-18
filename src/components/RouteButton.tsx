@@ -1194,9 +1194,7 @@ export const RouteButton: React.FC<RouteButtonProps> = ({ vehicleType, onRouteCh
                         {/* Tip Message */}
                         <div className="p-3 rounded-xl bg-amber-500/10 dark:bg-amber-500/5 border border-amber-500/20">
                             <p className="text-xs text-amber-700 dark:text-amber-400/80 leading-relaxed">
-                                <strong>Tip:</strong> If place name does not return results, use coordinate or Google Maps plus code in waypoint search.
-                                Edit waypoint names to label locations. When you save routes,
-                                waypoint names become searchable — building your personal offline map over time! ⭐
+                                <strong>Tip:</strong> If place name does not return results, use coordinate or Google Maps plus code in waypoint search. Edit waypoint names to label locations. When you save routes, waypoint names become searchable.
                             </p>
                         </div>
                     </div>

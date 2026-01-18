@@ -2168,9 +2168,9 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                     {displayedCount < filteredListings.length && (
                                         <button
                                             onClick={() => setDisplayedCount(prev => prev + 10)}
-                                            className="w-full py-4 bg-blue-500/10 text-[#007AFF] font-bold rounded-2xl border border-blue-500/20 active:scale-[0.98] transition-transform"
+                                            className="flex items-center justify-center gap-1 w-full py-3 rounded-full border transition-colors text-sm font-bold bg-zinc-100 dark:bg-white/5 border-transparent text-zinc-500 active:bg-zinc-200 dark:active:bg-white/10"
                                         >
-                                            Load More ({filteredListings.length - displayedCount} remaining)
+                                            Load More
                                         </button>
                                     )}
                                 </>

@@ -20,6 +20,8 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
     const [isOpen, setIsOpen] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [showNpubQr, setShowNpubQr] = useState(false);
+    const [editingUsername, setEditingUsername] = useState(false);
+    const [editedName, setEditedName] = useState('');
 
     // Preferred Relays state
     const [preferredRelays, setPreferredRelays] = useState<string[]>([]);
@@ -393,12 +395,22 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
 
                     <div className="relative z-10 w-full max-w-md bg-white dark:bg-[#1c1c1e] rounded-[2rem] shadow-2xl p-6 flex flex-col gap-6 animate-in slide-in-from-bottom-10 duration-300 h-[calc(100vh-1.5rem)] overflow-y-auto no-scrollbar border border-black/5 dark:border-white/5 transition-colors">
 
-                        {/* Header - Username with QR */}
+                        {/* Header - Username with QR and Edit */}
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2 min-w-0">
-                                <h2 className="text-xl font-bold bg-gradient-to-r from-blue-500 to-purple-500 dark:from-blue-400 dark:to-purple-400 bg-clip-text text-transparent truncate max-w-[180px]">
+                                <h2 className="text-xl font-bold bg-gradient-to-r from-blue-500 to-purple-500 dark:from-blue-400 dark:to-purple-400 bg-clip-text text-transparent truncate max-w-[150px]">
                                     {profile?.name || 'Nostr User'}
                                 </h2>
+                                <button
+                                    onClick={() => {
+                                        setEditedName(profile?.name || '');
+                                        setEditingUsername(true);
+                                    }}
+                                    className="p-1.5 rounded-full bg-black/5 dark:bg-white/10 text-zinc-500 dark:text-white/60 active:scale-95 transition-transform shrink-0"
+                                    title="Edit username"
+                                >
+                                    <Pencil size={14} />
+                                </button>
                                 <button
                                     onClick={() => setShowNpubQr(!showNpubQr)}
                                     className="w-10 h-10 flex items-center justify-center rounded-full bg-black/5 dark:bg-white/10 text-zinc-600 dark:text-white/60 active:scale-95 transition-transform shrink-0"
@@ -423,17 +435,75 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                             </div>
                         </div>
 
+                        {/* Edit Username Overlay */}
+                        {editingUsername && (
+                            <div className="fixed inset-0 z-[2100] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in">
+                                <div className="w-[90%] max-w-xs bg-white dark:bg-zinc-800 rounded-2xl p-5 shadow-xl border border-black/10 dark:border-white/10 space-y-4">
+                                    <h3 className="text-lg font-bold text-zinc-900 dark:text-white text-center">Edit Username</h3>
+                                    <input
+                                        type="text"
+                                        value={editedName}
+                                        onChange={(e) => setEditedName(e.target.value)}
+                                        className="w-full px-4 py-3 rounded-xl bg-zinc-100 dark:bg-white/10 text-zinc-900 dark:text-white text-center font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        autoFocus
+                                        onFocus={(e) => e.target.select()}
+                                        placeholder="Enter username"
+                                    />
+                                    <div className="flex gap-3">
+                                        <button
+                                            onClick={() => setEditingUsername(false)}
+                                            className="flex-1 py-2.5 rounded-xl bg-zinc-200 dark:bg-white/10 text-zinc-600 dark:text-white/70 font-medium active:scale-95 transition-transform"
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            onClick={async () => {
+                                                if (!pool || !signEvent || !pubkey) return;
+                                                try {
+                                                    const metadataEvent = {
+                                                        kind: 0,
+                                                        created_at: Math.floor(Date.now() / 1000),
+                                                        tags: [],
+                                                        content: JSON.stringify({ name: editedName.trim() || 'Nostr User' })
+                                                    };
+                                                    const signedEvent = await signEvent(metadataEvent);
+                                                    await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedEvent));
+                                                    setEditingUsername(false);
+                                                    // Profile will refresh automatically via subscription
+                                                } catch (e) {
+                                                    console.error('Failed to update username:', e);
+                                                    alert('Failed to update username');
+                                                }
+                                            }}
+                                            className="flex-1 py-2.5 rounded-xl bg-blue-500 text-white font-medium active:scale-95 transition-transform"
+                                        >
+                                            Confirm
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
                         {/* Npub QR Code Overlay */}
                         {showNpubQr ? (
-                            <div className="flex-1 flex items-center justify-center">
+                            <div className="flex-1 flex flex-col items-center justify-center gap-6">
                                 <QRCodeSVG
                                     value={profile?.npub || ''}
-                                    size={240}
+                                    size={200}
                                     level="M"
                                     bgColor="transparent"
                                     fgColor="currentColor"
                                     className="text-zinc-900 dark:text-white"
                                 />
+                                <button
+                                    onClick={() => {
+                                        navigator.clipboard.writeText(profile?.npub || '');
+                                        alert('npub copied to clipboard');
+                                    }}
+                                    className="text-xs text-zinc-500 dark:text-zinc-400 font-mono break-all text-center px-4 active:text-zinc-900 dark:active:text-white transition-colors"
+                                >
+                                    {profile?.npub?.slice(0, 20)}...{profile?.npub?.slice(-8)}
+                                </button>
                             </div>
                         ) : (
                             <>
@@ -467,7 +537,7 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                                         )}
                                     </div>
                                     <p className="text-xs text-zinc-400 dark:text-white/30 mt-2 ml-2 leading-relaxed">
-                                        ⚠️ Store your npub and nsec securely. These are your account access keys and cannot be recovered if lost. Use these keys to login to any Nostr client.
+                                        Store your npub and nsec securely. These are your account access keys and cannot be recovered if lost. Use these keys to login to any Nostr client.
                                     </p>
                                 </div>
 
@@ -537,7 +607,7 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                                         )}
                                     </div>
                                     <p className="text-xs text-zinc-400 dark:text-white/30 mt-2 ml-2 leading-relaxed">
-                                        📡 Relay address(es) listed in this section tell Parlens where to look for and store data. Parlens requires a connection to at least one relay to work.
+                                        Relay address(es) listed in this section tell Parlens where to look for and store data. Parlens requires a connection to at least one relay to work.
                                     </p>
                                     {/* Add Relay Modal */}
                                     {isAddingRelay && (
@@ -637,7 +707,7 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                                             )}
                                         </div>
                                         <p className="text-xs text-zinc-400 dark:text-white/30 text-left ml-2">
-                                            🚫 Items you hide in the listed parking page can be managed here.
+                                            Items you hide in the listed parking page can be managed here.
                                         </p>
                                     </div>
 
@@ -709,7 +779,7 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
 
                                         {/* Privacy note - outside container */}
                                         <p className="text-xs text-zinc-400 dark:text-white/30 text-left ml-2 leading-relaxed">
-                                            🅿️ Parking areas are reported anonymously shortly after you complete a session. Sharing reports will help other users know where to find parking when visiting the area.
+                                            Parking areas are reported anonymously shortly after you complete a session. Sharing reports will help other users know where to find parking when visiting the area.
                                         </p>
                                     </div>
 
