@@ -1023,11 +1023,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
 
         // Check if this is a search drop pin vs route drop pin
         if (isSearchDropPin) {
+            // Set parking search marker at dropped location
+            const lat = center.latitude;
+            const lon = center.longitude;
+            setParkingSearchMarker({ lat, lon, name: `${lat.toFixed(4)}, ${lon.toFixed(4)}` });
+
             // Fly to the dropped pin location and trigger parking search
             if (mapRef.current) {
                 isTransitioning.current = true;
                 mapRef.current.flyTo({
-                    center: [center.longitude, center.latitude],
+                    center: [lon, lat],
                     zoom: 16,
                     duration: 1200,
                     essential: true
@@ -1121,9 +1126,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                 essential: true
             });
 
-            // Clear transitioning flag after animation
+            // Trigger FAB search after map transition
             setTimeout(() => {
                 isTransitioning.current = false;
+                setStatus('search');
             }, 1300);
         }
     }, []);
@@ -2686,11 +2692,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                             longitude={parkingSearchMarker.lon}
                             latitude={parkingSearchMarker.lat}
                             anchor="bottom"
-                            style={{ zIndex: 1001 }}
+                            style={{ zIndex: 100 }}
                         >
                             <div className="flex flex-col items-center pointer-events-auto animate-in zoom-in-75 fade-in duration-200">
                                 {/* Popup */}
-                                <div className="bg-white dark:bg-zinc-800 rounded-xl shadow-xl border border-amber-500/30 p-3 w-[220px] mb-2">
+                                <div className="bg-white dark:bg-zinc-800 rounded-xl shadow-xl border border-black/10 dark:border-white/10 p-3 w-[240px] mb-2 relative">
                                     <button
                                         onClick={() => setParkingSearchMarker(null)}
                                         className="absolute top-2 right-2 p-1 text-zinc-400 active:text-zinc-600 z-10"
@@ -2710,21 +2716,33 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                             </div>
                                         </div>
                                     </div>
-                                    <button
-                                        onClick={() => {
-                                            const { lat, lon, name } = parkingSearchMarker;
-                                            // Clear marker and set pending waypoints for route creation
-                                            setParkingSearchMarker(null);
-                                            setPendingWaypoints([
-                                                { lat: location?.[0] || lat, lon: location?.[1] || lon, name: 'Current Location' },
-                                                { lat, lon, name: name.split(',')[0] }
-                                            ]);
-                                        }}
-                                        className="mt-2 w-full py-2 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 text-xs font-semibold active:bg-amber-500/20 transition-colors flex items-center justify-center gap-1.5"
-                                    >
-                                        <Route size={14} />
-                                        Create Route
-                                    </button>
+                                    <div className="mt-2 flex gap-2">
+                                        <button
+                                            onClick={() => {
+                                                // Just close popup - marker stays
+                                                setParkingSearchMarker(null);
+                                            }}
+                                            className="flex-1 py-2 rounded-lg bg-zinc-100 dark:bg-white/10 text-zinc-600 dark:text-white/70 text-xs font-semibold active:bg-zinc-200 dark:active:bg-white/20 transition-colors flex items-center justify-center gap-1.5"
+                                        >
+                                            <MapPin size={14} />
+                                            Keep on Map
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                const { lat, lon, name } = parkingSearchMarker;
+                                                // Clear marker and set pending waypoints for route creation
+                                                setParkingSearchMarker(null);
+                                                setPendingWaypoints([
+                                                    { lat: location?.[0] || lat, lon: location?.[1] || lon, name: 'Current Location' },
+                                                    { lat, lon, name: name.split(',')[0] }
+                                                ]);
+                                            }}
+                                            className="flex-1 py-2 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 text-xs font-semibold active:bg-amber-500/20 transition-colors flex items-center justify-center gap-1.5"
+                                        >
+                                            <Route size={14} />
+                                            Create Route
+                                        </button>
+                                    </div>
                                 </div>
                                 {/* Pin icon */}
                                 <div className="p-2 rounded-full bg-amber-500 shadow-lg border-2 border-white dark:border-zinc-700">
@@ -3582,35 +3600,26 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                         </div>
                                     </button>
                                 ))}
-                                {/* OSM online search results (blue for locality, violet for others) */}
-                                {parkingSearchSuggestions.map((result: any, idx: number) => {
-                                    // Check if result is a locality (city, town, village, etc.)
-                                    const localityTypes = ['city', 'borough', 'suburb', 'quarter', 'neighbourhood', 'town', 'village', 'hamlet', 'locality', 'residential', 'administrative'];
-                                    const isLocality = localityTypes.includes(result.type);
-
-                                    return (
-                                        <button
-                                            key={`osm-${idx}`}
-                                            onClick={() => handleSelectParkingDestination(result)}
-                                            className="w-full flex items-start gap-3 p-4 text-left hover:bg-zinc-50 dark:hover:bg-white/5 active:bg-zinc-100 transition-colors border-t border-black/5 dark:border-white/5 first:border-t-0 group"
-                                        >
-                                            <div className={`mt-0.5 p-2 rounded-full shrink-0 transition-colors ${isLocality
-                                                ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-500 group-hover:text-blue-600 dark:group-hover:text-blue-400'
-                                                : 'bg-violet-50 dark:bg-violet-500/10 text-violet-500 group-hover:text-violet-600 dark:group-hover:text-violet-400'
-                                                }`}>
-                                                <MapPin size={16} />
+                                {/* OSM online search results (amber for parking search) */}
+                                {parkingSearchSuggestions.map((result: any, idx: number) => (
+                                    <button
+                                        key={`osm-${idx}`}
+                                        onClick={() => handleSelectParkingDestination(result)}
+                                        className="w-full flex items-start gap-3 p-4 text-left hover:bg-zinc-50 dark:hover:bg-white/5 active:bg-zinc-100 transition-colors border-t border-black/5 dark:border-white/5 first:border-t-0 group"
+                                    >
+                                        <div className="mt-0.5 p-2 rounded-full shrink-0 transition-colors bg-amber-50 dark:bg-amber-500/10 text-amber-500 group-hover:text-amber-600 dark:group-hover:text-amber-400">
+                                            <MapPin size={16} />
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="text-sm font-semibold text-zinc-900 dark:text-white truncate">
+                                                {result.display_name?.split(',')[0]}
                                             </div>
-                                            <div className="flex-1 min-w-0">
-                                                <div className="text-sm font-semibold text-zinc-900 dark:text-white truncate">
-                                                    {result.display_name?.split(',')[0]}
-                                                </div>
-                                                <div className="text-xs text-zinc-500 dark:text-white/60 truncate">
-                                                    {result.display_name?.split(',').slice(1).join(',')}
-                                                </div>
+                                            <div className="text-xs text-zinc-500 dark:text-white/60 truncate">
+                                                {result.display_name?.split(',').slice(1).join(',')}
                                             </div>
-                                        </button>
-                                    );
-                                })}
+                                        </div>
+                                    </button>
+                                ))}
                             </div>
                         )}
                     </div>

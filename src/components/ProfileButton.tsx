@@ -395,22 +395,12 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
 
                     <div className="relative z-10 w-full max-w-md bg-white dark:bg-[#1c1c1e] rounded-[2rem] shadow-2xl p-6 flex flex-col gap-6 animate-in slide-in-from-bottom-10 duration-300 h-[calc(100vh-1.5rem)] overflow-y-auto no-scrollbar border border-black/5 dark:border-white/5 transition-colors">
 
-                        {/* Header - Username with QR and Edit */}
+                        {/* Header - Username with QR */}
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2 min-w-0">
-                                <h2 className="text-xl font-bold bg-gradient-to-r from-blue-500 to-purple-500 dark:from-blue-400 dark:to-purple-400 bg-clip-text text-transparent truncate max-w-[150px]">
+                                <h2 className="text-xl font-bold bg-gradient-to-r from-blue-500 to-purple-500 dark:from-blue-400 dark:to-purple-400 bg-clip-text text-transparent truncate max-w-[180px]">
                                     {profile?.name || 'Nostr User'}
                                 </h2>
-                                <button
-                                    onClick={() => {
-                                        setEditedName(profile?.name || '');
-                                        setEditingUsername(true);
-                                    }}
-                                    className="p-1.5 rounded-full bg-black/5 dark:bg-white/10 text-zinc-500 dark:text-white/60 active:scale-95 transition-transform shrink-0"
-                                    title="Edit username"
-                                >
-                                    <Pencil size={14} />
-                                </button>
                                 <button
                                     onClick={() => setShowNpubQr(!showNpubQr)}
                                     className="w-10 h-10 flex items-center justify-center rounded-full bg-black/5 dark:bg-white/10 text-zinc-600 dark:text-white/60 active:scale-95 transition-transform shrink-0"
@@ -486,7 +476,18 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
 
                         {/* Npub QR Code Overlay */}
                         {showNpubQr ? (
-                            <div className="flex-1 flex flex-col items-center justify-center gap-6">
+                            <div className="flex-1 flex flex-col items-center justify-center gap-4">
+                                {/* Edit Username Button */}
+                                <button
+                                    onClick={() => {
+                                        setEditedName(profile?.name || '');
+                                        setEditingUsername(true);
+                                    }}
+                                    className="flex items-center gap-2 px-4 py-2 rounded-full bg-black/5 dark:bg-white/10 text-zinc-600 dark:text-white/60 active:scale-95 transition-transform text-sm font-medium"
+                                >
+                                    <Pencil size={14} />
+                                    Edit Username
+                                </button>
                                 <QRCodeSVG
                                     value={profile?.npub || ''}
                                     size={200}

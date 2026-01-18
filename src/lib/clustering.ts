@@ -34,8 +34,9 @@ function getClusterPrecision(zoom: number): number {
     if (zoom >= 15) return 7;  // ~50m at high zoom
     if (zoom >= 13) return 6;  // ~150m
     if (zoom >= 11) return 5;  // ~600m
-    if (zoom >= 9) return 4;   // ~2.4km
-    if (zoom >= 7) return 3;   // ~20km
+    if (zoom >= 9) return 5;   // ~600m (less aggressive)
+    if (zoom >= 7) return 4;   // ~2.4km (less aggressive)
+    if (zoom >= 5) return 3;   // ~20km
     return 2;                   // ~150km
 }
 
