@@ -621,6 +621,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
     const [parkingSearchQuery, setParkingSearchQuery] = useState('');
     const [parkingSearchSuggestions, setParkingSearchSuggestions] = useState<any[]>([]);
     const [isSearchDropPin, setIsSearchDropPin] = useState(false); // Distinguish search drop pin from route drop pin
+    const [parkingSearchMarker, setParkingSearchMarker] = useState<{ lat: number; lon: number; name: string } | null>(null);
 
     // Cached routes for saved waypoint search (read from localStorage, synced by RouteButton)
     const [cachedRoutes] = useState<any[]>(() => {
@@ -1106,8 +1107,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
         // Fly to the selected location
         const lat = parseFloat(result.lat);
         const lon = parseFloat(result.lon);
+        const name = result.display_name || `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
 
         if (mapRef.current && !isNaN(lat) && !isNaN(lon)) {
+            // Set the parking search marker with popup
+            setParkingSearchMarker({ lat, lon, name });
+
             isTransitioning.current = true;
             mapRef.current.flyTo({
                 center: [lon, lat],
@@ -1116,10 +1121,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                 essential: true
             });
 
-            // Auto-trigger search after transition
+            // Clear transitioning flag after animation
             setTimeout(() => {
                 isTransitioning.current = false;
-                setStatus('search');
             }, 1300);
         }
     }, []);
@@ -2672,6 +2676,61 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                     <QrCode size={20} className="text-[#007AFF]" />
                                 </div>
                                 <div className="w-0.5 h-3 bg-[#007AFF]/50"></div>
+                            </div>
+                        </Marker>
+                    )}
+
+                    {/* Parking Search Destination Marker */}
+                    {parkingSearchMarker && (
+                        <Marker
+                            longitude={parkingSearchMarker.lon}
+                            latitude={parkingSearchMarker.lat}
+                            anchor="bottom"
+                            style={{ zIndex: 1001 }}
+                        >
+                            <div className="flex flex-col items-center pointer-events-auto animate-in zoom-in-75 fade-in duration-200">
+                                {/* Popup */}
+                                <div className="bg-white dark:bg-zinc-800 rounded-xl shadow-xl border border-amber-500/30 p-3 w-[220px] mb-2">
+                                    <button
+                                        onClick={() => setParkingSearchMarker(null)}
+                                        className="absolute top-2 right-2 p-1 text-zinc-400 active:text-zinc-600 z-10"
+                                    >
+                                        <X size={14} />
+                                    </button>
+                                    <div className="flex items-start gap-2 pr-5">
+                                        <div className="mt-0.5 p-1.5 rounded-full bg-amber-500/10 text-amber-500 shrink-0">
+                                            <MapPin size={14} />
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="text-sm font-semibold text-zinc-900 dark:text-white truncate">
+                                                {parkingSearchMarker.name.split(',')[0]}
+                                            </div>
+                                            <div className="text-[10px] text-zinc-400 dark:text-white/40 truncate">
+                                                {parkingSearchMarker.name.split(',').slice(1).join(',').trim() || 'Search destination'}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <button
+                                        onClick={() => {
+                                            const { lat, lon, name } = parkingSearchMarker;
+                                            // Clear marker and set pending waypoints for route creation
+                                            setParkingSearchMarker(null);
+                                            setPendingWaypoints([
+                                                { lat: location?.[0] || lat, lon: location?.[1] || lon, name: 'Current Location' },
+                                                { lat, lon, name: name.split(',')[0] }
+                                            ]);
+                                        }}
+                                        className="mt-2 w-full py-2 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 text-xs font-semibold active:bg-amber-500/20 transition-colors flex items-center justify-center gap-1.5"
+                                    >
+                                        <Route size={14} />
+                                        Create Route
+                                    </button>
+                                </div>
+                                {/* Pin icon */}
+                                <div className="p-2 rounded-full bg-amber-500 shadow-lg border-2 border-white dark:border-zinc-700">
+                                    <MapPin size={16} className="text-white" />
+                                </div>
+                                <div className="w-0.5 h-2 bg-amber-500/50"></div>
                             </div>
                         </Marker>
                     )}
