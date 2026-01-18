@@ -1,4 +1,4 @@
-# Parlens Mirror Creation 🚀
+# Parlens Mirror Creation
 
 This guide explains how to create your own mirror of Parlens and release it on the web using GitHub Pages—completely free!
 
