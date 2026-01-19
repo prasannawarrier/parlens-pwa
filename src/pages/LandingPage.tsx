@@ -2677,6 +2677,32 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                         </Marker>
                     )}
 
+                    {/* Pinned Location Pins (Custom Locations) */}
+                    {pinnedMarkers.filter(p => p.markerType === 'location_pin').map((p, idx) => (
+                        <Marker
+                            key={p.id || `pin-${idx}`}
+                            longitude={p.lon}
+                            latitude={p.lat}
+                            anchor="bottom"
+                            style={{ zIndex: 90 }} // Below search marker (100)
+                            onClick={(e) => {
+                                e.originalEvent.stopPropagation();
+                                setParkingSearchMarker({
+                                    lat: p.lat,
+                                    lon: p.lon,
+                                    name: p.name
+                                });
+                            }}
+                        >
+                            <div className="flex flex-col items-center pointer-events-auto transition-transform hover:scale-110">
+                                <div className="p-2 rounded-full bg-white dark:bg-zinc-800 shadow-lg border-2 border-amber-500">
+                                    <MapPin size={16} className="text-amber-500" />
+                                </div>
+                                <div className="w-0.5 h-2 bg-amber-500/50"></div>
+                            </div>
+                        </Marker>
+                    ))}
+
                     {/* Parking Search Destination Marker */}
                     {parkingSearchMarker && (
                         <Marker
@@ -2695,43 +2721,61 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                         <X size={14} />
                                     </button>
                                     <div className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">Location Pin</div>
-                                    <div className="font-semibold text-sm text-zinc-900 dark:text-white truncate">
-                                        {parkingSearchMarker.name.split(',')[0]}
+                                    <div className="font-semibold text-xs text-zinc-900 dark:text-white truncate">
+                                        {parkingSearchMarker.name.split(',')[0] || `${parkingSearchMarker.lat.toFixed(5)}, ${parkingSearchMarker.lon.toFixed(5)}`}
                                     </div>
-                                    <div className="text-[10px] text-zinc-400 dark:text-white/40 truncate mt-0.5">
-                                        {parkingSearchMarker.name.split(',').slice(1).join(',').trim() || `${parkingSearchMarker.lat.toFixed(5)}, ${parkingSearchMarker.lon.toFixed(5)}`}
-                                    </div>
-                                    <div className="mt-2 flex gap-2">
+                                    <div className="mt-2">
                                         <button
                                             onClick={() => {
-                                                // Just close popup - marker stays
+                                                // Add to pinned markers
+                                                const newPin = {
+                                                    id: `location-pin-${Date.now()}`,
+                                                    lat: parkingSearchMarker.lat,
+                                                    lon: parkingSearchMarker.lon,
+                                                    name: parkingSearchMarker.name.split(',')[0] || `Pin ${parkingSearchMarker.lat.toFixed(4)},${parkingSearchMarker.lon.toFixed(4)}`,
+                                                    markerType: 'location_pin'
+                                                };
+                                                setPinnedMarkers(prev => [...prev, newPin]);
+                                                localStorage.setItem('parlens_pinned_markers', JSON.stringify([...pinnedMarkers, newPin]));
+
+                                                // Clear search marker (it will be rendered as pinned)
                                                 setParkingSearchMarker(null);
                                             }}
-                                            className="flex-1 py-2 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 text-xs font-semibold active:bg-amber-500/20 transition-colors flex items-center justify-center gap-1.5"
+                                            className="mt-3 w-full py-1.5 rounded-lg text-xs font-medium transition-colors bg-amber-500/10 text-amber-600 active:bg-amber-500/20"
                                         >
-                                            <MapPin size={14} />
                                             Keep on Map
                                         </button>
                                         <button
                                             onClick={() => {
                                                 const { lat, lon, name } = parkingSearchMarker;
-                                                // Clear marker and set pending waypoints for route creation
+
+                                                // Auto-keep on map when creating route
+                                                const newPin = {
+                                                    id: `location-pin-${Date.now()}`,
+                                                    lat,
+                                                    lon,
+                                                    name: name.split(',')[0] || `Pin ${lat.toFixed(4)},${lon.toFixed(4)}`,
+                                                    markerType: 'location_pin'
+                                                };
+                                                setPinnedMarkers(prev => [...prev, newPin]);
+                                                localStorage.setItem('parlens_pinned_markers', JSON.stringify([...pinnedMarkers, newPin]));
+
+                                                // Clear marker and set pending waypoints
                                                 setParkingSearchMarker(null);
                                                 setPendingWaypoints([
                                                     { lat: location?.[0] || lat, lon: location?.[1] || lon, name: 'Current Location' },
                                                     { lat, lon, name: name.split(',')[0] }
                                                 ]);
                                             }}
-                                            className="flex-1 py-2 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 text-xs font-semibold active:bg-blue-500/20 transition-colors flex items-center justify-center gap-1.5"
+                                            className="mt-2 w-full py-1.5 rounded-lg text-xs font-medium bg-blue-500/10 text-blue-600 active:bg-blue-500/20 transition-colors"
                                         >
-                                            <Route size={14} />
                                             Create Route
                                         </button>
                                     </div>
                                 </div>
                                 {/* Pin icon */}
-                                <div className="p-2 rounded-full bg-amber-500 shadow-lg border-2 border-white dark:border-zinc-700">
-                                    <MapPin size={16} className="text-white" />
+                                <div className="p-2 rounded-full bg-white dark:bg-zinc-800 shadow-lg border-2 border-amber-500">
+                                    <MapPin size={16} className="text-amber-500" />
                                 </div>
                                 <div className="w-0.5 h-2 bg-amber-500/50"></div>
                             </div>
