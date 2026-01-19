@@ -625,6 +625,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
     const [parkingSearchSuggestions, setParkingSearchSuggestions] = useState<any[]>([]);
     const [isSearchDropPin, setIsSearchDropPin] = useState(false); // Distinguish search drop pin from route drop pin
     const [parkingSearchMarker, setParkingSearchMarker] = useState<{ lat: number; lon: number; name: string } | null>(null);
+    const [parkingSearchPopupOpen, setParkingSearchPopupOpen] = useState(false);
+
+    // Auto-open popup when a new search marker is set
+    useEffect(() => {
+        if (parkingSearchMarker) setParkingSearchPopupOpen(true);
+    }, [parkingSearchMarker]);
 
     // Cached routes for saved waypoint search (read from localStorage, synced by RouteButton)
     const [cachedRoutes] = useState<any[]>(() => {
@@ -2255,6 +2261,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                 style={{ willChange: 'transform' }}
                                 onClick={(e) => {
                                     e.originalEvent.stopPropagation();
+                                    setParkingSearchPopupOpen(false);
                                     if (isClusterItem) {
                                         // For clusters, show popup with all items
                                         setSelectedMarkerPopup({
@@ -2305,6 +2312,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                 style={{ willChange: 'transform' }}
                                 onClick={(e) => {
                                     e.originalEvent.stopPropagation();
+                                    setParkingSearchPopupOpen(false);
                                     if (isClusterItem) {
                                         // For clusters, show popup with all items
                                         setSelectedMarkerPopup({
@@ -2355,6 +2363,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                 style={{ willChange: 'transform' }}
                                 onClick={(e) => {
                                     e.originalEvent.stopPropagation();
+                                    setParkingSearchPopupOpen(false);
                                     if (isClusterItem) {
                                         // For clusters, show popup with all items
                                         setSelectedMarkerPopup({
@@ -2604,6 +2613,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                 style={{ willChange: 'transform' }}
                                 onClick={(e) => {
                                     e.originalEvent.stopPropagation();
+                                    setParkingSearchPopupOpen(false);
                                     if (isClusterItem) {
                                         // Show popup directly with actual spots from cluster
                                         setSelectedMarkerPopup({
@@ -2663,6 +2673,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                             anchor="bottom"
                             onClick={(e) => {
                                 e.originalEvent.stopPropagation();
+                                setParkingSearchPopupOpen(false);
                                 setShowListedDetails(true);
                             }}
                             style={{ zIndex: 20 }} // Above parked marker
@@ -2692,10 +2703,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                     lon: p.lon,
                                     name: p.name
                                 });
+                                setSelectedMarkerPopup(null);
                             }}
                         >
-                            <div className="flex flex-col items-center pointer-events-auto transition-transform hover:scale-110">
-                                <div className="p-2 rounded-full bg-white dark:bg-zinc-800 shadow-lg border-2 border-amber-500">
+                            <div className="flex flex-col items-center pointer-events-auto transition-transform">
+                                <div className="p-2 rounded-full bg-white dark:bg-zinc-800 border-2 border-amber-500">
                                     <MapPin size={16} className="text-amber-500" />
                                 </div>
                                 <div className="w-0.5 h-2 bg-amber-500/50"></div>
@@ -2711,70 +2723,97 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                             anchor="bottom"
                             style={{ zIndex: 100 }}
                         >
-                            <div className="flex flex-col items-center pointer-events-auto animate-in zoom-in-75 fade-in duration-200">
+                            <div className="flex flex-col items-center pointer-events-auto animate-in zoom-in-75 fade-in duration-200"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setParkingSearchPopupOpen(true);
+                                    setSelectedMarkerPopup(null);
+                                }}
+                            >
                                 {/* Popup */}
-                                <div className="bg-white dark:bg-zinc-800 rounded-xl shadow-xl border border-black/10 dark:border-white/10 p-3 w-[240px] mb-2 relative">
-                                    <button
-                                        onClick={() => setParkingSearchMarker(null)}
-                                        className="absolute top-2 right-2 p-1 text-zinc-400 active:text-zinc-600 z-10"
-                                    >
-                                        <X size={14} />
-                                    </button>
-                                    <div className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">Location Pin</div>
-                                    <div className="font-semibold text-xs text-zinc-900 dark:text-white truncate">
-                                        {parkingSearchMarker.name.split(',')[0] || `${parkingSearchMarker.lat.toFixed(5)}, ${parkingSearchMarker.lon.toFixed(5)}`}
-                                    </div>
-                                    <div className="mt-2">
+                                {parkingSearchPopupOpen && (
+                                    <div className="bg-white dark:bg-zinc-800 rounded-xl shadow-xl border border-black/10 dark:border-white/10 p-3 w-[240px] mb-2 relative cursor-default" onClick={e => e.stopPropagation()}>
                                         <button
-                                            onClick={() => {
-                                                // Add to pinned markers
-                                                const newPin = {
-                                                    id: `location-pin-${Date.now()}`,
-                                                    lat: parkingSearchMarker.lat,
-                                                    lon: parkingSearchMarker.lon,
-                                                    name: parkingSearchMarker.name.split(',')[0] || `Pin ${parkingSearchMarker.lat.toFixed(4)},${parkingSearchMarker.lon.toFixed(4)}`,
-                                                    markerType: 'location_pin'
-                                                };
-                                                setPinnedMarkers(prev => [...prev, newPin]);
-                                                localStorage.setItem('parlens_pinned_markers', JSON.stringify([...pinnedMarkers, newPin]));
-
-                                                // Clear search marker (it will be rendered as pinned)
-                                                setParkingSearchMarker(null);
-                                            }}
-                                            className="mt-3 w-full py-1.5 rounded-lg text-xs font-medium transition-colors bg-amber-500/10 text-amber-600 active:bg-amber-500/20"
+                                            onClick={() => setParkingSearchPopupOpen(false)}
+                                            className="absolute top-2 right-2 p-1 text-zinc-400 active:text-zinc-600 dark:active:text-zinc-300 z-10 bg-white/50 dark:bg-black/20 rounded-full"
                                         >
-                                            Keep on Map
+                                            <X size={14} />
                                         </button>
-                                        <button
-                                            onClick={() => {
-                                                const { lat, lon, name } = parkingSearchMarker;
+                                        <div className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">Location Pin</div>
+                                        <div className="font-semibold text-xs text-zinc-900 dark:text-white truncate">
+                                            {
+                                                (/[a-zA-Z]/.test(parkingSearchMarker.name) ? parkingSearchMarker.name.split(',')[0] : parkingSearchMarker.name)
+                                                || `${parkingSearchMarker.lat.toFixed(5)}, ${parkingSearchMarker.lon.toFixed(5)}`
+                                            }
+                                        </div>
+                                        <div className="mt-2">
+                                            {(() => {
+                                                const isPinned = pinnedMarkers.some(p => p.lat === parkingSearchMarker.lat && p.lon === parkingSearchMarker.lon);
+                                                return (
+                                                    <button
+                                                        onClick={() => {
+                                                            if (isPinned) {
+                                                                // Remove from pinned
+                                                                const newPinned = pinnedMarkers.filter(p => !(p.lat === parkingSearchMarker.lat && p.lon === parkingSearchMarker.lon));
+                                                                setPinnedMarkers(newPinned);
+                                                                localStorage.setItem('parlens_pinned_markers', JSON.stringify(newPinned));
+                                                            } else {
+                                                                // Add to pinned
+                                                                const newPin = {
+                                                                    id: `location-pin-${Date.now()}`,
+                                                                    lat: parkingSearchMarker.lat,
+                                                                    lon: parkingSearchMarker.lon,
+                                                                    name: (/[a-zA-Z]/.test(parkingSearchMarker.name) ? parkingSearchMarker.name.split(',')[0] : parkingSearchMarker.name) || `Pin ${parkingSearchMarker.lat.toFixed(4)},${parkingSearchMarker.lon.toFixed(4)}`,
+                                                                    markerType: 'location_pin'
+                                                                };
+                                                                setPinnedMarkers(prev => [...prev, newPin]);
+                                                                localStorage.setItem('parlens_pinned_markers', JSON.stringify([...pinnedMarkers, newPin]));
+                                                            }
+                                                        }}
+                                                        className={`mt-3 w-full py-1.5 rounded-lg text-xs font-medium transition-colors ${isPinned
+                                                            ? 'bg-zinc-500/10 text-zinc-600 active:bg-zinc-500/20 dark:text-zinc-400'
+                                                            : 'bg-amber-500/10 text-amber-600 active:bg-amber-500/20'
+                                                            }`}
+                                                    >
+                                                        {isPinned ? 'Remove from Map' : 'Keep on Map'}
+                                                    </button>
+                                                );
+                                            })()}
+                                            <button
+                                                onClick={() => {
+                                                    const { lat, lon, name } = parkingSearchMarker;
+                                                    const displayName = (/[a-zA-Z]/.test(name) ? name.split(',')[0] : name) || `Pin ${lat.toFixed(4)},${lon.toFixed(4)}`;
 
-                                                // Auto-keep on map when creating route
-                                                const newPin = {
-                                                    id: `location-pin-${Date.now()}`,
-                                                    lat,
-                                                    lon,
-                                                    name: name.split(',')[0] || `Pin ${lat.toFixed(4)},${lon.toFixed(4)}`,
-                                                    markerType: 'location_pin'
-                                                };
-                                                setPinnedMarkers(prev => [...prev, newPin]);
-                                                localStorage.setItem('parlens_pinned_markers', JSON.stringify([...pinnedMarkers, newPin]));
+                                                    // Auto-keep on map when creating route
+                                                    const isPinned = pinnedMarkers.some(p => p.lat === lat && p.lon === lon);
+                                                    if (!isPinned) {
+                                                        const newPin = {
+                                                            id: `location-pin-${Date.now()}`,
+                                                            lat,
+                                                            lon,
+                                                            name: displayName,
+                                                            markerType: 'location_pin'
+                                                        };
+                                                        setPinnedMarkers(prev => [...prev, newPin]);
+                                                        localStorage.setItem('parlens_pinned_markers', JSON.stringify([...pinnedMarkers, newPin]));
+                                                    }
 
-                                                // Clear marker and set pending waypoints
-                                                setParkingSearchMarker(null);
-                                                setPendingWaypoints([
-                                                    { lat: location?.[0] || lat, lon: location?.[1] || lon, name: 'Current Location' },
-                                                    { lat, lon, name: name.split(',')[0] }
-                                                ]);
-                                            }}
-                                            className="mt-2 w-full py-1.5 rounded-lg text-xs font-medium bg-blue-500/10 text-blue-600 active:bg-blue-500/20 transition-colors"
-                                        >
-                                            Create Route
-                                        </button>
+                                                    // Clear search marker (keep it as pinned now, as route creation implies moving flow)
+                                                    setParkingSearchMarker(null);
+                                                    setPendingWaypoints([
+                                                        { lat: location?.[0] || lat, lon: location?.[1] || lon, name: 'Current Location' },
+                                                        { lat, lon, name: displayName }
+                                                    ]);
+                                                }}
+                                                className="mt-2 w-full py-1.5 rounded-lg text-xs font-medium bg-blue-500/10 text-blue-600 active:bg-blue-500/20 transition-colors"
+                                            >
+                                                Create Route
+                                            </button>
+                                        </div>
                                     </div>
-                                </div>
+                                )}
                                 {/* Pin icon */}
-                                <div className="p-2 rounded-full bg-white dark:bg-zinc-800 shadow-lg border-2 border-amber-500">
+                                <div className="p-2 rounded-full bg-white dark:bg-zinc-800 border-2 border-amber-500">
                                     <MapPin size={16} className="text-amber-500" />
                                 </div>
                                 <div className="w-0.5 h-2 bg-amber-500/50"></div>
