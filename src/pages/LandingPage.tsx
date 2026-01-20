@@ -2655,7 +2655,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                     })}
 
                     {/* Parked Vehicle Marker */}
-                    {status === 'parked' && parkLocation && (
+                    {status === 'parked' && parkLocation && !listedParkingSession && (
                         <Marker
                             longitude={parkLocation[1]}
                             latitude={parkLocation[0]}
@@ -2678,10 +2678,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                             }}
                             style={{ zIndex: 20 }} // Above parked marker
                         >
-                            <div className="flex flex-col items-center -translate-y-8">
+                            <div className="flex flex-col items-center">
                                 {/* Bubble */}
-                                <div className="bg-white dark:bg-zinc-800 p-3 rounded-full shadow-xl border-2 border-[#007AFF] cursor-pointer hover:scale-110 transition-transform">
-                                    <QrCode size={20} className="text-[#007AFF]" />
+                                <div className="bg-white dark:bg-zinc-800 p-2 rounded-full shadow-xl border-2 border-[#007AFF] cursor-pointer hover:scale-110 transition-transform">
+                                    <QrCode size={16} className="text-[#007AFF]" />
                                 </div>
                                 <div className="w-0.5 h-3 bg-[#007AFF]/50"></div>
                             </div>
