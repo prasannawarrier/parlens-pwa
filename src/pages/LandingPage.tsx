@@ -632,6 +632,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
         if (parkingSearchMarker) setParkingSearchPopupOpen(true);
     }, [parkingSearchMarker]);
 
+    // Auto-clear search marker when status changes (e.g. to parked or idle)
+    useEffect(() => {
+        if (status === 'idle' || status === 'parked') {
+            setParkingSearchMarker(null);
+            setParkingSearchPopupOpen(false);
+        }
+    }, [status]);
+
     // Cached routes for saved waypoint search (read from localStorage, synced by RouteButton)
     const [cachedRoutes] = useState<any[]>(() => {
         try {
@@ -2721,7 +2729,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                             longitude={parkingSearchMarker.lon}
                             latitude={parkingSearchMarker.lat}
                             anchor="bottom"
-                            style={{ zIndex: 100 }}
+                            style={{ zIndex: 2000 }}
                         >
                             <div className="flex flex-col items-center pointer-events-auto animate-in zoom-in-75 fade-in duration-200"
                                 onClick={(e) => {
