@@ -2707,10 +2707,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                             }}
                         >
                             <div className="flex flex-col items-center pointer-events-auto transition-transform">
-                                <div className="p-2 rounded-full bg-white dark:bg-zinc-800 border-2 border-amber-500">
-                                    <MapPin size={16} className="text-amber-500" />
+                                <div className="p-2 rounded-full bg-white dark:bg-zinc-800 border-2 border-orange-500">
+                                    <MapPin size={16} className="text-orange-500" />
                                 </div>
-                                <div className="w-0.5 h-2 bg-amber-500/50"></div>
+                                <div className="w-0.5 h-2 bg-orange-500/50"></div>
                             </div>
                         </Marker>
                     ))}
@@ -2757,6 +2757,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                                                 const newPinned = pinnedMarkers.filter(p => !(p.lat === parkingSearchMarker.lat && p.lon === parkingSearchMarker.lon));
                                                                 setPinnedMarkers(newPinned);
                                                                 localStorage.setItem('parlens_pinned_markers', JSON.stringify(newPinned));
+                                                                setParkingSearchMarker(null);
+                                                                setParkingSearchPopupOpen(false);
                                                             } else {
                                                                 // Add to pinned
                                                                 const newPin = {
@@ -2813,10 +2815,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                     </div>
                                 )}
                                 {/* Pin icon */}
-                                <div className="p-2 rounded-full bg-white dark:bg-zinc-800 border-2 border-amber-500">
-                                    <MapPin size={16} className="text-amber-500" />
+                                <div className="p-2 rounded-full bg-white dark:bg-zinc-800 border-2 border-orange-500">
+                                    <MapPin size={16} className="text-orange-500" />
                                 </div>
-                                <div className="w-0.5 h-2 bg-amber-500/50"></div>
+                                <div className="w-0.5 h-2 bg-orange-500/50"></div>
                             </div>
                         </Marker>
                     )}
