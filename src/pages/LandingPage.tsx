@@ -3,7 +3,7 @@
  * Replaces Leaflet for native vector map rotation and smooth zoom
  */
 import React, { useState, useEffect, useRef, useCallback, memo, useMemo } from 'react';
-import { MapPin, Locate, X, ChevronDown, Check, Trash, Pencil, QrCode, ArrowUp, ArrowRight, ArrowLeft, ChevronUp, ScanLine, Route } from 'lucide-react';
+import { MapPin, Locate, X, ChevronDown, Check, Trash, Pencil, QrCode, ArrowUp, ArrowRight, ArrowLeft, ChevronUp, ScanLine, Route, Ban } from 'lucide-react';
 import MapGL, { Marker, Source, Layer, type MapRef } from 'react-map-gl/maplibre';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
@@ -32,43 +32,63 @@ const MAP_STYLES = {
 
 
 
+// Reusable Pin Style Marker (Circle + Icon + Stem)
+const PinStyleMarker = memo(({ bgClass, borderClass, stemClass, icon, iconClass = "", size = 32 }: { bgClass: string, borderClass: string, stemClass: string, icon: React.ReactNode, iconClass?: string, size?: number }) => {
+    return (
+        <div className="flex flex-col items-center pointer-events-auto transition-transform active:scale-95 group">
+            <div className={`flex items-center justify-center rounded-full border-2 shadow-md ${bgClass} ${borderClass}`} style={{ width: size, height: size }}>
+                <div className={iconClass}>{icon}</div>
+            </div>
+            <div className={`w-0.5 h-2 ${stemClass}`}></div>
+        </div>
+    );
+});
+
 // Restored Stable SpotMarkerContent
-const SpotMarkerContent = memo(({ price, emoji, currency, isHistory = false, variant }: { price: number, emoji: string, currency: string, isHistory?: boolean, variant?: 'default' | 'history' | 'area' }) => {
-    const symbol = getCurrencySymbol(currency);
-    // Determine styling based on variant (if provided) or isHistory fallback
+const SpotMarkerContent = memo(({ emoji, isHistory = false, variant }: { price: number, emoji: string, currency: string, isHistory?: boolean, variant?: 'default' | 'history' | 'area' }) => {
+    // Determine styling based on variant
     const effectiveVariant = variant || (isHistory ? 'history' : 'default');
-
-    // Check if this is a no parking marker
     const isNoParking = emoji === '🚫';
-
-    // Grey P for area markers (using CSS filter) - but NOT for no parking emoji
     const isArea = effectiveVariant === 'area';
     const isHistoryVariant = effectiveVariant === 'history';
 
-    // Pill background classes
-    const pillClasses = isArea
-        ? 'bg-white text-zinc-900 border-zinc-300'  // White Pill for Parking Area
-        : isHistoryVariant
-            ? 'bg-zinc-500 text-white border-white'  // Grey Pill for History
-            : 'bg-[#34C759] text-white border-white'; // Green Pill for Listed
+    // Style Mapping
+    let bgClass = 'bg-[#007AFF]'; // Default Listed (Apple Blue)
+    let borderClass = 'border-white';
+    let stemClass = 'bg-white'; // White stem for listed for contrast? Or should be Blue? User said "white border and stem".
+    let iconClass = 'text-white font-bold text-sm';
+    let icon: React.ReactNode = <span>P</span>;
+
+    if (isNoParking) {
+        bgClass = 'bg-red-500';
+        borderClass = 'border-white';
+        stemClass = 'bg-white'; // White stem as requested
+        iconClass = 'text-white';
+        icon = <Ban size={16} />;
+    } else if (isArea) {
+        // Parking Area: White Fill, Black P, Red Border, Red Stem
+        bgClass = 'bg-white';
+        borderClass = 'border-red-500';
+        stemClass = 'bg-red-500';
+        iconClass = 'text-black font-bold text-sm';
+        icon = <span>P</span>;
+    } else if (isHistoryVariant) {
+        // Historic: White Fill, Grey P, Grey Border, Grey Stem
+        bgClass = 'bg-white';
+        borderClass = 'border-zinc-500';
+        stemClass = 'bg-zinc-500';
+        iconClass = 'text-zinc-500 font-bold text-sm';
+        icon = <span>P</span>;
+    }
 
     return (
-        <div className="flex flex-col items-center justify-center transition-transform active:scale-95 pointer-events-none group">
-            <div className={`text-[32px] leading-none drop-shadow-md z-10 pointer-events-auto cursor-pointer ${isArea && !isNoParking ? 'grayscale' : ''}`}>
-                {emoji}
-            </div>
-            {/* Hide rate pill for no parking markers */}
-            {!isNoParking && (
-                <div
-                    className={`
-                        px-2 py-0.5 rounded-full text-[11px] font-bold shadow-md border-[1.5px] -mt-1.5 z-0 whitespace-nowrap pointer-events-auto
-                        ${pillClasses}
-                    `}
-                >
-                    {symbol}{Math.round(Number(price) || 0)}/hr
-                </div>
-            )}
-        </div>
+        <PinStyleMarker
+            bgClass={bgClass}
+            borderClass={borderClass}
+            stemClass={stemClass}
+            icon={icon}
+            iconClass={iconClass}
+        />
     );
 });
 
@@ -158,36 +178,41 @@ UserLocationMarker.displayName = 'UserLocationMarker';
 
 
 // Cluster Marker Component
-const ClusterMarkerContent = memo(({ minPrice, maxPrice, currency, type }: {
+const ClusterMarkerContent = memo(({ type }: {
     minPrice: number; maxPrice: number; currency: string; type: 'open' | 'history' | 'area'
 }) => {
-    const emoji = type === 'area' ? '🅿️' : type === 'open' ? '🅿️' : '🅟';
+    // Style Mapping for Clusters (Same as Spots)
     const isArea = type === 'area';
     const isHistory = type === 'history';
-    const symbol = getCurrencySymbol(currency);
-    const priceRange = minPrice === maxPrice ? `${symbol}${minPrice}` : `${symbol}${minPrice}-${maxPrice}`;
 
-    // Pill styling based on type
-    const pillClasses = isArea
-        ? 'bg-white text-zinc-900 border-zinc-300'  // White Pill for Parking Area
-        : isHistory
-            ? 'bg-zinc-500 text-white border-white'  // Grey Pill for History
-            : 'bg-[#34C759] text-white border-white'; // Green Pill for Listed/Open
+    let bgClass = 'bg-[#007AFF]'; // Default Open/Listed (Apple Blue)
+    let borderClass = 'border-white';
+    let stemClass = 'bg-white';
+    let iconClass = 'text-white font-bold text-sm';
+    let icon = <span>P</span>;
+
+    if (isArea) {
+        // Parking Area Cluster: White Fill, Black P, Red Border, Red Stem
+        bgClass = 'bg-white';
+        borderClass = 'border-red-500';
+        stemClass = 'bg-red-500';
+        iconClass = 'text-black font-bold text-sm';
+    } else if (isHistory) {
+        // Historic Cluster: White Fill, Grey P, Grey Border, Grey Stem
+        bgClass = 'bg-white';
+        borderClass = 'border-zinc-500';
+        stemClass = 'bg-zinc-500';
+        iconClass = 'text-zinc-500 font-bold text-sm';
+    }
 
     return (
-        <div className="flex flex-col items-center justify-center transition-transform active:scale-95 pointer-events-none group">
-            <div className={`relative text-[32px] leading-none drop-shadow-md z-10 pointer-events-auto cursor-pointer ${isArea ? 'grayscale' : ''}`}>
-                {emoji}
-            </div>
-            <div
-                className={`
-                    px-2 py-0.5 rounded-full text-[11px] font-bold shadow-md border-[1.5px] -mt-1.5 z-0 whitespace-nowrap
-                    ${pillClasses}
-                `}
-            >
-                {priceRange}/hr
-            </div>
-        </div>
+        <PinStyleMarker
+            bgClass={bgClass}
+            borderClass={borderClass}
+            stemClass={stemClass}
+            icon={icon}
+            iconClass={iconClass}
+        />
     );
 });
 ClusterMarkerContent.displayName = 'ClusterMarkerContent';
@@ -232,6 +257,28 @@ const MarkerPopup = memo(({ type, items, onClose, isPinned, onTogglePin, onCreat
                         <span className="text-zinc-500">Times Parked:</span>
                         <span className="font-semibold text-zinc-900 dark:text-white">{count}</span>
                     </div>
+                    {(() => {
+                        // Calculate Fee Range for History
+                        const rates = items.map(i => {
+                            const r = Number(i.hourly_rate ?? i.price ?? i.properties?.hourly_rate ?? NaN);
+                            return isNaN(r) ? undefined : r;
+                        }).filter((r): r is number => r !== undefined);
+
+                        if (rates.length === 0) return null;
+
+                        const min = Math.min(...rates);
+                        const max = Math.max(...rates);
+                        const currency = items[0]?.currency || items[0]?.properties?.currency || 'USD';
+                        const symbol = getCurrencySymbol(currency);
+                        const feeDisplay = min === max ? `${symbol}${min}` : `${symbol}${min}-${max}`;
+
+                        return (
+                            <div className="flex justify-between gap-4">
+                                <span className="text-zinc-500">Fees Reported:</span>
+                                <span className="font-semibold text-zinc-900 dark:text-white">{feeDisplay}/hr</span>
+                            </div>
+                        );
+                    })()}
                 </div>
                 {onCreateRoute && (
                     <button
@@ -250,6 +297,21 @@ const MarkerPopup = memo(({ type, items, onClose, isPinned, onTogglePin, onCreat
         const reportCount = items.length;
         const timestamps = items.map(i => i.original?.created_at || i.created_at).filter(Boolean);
         const firstReport = timestamps.length > 0 ? Math.min(...timestamps) : null;
+
+        // Calculate Fee Range
+        const rates = items.map(i => {
+            const r = Number(i.hourly_rate ?? i.price ?? i.properties?.hourly_rate ?? NaN);
+            return isNaN(r) ? undefined : r;
+        }).filter((r): r is number => r !== undefined);
+
+        let feeDisplay = null;
+        if (rates.length > 0) {
+            const min = Math.min(...rates);
+            const max = Math.max(...rates);
+            const currency = items[0]?.currency || items[0]?.properties?.currency || 'USD';
+            const symbol = getCurrencySymbol(currency);
+            feeDisplay = min === max ? `${symbol}${min}` : `${symbol}${min}-${max}`;
+        }
 
         const formatTimeline = () => {
             if (!firstReport) return null;
@@ -270,6 +332,12 @@ const MarkerPopup = memo(({ type, items, onClose, isPinned, onTogglePin, onCreat
                         <span className="text-zinc-500">Reports:</span>
                         <span className="font-semibold text-zinc-900 dark:text-white">{reportCount}</span>
                     </div>
+                    {feeDisplay && (
+                        <div className="flex justify-between gap-4">
+                            <span className="text-zinc-500">Fees Reported:</span>
+                            <span className="font-semibold text-zinc-900 dark:text-white">{feeDisplay}/hr</span>
+                        </div>
+                    )}
                     {formatTimeline() && (
                         <div className="flex justify-between gap-4">
                             <span className="text-zinc-500">Reported over:</span>
@@ -372,13 +440,17 @@ const MarkerPopup = memo(({ type, items, onClose, isPinned, onTogglePin, onCreat
 MarkerPopup.displayName = 'MarkerPopup';
 
 // Active Session Marker (Map Icon)
-const ActiveSessionMarkerContent = memo(({ vehicleType }: { vehicleType: 'bicycle' | 'motorcycle' | 'car' }) => {
-    // Only the emoji marker on the map
-    const emoji = vehicleType === 'bicycle' ? '🚲' : vehicleType === 'motorcycle' ? '🏍️' : '🚗';
+const ActiveSessionMarkerContent = memo(({ }: { vehicleType: 'bicycle' | 'motorcycle' | 'car' }) => {
+    // Parked Car Marker: Green Fill, White P, White Border, White Stem
+    // We ignore vehicleType icon for now as per user request (uniform look)
     return (
-        <div style={{ fontSize: 36, filter: 'drop-shadow(0 4px 8px rgba(0,0,0,0.4))', pointerEvents: 'none' }}>
-            {emoji}
-        </div>
+        <PinStyleMarker
+            bgClass="bg-[#34C759]"
+            borderClass="border-white"
+            stemClass="bg-white"
+            icon={<span>P</span>}
+            iconClass="text-white font-bold text-sm"
+        />
     );
 });
 ActiveSessionMarkerContent.displayName = 'ActiveSessionMarkerContent';
@@ -2265,7 +2337,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                 key={`listed-${item.id}`}
                                 longitude={item.lon}
                                 latitude={item.lat}
-                                anchor="center"
+                                anchor="bottom"
                                 style={{ willChange: 'transform' }}
                                 onClick={(e) => {
                                     e.originalEvent.stopPropagation();
@@ -2316,7 +2388,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                 key={`area-${item.id}`}
                                 longitude={item.lon}
                                 latitude={item.lat}
-                                anchor="center"
+                                anchor="bottom"
                                 style={{ willChange: 'transform' }}
                                 onClick={(e) => {
                                     e.originalEvent.stopPropagation();
@@ -2367,7 +2439,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                 key={`noparking-${item.id}`}
                                 longitude={item.lon}
                                 latitude={item.lat}
-                                anchor="center"
+                                anchor="bottom"
                                 style={{ willChange: 'transform' }}
                                 onClick={(e) => {
                                     e.originalEvent.stopPropagation();
@@ -2617,7 +2689,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                 key={`history-${item.id}`}
                                 longitude={item.lon}
                                 latitude={item.lat}
-                                anchor="center"
+                                anchor="bottom"
                                 style={{ willChange: 'transform' }}
                                 onClick={(e) => {
                                     e.originalEvent.stopPropagation();
@@ -2667,7 +2739,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                         <Marker
                             longitude={parkLocation[1]}
                             latitude={parkLocation[0]}
-                            anchor="center"
+                            anchor="bottom"
                         >
                             <ActiveSessionMarkerContent vehicleType={vehicleType} />
                         </Marker>
@@ -2688,10 +2760,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                         >
                             <div className="flex flex-col items-center">
                                 {/* Bubble */}
-                                <div className="bg-white dark:bg-zinc-800 p-2 rounded-full shadow-xl border-2 border-[#007AFF] cursor-pointer hover:scale-110 transition-transform">
-                                    <QrCode size={16} className="text-[#007AFF]" />
+                                <div className="bg-[#34C759] p-2 rounded-full shadow-xl border-2 border-white cursor-pointer hover:scale-110 transition-transform">
+                                    <QrCode size={16} className="text-white" />
                                 </div>
-                                <div className="w-0.5 h-3 bg-[#007AFF]/50"></div>
+                                <div className="w-0.5 h-3 bg-white"></div>
                             </div>
                         </Marker>
                     )}
@@ -2729,7 +2801,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                             longitude={parkingSearchMarker.lon}
                             latitude={parkingSearchMarker.lat}
                             anchor="bottom"
-                            style={{ zIndex: 2000 }}
+                            style={{ zIndex: 1000 }}
                         >
                             <div className="flex flex-col items-center pointer-events-auto animate-in zoom-in-75 fade-in duration-200"
                                 onClick={(e) => {
@@ -2837,6 +2909,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                             longitude={selectedMarkerPopup.lon}
                             latitude={selectedMarkerPopup.lat}
                             anchor="bottom"
+                            offset={[0, -48]}
                             style={{ zIndex: 1000 }}
                         >
                             <div className="relative">
