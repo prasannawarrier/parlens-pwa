@@ -17,7 +17,7 @@ interface ProfileButtonProps {
 
 export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, onOpenChange, onHelpClick }) => {
     const { pubkey, logout, pool, signEvent, refreshConnections } = useAuth();
-    const { logs, refetch, markDeleted } = useParkingLogs();
+    const { logs, markDeleted } = useParkingLogs();
     const [isOpen, setIsOpen] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [showNpubQr, setShowNpubQr] = useState(false);
