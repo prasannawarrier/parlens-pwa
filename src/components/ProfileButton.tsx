@@ -280,34 +280,7 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
     }, [decryptedLogs, filterType]);
 
     // Fetch preferred relays (NIP-65)
-    const fetchPreferredRelays = useCallback(async () => {
-        if (!pool || !pubkey) return;
 
-        setIsRelayLoading(true);
-        try {
-            const event = await pool.get(DEFAULT_RELAYS, {
-                kinds: [KINDS.RELAY_LIST],
-                authors: [pubkey],
-            });
-
-            if (event) {
-                // Extract relay URLs from 'r' tags
-                const relays = event.tags
-                    .filter((t: string[]) => t[0] === 'r')
-                    .map((t: string[]) => t[1]);
-                setPreferredRelays(relays);
-            } else {
-                // No NIP-65 event found, use default relays
-                setPreferredRelays([...DEFAULT_RELAYS]);
-            }
-        } catch (error) {
-            console.error('Error fetching preferred relays:', error);
-            // Fallback to default relays on error
-            setPreferredRelays([...DEFAULT_RELAYS]);
-        } finally {
-            setIsRelayLoading(false);
-        }
-    }, [pool, pubkey]);
 
     // Publish updated relay list
     const publishRelayList = async (relays: string[]) => {
