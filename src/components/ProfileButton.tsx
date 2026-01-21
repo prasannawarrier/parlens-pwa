@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Key, X, Shield, ChevronRight, MapPin, Clock, User, Trash2, Plus, Radio, Pencil, Check, EyeOff, Share2, QrCode, ArrowLeft } from 'lucide-react';
+import { Key, X, Shield, ChevronRight, MapPin, Clock, User, Trash2, Plus, Radio, Pencil, Check, EyeOff, Share2, QrCode, ArrowLeft, RefreshCw } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { relayHealthMonitor, type RelayHealth } from '../lib/relayHealth';
 import { useParkingLogs } from '../hooks/useParkingLogs';
 import { nip19 } from 'nostr-tools';
 import { decryptParkingLog, encryptParkingLog } from '../lib/encryption';
@@ -15,7 +16,7 @@ interface ProfileButtonProps {
 }
 
 export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, onOpenChange, onHelpClick }) => {
-    const { pubkey, logout, pool, signEvent } = useAuth();
+    const { pubkey, logout, pool, signEvent, refreshConnections } = useAuth();
     const { logs, refetch, markDeleted } = useParkingLogs();
     const [isOpen, setIsOpen] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
@@ -24,12 +25,20 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
     const [editedName, setEditedName] = useState('');
 
     // Preferred Relays state
-    const [preferredRelays, setPreferredRelays] = useState<string[]>([]);
+    const [preferredRelays, setPreferredRelays] = useState<string[]>([...DEFAULT_RELAYS]);
     const [showPreferredRelays, setShowPreferredRelays] = useState(false);
     const [isAddingRelay, setIsAddingRelay] = useState(false);
     const [newRelayUrl, setNewRelayUrl] = useState('');
     const [isRelayLoading, setIsRelayLoading] = useState(false);
     const [relayError, setRelayError] = useState<string | null>(null);
+    const [relayStatuses, setRelayStatuses] = useState<Map<string, RelayHealth>>(new Map());
+
+    // Subscribe to relay health updates
+    useEffect(() => {
+        return relayHealthMonitor.subscribe((stats) => {
+            setRelayStatuses(new Map(stats)); // Create new Map to trigger re-render
+        });
+    }, []);
 
     // Hidden Items state (unified structure for hidden listings and owners)
     interface HiddenItem {
@@ -148,11 +157,13 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                         console.error('Error parsing profile:', e);
                     }
                 } else {
-                    setProfile({
-                        name: 'Nostr User',
-                        npub: nip19.npubEncode(pubkey),
-                        picture: `https://api.dicebear.com/7.x/bottts/svg?seed=${pubkey}`
-                    });
+                    if (!profile) {
+                        setProfile({
+                            name: 'Nostr User',
+                            npub: nip19.npubEncode(pubkey),
+                            picture: `https://api.dicebear.com/7.x/bottts/svg?seed=${pubkey}`
+                        });
+                    }
                 }
             };
             fetchProfile();
@@ -359,17 +370,12 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
         }
     };
 
-    // Fetch preferred relays when modal opens
-    useEffect(() => {
-        if (isOpen && pubkey) {
-            fetchPreferredRelays();
-        }
-    }, [isOpen, pubkey, fetchPreferredRelays]);
+
 
     return (
         <>
             <button
-                onClick={() => { refetch(); setIsOpen(true); }}
+                onClick={() => { setIsOpen(true); }}
                 className="h-12 w-12 flex items-center justify-center rounded-[1.5rem] bg-white/80 dark:bg-white/10 backdrop-blur-md text-zinc-600 dark:text-white/70 active:scale-95 transition-all shadow-lg border border-black/5 dark:border-white/10"
                 title="Activity Log"
             >
@@ -544,7 +550,27 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
 
                                 {/* Preferred Relays Section */}
                                 <div className="space-y-4">
-                                    <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-white/20 ml-2">Preferred Relays</h4>
+                                    <div className="flex items-center justify-between ml-2 pr-2">
+                                        <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-white/20">Preferred Relays</h4>
+                                        <button
+                                            onClick={async (e) => {
+                                                e.stopPropagation();
+                                                setIsRelayLoading(true);
+                                                try {
+                                                    await refreshConnections();
+                                                } catch (e) {
+                                                    console.error('Refresh failed:', e);
+                                                } finally {
+                                                    setIsRelayLoading(false);
+                                                }
+                                            }}
+                                            disabled={isRelayLoading}
+                                            className={`p-1.5 rounded-full bg-zinc-100 dark:bg-white/5 text-zinc-400 dark:text-white/30 active:scale-95 transition-all flex items-center justify-center ${isRelayLoading ? 'text-zinc-500 dark:text-white/50 cursor-not-allowed' : ''}`}
+                                            title="Refresh Connections"
+                                        >
+                                            <RefreshCw size={14} className={`origin-center ${isRelayLoading ? 'animate-spin' : ''}`} />
+                                        </button>
+                                    </div>
                                     <div className="space-y-0.5 rounded-[2rem] overflow-hidden bg-zinc-50 dark:bg-white/[0.03] border border-black/5 dark:border-white/5">
                                         <button
                                             onClick={() => setShowPreferredRelays(!showPreferredRelays)}
@@ -575,7 +601,7 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                                                                     className="flex items-center justify-between p-3 rounded-xl bg-white dark:bg-white/5 border border-black/5 dark:border-white/10"
                                                                 >
                                                                     <div className="flex items-center gap-3 flex-1 min-w-0">
-                                                                        <Radio size={16} className="text-green-500 shrink-0" />
+                                                                        <Radio size={16} className={`shrink-0 ${relayStatuses.get(relay)?.connected ? 'text-green-500' : 'text-zinc-400'}`} />
                                                                         <span className="text-sm text-zinc-700 dark:text-white truncate">
                                                                             {relay.replace('wss://', '')}
                                                                         </span>
@@ -607,6 +633,9 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                                             </>
                                         )}
                                     </div>
+
+
+
                                     <p className="text-xs text-zinc-400 dark:text-white/30 mt-2 ml-2 leading-relaxed">
                                         Relay address(es) listed in this section tell Parlens where to look for and store data. Parlens requires a connection to at least one relay to work.
                                     </p>

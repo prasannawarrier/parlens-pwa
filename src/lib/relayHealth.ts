@@ -15,6 +15,21 @@ export interface RelayHealth {
 
 class RelayHealthMonitor {
     private relayHealth: Map<string, RelayHealth> = new Map();
+    private listeners = new Set<(stats: Map<string, RelayHealth>) => void>();
+
+    /**
+     * Subscribe to health updates
+     */
+    subscribe(callback: (stats: Map<string, RelayHealth>) => void): () => void {
+        this.listeners.add(callback);
+        // Immediate callback with current state
+        callback(this.relayHealth);
+        return () => this.listeners.delete(callback);
+    }
+
+    private notifyListeners() {
+        this.listeners.forEach(listener => listener(this.relayHealth));
+    }
 
     /**
      * Initialize health tracking for relays
@@ -48,6 +63,7 @@ class RelayHealthMonitor {
             health.avgLatency = health.avgLatency === 0
                 ? latencyMs
                 : (health.avgLatency * 0.8) + (latencyMs * 0.2);
+            this.notifyListeners();
         }
     }
 
@@ -67,6 +83,7 @@ class RelayHealthMonitor {
                 health.connected = false;
                 console.warn(`[Parlens] Relay ${url} marked unhealthy after ${health.failureCount} failures`);
             }
+            this.notifyListeners();
         }
     }
 
@@ -122,6 +139,7 @@ class RelayHealthMonitor {
             health.connected = true;
             health.failureCount = 0;
         });
+        this.notifyListeners();
         console.log('[Parlens] Relay health monitor reset');
     }
 

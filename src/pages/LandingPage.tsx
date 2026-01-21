@@ -3453,21 +3453,20 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                 )}
 
                 {/* Profile Button - Hidden in Drop Pin Mode */}
-                {!dropPinMode && (
-                    <div className="relative z-[1010] pointer-events-auto">
-                        <ProfileButton
-                            setHistorySpots={setHistorySpots}
-                            onHelpClick={() => setShowHelp(true)}
-                        />
-                    </div>
-                )}
+                {/* Profile Button - Hidden in Drop Pin Mode (CSS only to preserve state) */}
+                <div className={`relative z-[1010] pointer-events-auto ${dropPinMode ? 'hidden' : 'block'}`}>
+                    <ProfileButton
+                        setHistorySpots={setHistorySpots}
+                        onHelpClick={() => setShowHelp(true)}
+                    />
+                </div>
 
-                {/* FAB - Hidden in Drop Pin Mode */}
-                {!dropPinMode && (
+                {/* FAB - Hidden in Drop Pin Mode (CSS only to preserve state) */}
+                <div className={dropPinMode ? 'hidden' : 'block'}>
                     <FAB
                         status={status}
                         setStatus={setStatus}
-                        searchLocation={status === 'search' ? [viewState.latitude, viewState.longitude] : location}
+                        searchLocation={parkingSearchMarker ? [parkingSearchMarker.lat, parkingSearchMarker.lon] : (status === 'search' ? [viewState.latitude, viewState.longitude] : location)}
                         userLocation={location}
                         vehicleType={vehicleType}
                         setOpenSpots={setOpenSpots}
@@ -3478,7 +3477,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                         listedParkingSession={listedParkingSession}
                         onQRScan={() => onRequestScan?.()}
                     />
-                )}
+                </div>
             </div>
 
             {/* Route Button Component (Moved out of visual stack to prevent spacing gaps) */}

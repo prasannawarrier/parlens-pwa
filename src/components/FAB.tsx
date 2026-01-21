@@ -233,6 +233,12 @@ export const FAB: React.FC<FABProps> = ({
 
                         if (spotType !== vehicleType) return;
 
+                        // Race Condition Check: Don't overwrite newer data with older data
+                        const existing = spotsMapRef.current.get(uniqueKey);
+                        if (existing && existing.created_at > event.created_at) {
+                            return;
+                        }
+
                         // Update Map
                         const spot = {
                             id: event.id,

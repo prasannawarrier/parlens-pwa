@@ -13,6 +13,7 @@ interface AuthContextType {
     logout: () => void;
     pool: SimplePool;
     signEvent: (event: any) => Promise<any>;
+    refreshConnections: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -22,13 +23,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // SimplePool with iOS-friendly settings for reliable connections
     // enablePing: sends heartbeats to detect dropped connections (critical for iOS)
     // enableReconnect: automatically reconnects when connections fail
-    const [pool] = useState(() => new SimplePool({ enablePing: true, enableReconnect: true }));
+    const [pool, setPool] = useState(() => new SimplePool({ enablePing: true, enableReconnect: true }));
 
     // Initialize relay health monitoring on mount
     useEffect(() => {
         relayHealthMonitor.initialize(DEFAULT_RELAYS);
         console.log('[Parlens] Relay health monitor initialized for:', DEFAULT_RELAYS);
     }, []);
+
+    // Force reconnect logic
+    const refreshConnections = async () => {
+        console.log('[Parlens] Refreshing relay connections...');
+
+        // 1. Close existing connections to clear "zombies"
+        try {
+            pool.close(DEFAULT_RELAYS);
+        } catch (e) {
+            console.warn('[Parlens] Error closing connections:', e);
+        }
+
+        // 2. Reset health monitor stats
+        relayHealthMonitor.resetAll();
+
+        // 3. Create a fresh pool instance to guarantee clean state
+        const newPool = new SimplePool({ enablePing: true, enableReconnect: true });
+
+        // Wait for connections to establish (warming up the pool)
+        // This ensures the spinner keeps spinning until we are actually connected
+        await Promise.allSettled(DEFAULT_RELAYS.map(url => newPool.ensureRelay(url)));
+
+        // 4. Update state to trigger all downstream useEffects to re-subscribe
+        setPool(newPool);
+
+        console.log('[Parlens] Connections refreshed. New pool instance created.');
+    };
 
     // Reset relay health when app comes back from background (iOS reliability)
     useEffect(() => {
@@ -41,14 +69,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 // If backgrounded for more than 5 seconds, reset relay health
                 // This helps reconnect stale connections on iOS
                 if (hiddenDuration > 5000) {
-                    console.log('[Parlens] App resumed after', hiddenDuration, 'ms - resetting relay health');
-                    relayHealthMonitor.resetAll();
+                    console.log('[Parlens] App resumed after', hiddenDuration, 'ms - refreshing connections');
+                    refreshConnections();
                 }
             }
         };
         document.addEventListener('visibilitychange', handleVisibilityChange);
         return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-    }, []);
+    }, [pool]);
 
     const login = async (method: 'extension' | 'nsec' | 'bunker' | 'create', value?: string, username?: string) => {
         let key = '';
@@ -122,7 +150,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     return (
-        <AuthContext.Provider value={{ pubkey, login, logout, pool, signEvent }}>
+        <AuthContext.Provider value={{ pubkey, login, logout, pool, signEvent, refreshConnections }}>
             {children}
         </AuthContext.Provider>
     );
