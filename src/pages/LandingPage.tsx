@@ -1987,7 +1987,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
 
     // Listed Parking: NOT clustered (precise markers) - just apply standard clustering for zoom-out only
     const clusteredListedSpots = useMemo(() =>
-        clusterSpots(listedSpots, zoomLevel)
+        clusterSpots(listedSpots, zoomLevel, true, 7)
         , [listedSpots, zoomLevel]);
 
     // Parking Area Reports: Clustered at 7-digit geohash level (capped)
