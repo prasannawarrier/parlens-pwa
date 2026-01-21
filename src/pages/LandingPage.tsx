@@ -1922,7 +1922,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
 
         if (status !== 'search') return pinnedListedItems;
 
-        return openSpots
+        const searchResults = openSpots
             .filter(s => s.kind === KINDS.LISTED_SPOT_LOG && (s.type || 'car') === vehicleType)
             .map(s => ({
                 id: s.id,
@@ -1938,6 +1938,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                 openSpots: s.count || 1,
                 original: s
             }));
+
+        // Merge logic: Live results overwrite pinned items, but pinned items persist if not in live results
+        const mergedMap = new Map<string, any>();
+        pinnedListedItems.forEach(item => mergedMap.set(item.id, item));
+        searchResults.forEach(item => mergedMap.set(item.id, item));
+
+        return Array.from(mergedMap.values());
     }, [openSpots, vehicleType, status, pinnedMarkers]);
 
     // Filter and transform area spots for clustering (Kind 31714) - RESPECT TOGGLE
@@ -1967,10 +1974,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
         // Check toggle setting
         try {
             const showAreas = JSON.parse(localStorage.getItem('parlens_show_parking_areas') || 'true');
-            if (!showAreas) return pinnedAreaItems;
+            if (!showAreas) return pinnedAreaItems; // Keep pinned items even if areas toggle is off? Or hide them? 
+            // Better to hide raw areas but KEEP pinned ones if they are pinned.
+            // Actually, if toggle is off, we usually hide everything. But pinned items are explicit user intent.
+            // Let's assume pinned items should stay visible.
         } catch { }
 
-        return openSpots
+        const searchResults = openSpots
             .filter(s => s.kind === KINDS.PARKING_AREA_INDICATOR && (s.type || 'car') === vehicleType)
             .map(s => ({
                 id: s.id,
@@ -1983,6 +1993,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                 created_at: s.created_at,
                 original: s
             }));
+
+        // Merge logic: Live results overwrite pinned items
+        const mergedMap = new Map<string, any>();
+        pinnedAreaItems.forEach(item => mergedMap.set(item.id, item));
+        searchResults.forEach(item => mergedMap.set(item.id, item));
+
+        return Array.from(mergedMap.values());
     }, [openSpots, vehicleType, status, pinnedMarkers]);
 
     // Listed Parking: NOT clustered (precise markers) - just apply standard clustering for zoom-out only
