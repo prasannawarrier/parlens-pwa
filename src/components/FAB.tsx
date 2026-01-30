@@ -435,33 +435,44 @@ export const FAB = React.memo<FABProps>(({
                     // If the parent Listing (31147) is deleted, the Spot Log (1714) is an orphan.
 
                     // Initialize defaults (safe even if validation query is skipped)
+                    // Initialize defaults (safe even if validation query is skipped)
                     const validAddresses = new Set<string>();
                     approvedListingATagsRef.current = new Set(); // Clear previous approvals
+                    let isValidationSuccessful = false; // Flag to track if we can trust the 'validAddresses' set
 
                     if (parentListingAddresses.size > 0) {
-                        const uniqueAddresses = Array.from(parentListingAddresses);
+                        try {
+                            const uniqueAddresses = Array.from(parentListingAddresses);
 
-                        const dTags = new Set<string>();
-                        const authors = new Set<string>();
-                        uniqueAddresses.forEach(a => {
-                            const p = a.split(':');
-                            if (p.length === 3) {
-                                authors.add(p[1]);
-                                dTags.add(p[2]);
-                            }
-                        });
+                            const dTags = new Set<string>();
+                            const authors = new Set<string>();
+                            uniqueAddresses.forEach(a => {
+                                const p = a.split(':');
+                                if (p.length === 3) {
+                                    authors.add(p[1]);
+                                    dTags.add(p[2]);
+                                }
+                            });
 
-                        const validListingsMap = await pool.querySync(DEFAULT_RELAYS, {
-                            kinds: [KINDS.LISTED_PARKING_METADATA], // 31147
-                            '#d': Array.from(dTags),
-                            authors: Array.from(authors)
-                        } as any);
+                            const validListingsMap = await pool.querySync(DEFAULT_RELAYS, {
+                                kinds: [KINDS.LISTED_PARKING_METADATA], // 31147
+                                '#d': Array.from(dTags),
+                                authors: Array.from(authors)
+                            } as any);
 
-                        // Create set of valid listing addresses found
-                        validListingsMap.forEach((e: any) => {
-                            const d = e.tags.find((t: string[]) => t[0] === 'd')?.[1];
-                            if (d) validAddresses.add(`${KINDS.LISTED_PARKING_METADATA}:${e.pubkey}:${d}`);
-                        });
+                            // Create set of valid listing addresses found
+                            validListingsMap.forEach((e: any) => {
+                                const d = e.tags.find((t: string[]) => t[0] === 'd')?.[1];
+                                if (d) validAddresses.add(`${KINDS.LISTED_PARKING_METADATA}:${e.pubkey}:${d}`);
+                            });
+
+                            isValidationSuccessful = true; // Mark validation as successful (we contacted relays)
+
+                        } catch (e) {
+                            console.error('[Parlens] Failed to validate parent listings:', e);
+                            // isValidationSuccessful remains false -> Fail Open (Show all)
+                        }
+
 
                         // === APPROVAL FILTER ===
                         // Fetch Kind 1985 (Label) from APPROVER_PUBKEY to get approved listing a-tags
@@ -498,15 +509,20 @@ export const FAB = React.memo<FABProps>(({
 
                         if (rootATag) {
                             // Check if listing is approved OR owner
-                            // Note: We skip 'validAddresses.has(rootATag)' check here to avoid hiding spots
-                            // if parent metadata query fails (Strict Orphan Validation removed).
-                            const listingPubkey = rootATag.split(':')[1];
-                            const isAutoApproved = listingPubkey === APPROVER_PUBKEY;
-                            const hasApprovalLabel = approvedListingATagsRef.current.has(rootATag);
-                            const isOwner = listingPubkey === pubkey;
+                            // CONDITIONAL VALIDATION:
+                            // 1. If validation succeeded -> Strict Check (validAddresses.has)
+                            // 2. If validation failed (network) -> Fail Open (allow all)
+                            const isValid = !isValidationSuccessful || validAddresses.has(rootATag);
 
-                            if (isAutoApproved || hasApprovalLabel || isOwner) {
-                                processSpotEvent(event);
+                            if (isValid) {
+                                const listingPubkey = rootATag.split(':')[1];
+                                const isAutoApproved = listingPubkey === APPROVER_PUBKEY;
+                                const hasApprovalLabel = approvedListingATagsRef.current.has(rootATag);
+                                const isOwner = listingPubkey === pubkey;
+
+                                if (isAutoApproved || hasApprovalLabel || isOwner) {
+                                    processSpotEvent(event);
+                                }
                             }
                         }
                     }
