@@ -10,7 +10,7 @@ import { KINDS, DEFAULT_RELAYS, APPROVER_PUBKEY } from '../lib/nostr';
 import { getSuggestions, type NominatimResult, calculateDistance, encodeGeohash } from '../lib/geo';
 import { decryptParkingLog } from '../lib/encryption';
 import type { RouteLogContent } from '../lib/nostr';
-import { getCurrencyFromLocation } from '../lib/currency'; // Import currency utility
+import { getCurrencyFromLocation, getCurrencySymbol } from '../lib/currency'; // Import currency utility
 import * as nip19 from 'nostr-tools/nip19';
 import { relayHealthMonitor } from '../lib/relayHealth';
 import { QRCodeSVG } from 'qrcode.react';
@@ -3000,7 +3000,12 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
                         <label className="text-xs font-bold uppercase text-zinc-400">Name / Short Code</label>
                         <input className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl dark:text-white" value={editData.short_name} onChange={e => setEditData({ ...editData, short_name: e.target.value })} placeholder={`#${spot.spot_number} `} />
                         <label className="text-xs font-bold uppercase text-zinc-400">Type</label>
-                        <select className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl dark:text-white" value={editData.type} onChange={e => setEditData({ ...editData, type: e.target.value as any })}>
+                        <select
+                            className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl dark:text-white appearance-none bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2212%22%20height%3D%2212%22%20viewBox%3D%220%200%2012%2012%22%3E%3Cpath%20fill%3D%22%23888%22%20d%3D%22M2%204l4%204%204-4z%22%2F%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[right_1rem_center]"
+                            style={{ WebkitTapHighlightColor: 'transparent' }}
+                            value={editData.type}
+                            onChange={e => setEditData({ ...editData, type: e.target.value as any })}
+                        >
                             <option value="car">🚗 Car</option><option value="motorcycle">🏍️ Motorcycle</option><option value="bicycle">🚲 Bicycle</option>
                         </select>
                     </div>
@@ -3146,7 +3151,7 @@ const SpotDetailsModal: React.FC<any> = ({ spot, listing, status, onClose, isMan
                         <div className="grid grid-cols-2 gap-3 text-left">
                             <div className="p-4 bg-zinc-50 dark:bg-white/5 rounded-2xl">
                                 <div className="text-xs font-bold uppercase text-zinc-400 mb-1">Rate</div>
-                                <div className="text-lg font-bold dark:text-white tabular-nums">{spot.rates?.currency || listing.rates?.car?.currency || '$'}{spot.rates?.hourly || listing.rates?.[spot.type]?.hourly}/hr</div>
+                                <div className="text-lg font-bold dark:text-white tabular-nums">{getCurrencySymbol(spot.rates?.currency || listing.rates?.car?.currency || 'USD')}{spot.rates?.hourly || listing.rates?.[spot.type]?.hourly}/hr</div>
                             </div>
                             <div className="p-4 bg-zinc-50 dark:bg-white/5 rounded-2xl">
                                 <div className="text-xs font-bold uppercase text-zinc-400 mb-1">Status</div>
