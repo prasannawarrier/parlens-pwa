@@ -1077,7 +1077,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
     };
 
     // Remote Cancellation Handler
-    const handleSpotStatusUpdate = useCallback((spotATag: string, status: string, event: any) => {
+    const handleSpotStatusUpdate = useCallback((_spotATag: string, status: string, _event: any) => {
         if (status === 'open' || status === 'closed') {
             console.log('[Parlens] Remote cancellation detected:', status);
             alert('The listing owner has updated the spot status. Your session has been ended.');
