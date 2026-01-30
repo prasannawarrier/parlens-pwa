@@ -599,7 +599,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
         hourlyRate?: number;
         currency?: string;
     } | null>(() => {
-        const saved = localStorage.getItem('parlens_active_listed_session');
+        const saved = localStorage.getItem('parlens_listed_parking_session');
         return saved ? JSON.parse(saved) : null;
     });
 
@@ -2180,14 +2180,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
     return (
         <div className="fixed inset-0 overflow-hidden bg-gray-50 dark:bg-black transition-colors duration-300">
             {/* Verifying Overlay - Processing QR & Status */}
-            {isVerifying && (
-                <div className="absolute inset-0 z-[2000] flex items-center justify-center bg-gray-50 dark:bg-black transition-opacity duration-500">
-                    <div className="flex flex-col items-center gap-4 animate-in fade-in duration-700 px-8 max-w-sm text-center">
-                        <div className="w-8 h-8 rounded-full border-4 border-green-500/20 border-t-green-500 animate-spin" />
-                        <p className="text-sm font-semibold text-zinc-400 dark:text-white/40 tracking-tight">Verifying...</p>
-                    </div>
-                </div>
-            )}
+
 
             {/* Loading Overlay - Covers everything until ready */}
             {((!location && !locationError) || !isMapLoaded) && (
@@ -2212,6 +2205,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                 </button>
                             </>
                         )}
+                    </div>
+                </div>
+            )}
+
+            {/* Verifying Overlay - Processing QR & Status */}
+            {isVerifying && (
+                <div className="absolute inset-0 z-[2000] flex items-center justify-center bg-gray-50 dark:bg-black transition-opacity duration-500">
+                    <div className="flex flex-col items-center gap-4 animate-in fade-in duration-700 px-8 max-w-sm text-center">
+                        <div className="w-8 h-8 rounded-full border-4 border-green-500/20 border-t-green-500 animate-spin" />
+                        <p className="text-sm font-semibold text-zinc-400 dark:text-white/40 tracking-tight">Verifying...</p>
                     </div>
                 </div>
             )}

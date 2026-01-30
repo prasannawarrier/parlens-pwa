@@ -417,8 +417,8 @@ const App: React.FC = () => {
     return (
       <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-zinc-900 text-white animate-in fade-in duration-300">
         <div className="flex flex-col items-center gap-4">
-          <div className="w-12 h-12 rounded-full border-4 border-white/20 border-t-blue-500 animate-spin" />
-          <p className="text-lg font-bold tracking-tight">Verifying...</p>
+          <div className="w-8 h-8 rounded-full border-4 border-green-500/20 border-t-green-500 animate-spin" />
+          <p className="text-sm font-semibold text-zinc-400 dark:text-white/40 tracking-tight">Verifying...</p>
         </div>
       </div>
     );
