@@ -540,7 +540,10 @@ interface LandingPageProps {
 export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initialScannedCode, onScannedCodeConsumed }) => {
     const { pubkey, signEvent, pool } = useAuth();
     const mapRef = useRef<MapRef>(null);
-    const [location, setLocation] = useState<[number, number] | null>(null);
+    const [location, setLocation] = useState<[number, number] | null>(() => {
+        const saved = localStorage.getItem('parlens_last_location');
+        return saved ? JSON.parse(saved) : null;
+    });
     const locationSmoother = useRef(new LocationSmoother());
     // Use BearingAnimator for map rotation to prevent 0/360 flip flickering
     const bearingAnimator = useRef(new BearingAnimator());
@@ -1059,6 +1062,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             const signedEndLog = await signEvent(endLogEvent);
             await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedEndLog));
 
+            // Notify history to update
+            window.dispatchEvent(new Event('parking-log-updated'));
+
             // Clear session
             localStorage.removeItem('parlens_listed_parking_session');
             setListedParkingSession(null);
@@ -1076,21 +1082,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
         }
     };
 
-    // Remote Cancellation Handler
-    const handleSpotStatusUpdate = useCallback((_spotATag: string, status: string, _event: any) => {
-        if (status === 'open' || status === 'closed') {
-            console.log('[Parlens] Remote cancellation detected:', status);
-            alert('The listing owner has updated the spot status. Your session has been ended.');
-            localStorage.removeItem('parlens_listed_parking_session');
-            setListedParkingSession(null);
-            setStatus('idle');
-            setParkLocation(null);
-            setSessionStart(null);
-            setShowListedEndPopup(false);
-            setPendingEndSession(null);
-            setEndSessionCost('0');
-        }
-    }, [setStatus]);
+
     const [needsRecenter, setNeedsRecenter] = useState(false);
     const [zoomLevel, setZoomLevel] = useState(17);
     const [routeCoords, setRouteCoords] = useState<[number, number][] | null>(null);
@@ -1159,6 +1151,34 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
         const timer = setTimeout(fetchCountry, 2000);
         return () => clearTimeout(timer);
     }, [location, countryCode]);
+
+    // Remote Cancellation Handler
+    const handleSpotStatusUpdate = useCallback((_spotATag: string, status: string, _event: any) => {
+        if (status === 'open' || status === 'closed') {
+            console.log('[Parlens] Remote cancellation detected:', status);
+            alert('The listing owner has updated the spot status. Your session continues as a regular parking session.');
+
+            // 1. Persist as regular session to preserve timer
+            if (sessionStart && parkLocation) {
+                localStorage.setItem('parlens_session', JSON.stringify({
+                    status: 'parked',
+                    sessionStart,
+                    parkLocation
+                }));
+            }
+
+            // 2. Clear listed session reference
+            localStorage.removeItem('parlens_listed_parking_session');
+            setListedParkingSession(null);
+
+            // 3. Ensure status remains parked (it should be already, but force it)
+            setStatus('parked');
+
+            // Hide popup if open
+            setShowListedEndPopup(false);
+            setPendingEndSession(null);
+        }
+    }, [setStatus, sessionStart, parkLocation]);
 
     // Handlers for Drop Pin
     const handleDropPin = useCallback(() => {
@@ -1358,6 +1378,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                 // Track speed for UI feedback
                 setUserSpeed(result.speed);
                 userSpeedRef.current = result.speed;
+
+                // Persist last known location for quick resumption
+                localStorage.setItem('parlens_last_location', JSON.stringify([latitude, longitude]));
 
                 // STATIONARY MODE: Use buffered position to prevent jitter
                 // This is critical for accurate parking spot marking
@@ -1601,6 +1624,24 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
 
     // Session Persistence
     useEffect(() => {
+        // 1. Check for Listed Parking Session (Priority)
+        const savedListed = localStorage.getItem('parlens_listed_parking_session');
+        if (savedListed) {
+            try {
+                const session = JSON.parse(savedListed);
+                console.log('[Parlens] Restoring listed session:', session);
+                if (session.startTime) {
+                    setSessionStart(session.startTime);
+                    if (session.listingLocation) setParkLocation(session.listingLocation);
+                    setStatus('parked');
+                    return; // Stop here, don't restore regular session if listed is active
+                }
+            } catch (e) {
+                console.warn('[Parlens] Failed to restore listed session:', e);
+            }
+        }
+
+        // 2. Check for Regular Session
         const savedSession = localStorage.getItem('parlens_session');
         if (savedSession) {
             try {

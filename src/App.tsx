@@ -415,7 +415,7 @@ const App: React.FC = () => {
   // Processing Overlay (during relay refresh after scan)
   if (isProcessingScan) {
     return (
-      <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-zinc-900 text-white animate-in fade-in duration-300">
+      <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-gray-50 dark:bg-black transition-colors duration-300 animate-in fade-in">
         <div className="flex flex-col items-center gap-4">
           <div className="w-8 h-8 rounded-full border-4 border-green-500/20 border-t-green-500 animate-spin" />
           <p className="text-sm font-semibold text-zinc-400 dark:text-white/40 tracking-tight">Verifying...</p>
