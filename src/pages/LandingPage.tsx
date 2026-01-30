@@ -552,12 +552,24 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
     const positionAnimator = useRef(new PositionAnimator());
     const [locationError, setLocationError] = useState<string | null>(null);
 
-    const [status, setStatus] = useState<'idle' | 'search' | 'parked'>('idle');
+    const [status, setStatus] = useState<'idle' | 'search' | 'parked'>(() => {
+        // 1. Check Listed Session (Priority)
+        if (localStorage.getItem('parlens_listed_parking_session')) return 'parked';
+        // 2. Check Regular Session
+        const saved = localStorage.getItem('parlens_session');
+        if (saved) {
+            try {
+                const s = JSON.parse(saved);
+                if (s.status === 'parked' || s.status === 'search') return s.status;
+            } catch { }
+        }
+        return 'idle';
+    });
     const [orientationMode, setOrientationMode] = useState<'fixed' | 'recentre' | 'auto'>('fixed');
     const [pendingAutoMode, setPendingAutoMode] = useState(false); // Immediate visual feedback for button
     const [showHelp, setShowHelp] = useState(false);
     const [showListedParking, setShowListedParking] = useState(false);
-    const [isVerifying, setIsVerifying] = useState(!!initialScannedCode);
+    const [isVerifying, setIsVerifying] = useState(false); // Controlled externally or by handleScannedCode
     // Currency state - removed (logic in FAB)
     const [vehicleType, setVehicleType] = useState<'bicycle' | 'motorcycle' | 'car'>(() => {
         const saved = localStorage.getItem('parlens_vehicle_type');
@@ -584,7 +596,25 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
         return combined;
     }, [relaySpots, localAddedFlags, localRemovedFlagIds]);
     const [historySpots, setHistorySpots] = useState<any[]>([]);
-    const [parkLocation, setParkLocation] = useState<[number, number] | null>(null);
+    const [parkLocation, setParkLocation] = useState<[number, number] | null>(() => {
+        // 1. Check Listed Session
+        const listed = localStorage.getItem('parlens_listed_parking_session');
+        if (listed) {
+            try {
+                const s = JSON.parse(listed);
+                if (s.listingLocation) return s.listingLocation;
+            } catch { }
+        }
+        // 2. Check Regular Session
+        const saved = localStorage.getItem('parlens_session');
+        if (saved) {
+            try {
+                const s = JSON.parse(saved);
+                if (s.parkLocation) return s.parkLocation;
+            } catch { }
+        }
+        return null;
+    });
 
     // Listed Parking Session - for overlay display
     const [listedParkingSession, setListedParkingSession] = useState<{
@@ -854,19 +884,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             if (isEndingSession) {
                 // Set pending session for Popup Modal
                 const session = JSON.parse(existingSession!);
-
-                // Auto-calculate cost based on duration
-                // Defaults to 0 if rate is missing
-                let estimatedCost = 0;
-                if (session.startTime && session.hourlyRate) {
-                    const durationSeconds = Math.floor(Date.now() / 1000) - session.startTime;
-                    const hours = Math.max(0, durationSeconds / 3600); // Prevent negative
-                    // Simple calculation: rate * hours, rounded up to nearest integer for display simplicity
-                    // TODO: Implement more complex rate rules (min time, increments) if needed
-                    estimatedCost = Math.ceil(hours * Number(session.hourlyRate));
-                }
-                setEndSessionCost(String(estimatedCost));
-
                 setPendingEndSession({
                     authData,
                     session,
@@ -1126,7 +1143,25 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
 
 
     // Session State (Lifted from FAB)
-    const [sessionStart, setSessionStart] = useState<number | null>(null);
+    const [sessionStart, setSessionStart] = useState<number | null>(() => {
+        // 1. Check Listed Session (Priority)
+        const listed = localStorage.getItem('parlens_listed_parking_session');
+        if (listed) {
+            try {
+                const s = JSON.parse(listed);
+                if (s.startTime) return s.startTime;
+            } catch { }
+        }
+        // 2. Check Regular Session
+        const saved = localStorage.getItem('parlens_session');
+        if (saved) {
+            try {
+                const s = JSON.parse(saved);
+                if (s.sessionStart) return s.sessionStart;
+            } catch { }
+        }
+        return null;
+    });
     const [isMapLoaded, setIsMapLoaded] = useState(false);
 
     // MapLibre view state
