@@ -216,11 +216,18 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
     const formatDuration = (startTime: Date | null, endTime: Date): string => {
         if (!startTime) return 'Unknown';
         const diffMs = endTime.getTime() - startTime.getTime();
-        const diffMins = Math.floor(diffMs / (1000 * 60));
-        if (diffMins < 60) return `${diffMins}m`;
-        const hours = Math.floor(diffMins / 60);
-        const mins = diffMins % 60;
-        return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+        const totalSeconds = Math.floor(diffMs / 1000);
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const seconds = totalSeconds % 60;
+
+        if (hours > 0) {
+            return `${hours}h ${minutes}m ${seconds}s`;
+        } else if (minutes > 0) {
+            return `${minutes}m ${seconds}s`;
+        } else {
+            return `${seconds}s`;
+        }
     };
 
     // Update note on a parking log
@@ -866,7 +873,9 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                                                 const endTime = content.finished_at ? new Date(content.finished_at * 1000) : new Date(log.created_at * 1000);
                                                 const coords = content.lat && content.lon ? `${content.lat.toFixed(5)}, ${content.lon.toFixed(5)}` : null;
                                                 const duration = formatDuration(startTime, endTime);
-                                                const dateStr = startTime ? startTime.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : endTime.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                                                const dateDate = startTime ? startTime.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : endTime.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                                                const dateTime = startTime ? startTime.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : '';
+                                                const dateStr = dateTime ? `${dateDate}, ${dateTime}` : dateDate;
 
                                                 // Read type from encrypted content (not public tags for privacy)
                                                 const type = content.type || 'car';
