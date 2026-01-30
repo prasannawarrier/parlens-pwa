@@ -151,6 +151,8 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
     // Approver filter: 'all' | 'my' | 'approved' | 'pending'
     const [approverFilter, setApproverFilter] = useState<'all' | 'my' | 'approved' | 'pending'>('all');
     const [isApprovingListing, setIsApprovingListing] = useState(false);
+    // User's My Listings filter: 'all' | 'approved' | 'pending'
+    const [myListingsStatusFilter, setMyListingsStatusFilter] = useState<'all' | 'approved' | 'pending'>('all');
 
     // Captured location - set once on mount and updated only on explicit refresh
     const capturedLocationRef = useRef<[number, number] | null>(null);
@@ -1319,6 +1321,18 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
 
                 if (!isApprover) {
                     match = isOwnListing;
+
+                    // Filter by status if "My Listings" tab is active
+                    if (match && activeTab === 'my') {
+                        switch (myListingsStatusFilter) {
+                            case 'approved':
+                                match = isAutoApproved || hasApprovalLabel;
+                                break;
+                            case 'pending':
+                                match = !isAutoApproved && !hasApprovalLabel;
+                                break;
+                        }
+                    }
                 } else {
                     // Approver filter logic
                     switch (approverFilter) {
@@ -1796,6 +1810,25 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                 >
                                     <option value="all">All</option>
                                     <option value="my">Mine</option>
+                                    <option value="approved">Approved</option>
+                                    <option value="pending">Pending</option>
+                                </select>
+                            )}
+
+                            {/* User: Dropdown filter for My Listings status */}
+                            {!isApprover && activeTab === 'my' && (
+                                <select
+                                    value={myListingsStatusFilter}
+                                    onChange={(e) => setMyListingsStatusFilter(e.target.value as 'all' | 'approved' | 'pending')}
+                                    className="pl-2 pr-6 py-1 rounded-full border border-transparent bg-zinc-100 dark:bg-white/5 text-zinc-500 dark:text-zinc-400 text-[10px] font-bold uppercase tracking-wider appearance-none cursor-pointer transition-colors active:bg-zinc-200 dark:active:bg-white/10 outline-none"
+                                    style={{
+                                        backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%239ca3af'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`,
+                                        backgroundRepeat: 'no-repeat',
+                                        backgroundPosition: 'right 6px center',
+                                        backgroundSize: '12px'
+                                    }}
+                                >
+                                    <option value="all">All</option>
                                     <option value="approved">Approved</option>
                                     <option value="pending">Pending</option>
                                 </select>
