@@ -3374,10 +3374,28 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                         </div>
                     )}
                     {status === 'parked' && (
-                        <div className="bg-white dark:bg-zinc-800 shadow-lg rounded-full px-4 py-2 flex items-center gap-2 border border-black/5 dark:border-white/10 animate-in fade-in zoom-in slide-in-from-top-4 pointer-events-auto">
-                            <div className="w-4 h-4 rounded-full bg-green-500 shadow-md" />
+                        <button
+                            onClick={() => {
+                                if (parkLocation && mapRef.current) {
+                                    isTransitioning.current = true;
+                                    mapRef.current.flyTo({
+                                        center: [parkLocation[1], parkLocation[0]],
+                                        zoom: 17,
+                                        duration: 1000,
+                                        essential: true
+                                    });
+                                    // Reset transition flag
+                                    mapRef.current.once('moveend', () => {
+                                        isTransitioning.current = false;
+                                        setOrientationMode('fixed'); // Lock to fixed to prevent drift
+                                    });
+                                }
+                            }}
+                            className="bg-white dark:bg-zinc-800 shadow-lg rounded-full px-4 py-2 flex items-center gap-2 border border-black/5 dark:border-white/10 animate-in fade-in zoom-in slide-in-from-top-4 pointer-events-auto active:scale-95 transition-transform"
+                        >
+                            <div className="w-4 h-4 rounded-full bg-green-500 shadow-md animate-pulse" />
                             <span className="text-sm font-medium text-zinc-900 dark:text-white">Session Active</span>
-                        </div>
+                        </button>
                     )}
 
                     {/* Search for Parking Bubble - IDLE state (permanent) */}
