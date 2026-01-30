@@ -21,11 +21,9 @@ interface FABProps {
     setSessionStart: (time: number | null) => void;
     listedParkingSession?: any; // Active listed parking session
     onQRScan?: () => void; // Trigger QR scanner
-    onSpotStatusUpdate?: (spotId: string, status: string, event: any) => void;
 }
 
-// Memoized to prevent re-renders on map drag (LandingPage viewState updates)
-export const FAB = React.memo<FABProps>(({
+export const FAB: React.FC<FABProps> = ({
     status,
     setStatus,
     searchLocation,
@@ -37,8 +35,7 @@ export const FAB = React.memo<FABProps>(({
     sessionStart,
     setSessionStart,
     listedParkingSession,
-    onQRScan,
-    onSpotStatusUpdate
+    onQRScan
 }) => {
     const { pubkey, pool, signEvent } = useAuth();
     const [showCostPopup, setShowCostPopup] = useState(false);
@@ -215,11 +212,6 @@ export const FAB = React.memo<FABProps>(({
                         const aTag = event.tags.find((t: string[]) => t[0] === 'a')?.[1];
                         if (aTag) uniqueKey = aTag;
 
-                        // Trigger callback for Listed Session Cancellation (if active spot changes status)
-                        if (onSpotStatusUpdate && listedParkingSession && listedParkingSession.spotATag === uniqueKey) {
-                            onSpotStatusUpdate(uniqueKey, statusTag?.[1] || 'unknown', event);
-                        }
-
                         if (statusTag?.[1] !== 'open') {
                             if (spotsMapRef.current.has(uniqueKey)) {
                                 spotsMapRef.current.delete(uniqueKey);
@@ -239,7 +231,7 @@ export const FAB = React.memo<FABProps>(({
                         spotCurrency = currencyTag?.[1] || 'USD';
                         listingName = listingNameTag?.[1];
 
-                        // if (spotType !== vehicleType) return; // Removed to allow all types in state, LandingPage filters them
+                        if (spotType !== vehicleType) return;
 
                         // Race Condition Check: Don't overwrite newer data with older data
                         const existing = spotsMapRef.current.get(uniqueKey);
@@ -307,7 +299,7 @@ export const FAB = React.memo<FABProps>(({
 
                 // === BATCH 1: Parking Area Indicators (Kind 31714) ===
                 try {
-                    const areaTimeFilter = localStorage.getItem('parlens_parking_area_filter') || 'all';
+                    const areaTimeFilter = localStorage.getItem('parlens_parking_area_filter') || 'week';
                     let areaSince = now - 604800; // Default: 7 days
                     if (areaTimeFilter === 'today') areaSince = now - 86400;
                     else if (areaTimeFilter === 'month') areaSince = now - 2592000;
@@ -409,13 +401,9 @@ export const FAB = React.memo<FABProps>(({
                         const aTag = event.tags.find((t: string[]) => t[0] === 'a')?.[1];
                         if (!aTag) continue;
 
-                        // Get root a-tag pointing to parent Listing (has 'root' marker at position 3 OR points to Kind 31147)
-                        let rootATag = event.tags.find((t: string[]) => t[0] === 'a' && t[3] === 'root')?.[1];
-                        if (!rootATag) {
-                            // Fallback for missing 'root' marker
-                            rootATag = event.tags.find((t: string[]) => t[0] === 'a' && t[1]?.startsWith(`${KINDS.LISTED_PARKING_METADATA}:`))?.[1];
-                        }
-
+                        // Get root a-tag pointing to parent Listing (has 'root' marker at position 3)
+                        // Format: ['a', '31147:pubkey:d_tag', '', 'root']
+                        const rootATag = event.tags.find((t: string[]) => t[0] === 'a' && t[3] === 'root')?.[1];
                         if (rootATag) {
                             const parts = rootATag.split(':');
                             if (parts.length === 3) {
@@ -431,13 +419,6 @@ export const FAB = React.memo<FABProps>(({
 
                     // Batch verify parent existence (Kind 31147 Listed Parking Metadata)
                     // If the parent Listing (31147) is deleted, the Spot Log (1714) is an orphan.
-                    // Batch verify parent existence (Kind 31147 Listed Parking Metadata)
-                    // If the parent Listing (31147) is deleted, the Spot Log (1714) is an orphan.
-
-                    // Initialize defaults (safe even if validation query is skipped)
-                    const validAddresses = new Set<string>();
-                    approvedListingATagsRef.current = new Set(); // Clear previous approvals
-
                     if (parentListingAddresses.size > 0) {
                         const uniqueAddresses = Array.from(parentListingAddresses);
 
@@ -458,6 +439,7 @@ export const FAB = React.memo<FABProps>(({
                         } as any);
 
                         // Create set of valid listing addresses found
+                        const validAddresses = new Set<string>();
                         validListingsMap.forEach((e: any) => {
                             const d = e.tags.find((t: string[]) => t[0] === 'd')?.[1];
                             if (d) validAddresses.add(`${KINDS.LISTED_PARKING_METADATA}:${e.pubkey}:${d}`);
@@ -473,6 +455,7 @@ export const FAB = React.memo<FABProps>(({
                             } as any);
 
                             // Build set of approved listing a-tags
+                            approvedListingATagsRef.current = new Set();
                             for (const event of approvalEvents) {
                                 const aTag = event.tags.find((t: string[]) => t[0] === 'a')?.[1];
                                 if (aTag) approvedListingATagsRef.current.add(aTag);
@@ -481,36 +464,24 @@ export const FAB = React.memo<FABProps>(({
                         } catch (e) {
                             console.error('[Parlens] Failed to fetch approval labels:', e);
                         }
-                    }
 
-                    // Filter Process loop - MOVED OUTSIDE the validation block
-                    // This ensures spots are processed even if parent metadata query was skipped or failed
-                    // (Strict Orphan Validation Removed)
-                    for (const event of latestBySpot.values()) {
-                        // Robust 'root' marker check:
-                        // 1. Standard NIP-10 root marker
-                        // 2. Fallback: Any 'a' tag pointing to a Listed Parking Metadata event (Kind 31147)
-                        let rootATag = event.tags.find((t: string[]) => t[0] === 'a' && t[3] === 'root')?.[1];
-                        if (!rootATag) {
-                            // Fallback for clients/events that missed the 'root' marker
-                            rootATag = event.tags.find((t: string[]) => t[0] === 'a' && t[1]?.startsWith(`${KINDS.LISTED_PARKING_METADATA}:`))?.[1];
-                        }
+                        // Filter Process loop - only add valid (non-orphaned) AND approved spots
+                        // Events without root a-tags (legacy) are skipped
+                        for (const event of latestBySpot.values()) {
+                            const rootATag = event.tags.find((t: string[]) => t[0] === 'a' && t[3] === 'root')?.[1];
+                            if (rootATag && validAddresses.has(rootATag)) {
+                                // Check if listing is approved (from APPROVER or has approval label)
+                                const listingPubkey = rootATag.split(':')[1];
+                                const isAutoApproved = listingPubkey === APPROVER_PUBKEY;
+                                const hasApprovalLabel = approvedListingATagsRef.current.has(rootATag);
 
-                        if (rootATag) {
-                            // Check if listing is approved OR owner
-                            // Note: We skip 'validAddresses.has(rootATag)' check here to avoid hiding spots
-                            // if parent metadata query fails (Strict Orphan Validation removed).
-                            const listingPubkey = rootATag.split(':')[1];
-                            const isAutoApproved = listingPubkey === APPROVER_PUBKEY;
-                            const hasApprovalLabel = approvedListingATagsRef.current.has(rootATag);
-                            const isOwner = listingPubkey === pubkey;
-
-                            if (isAutoApproved || hasApprovalLabel || isOwner) {
-                                processSpotEvent(event);
+                                if (isAutoApproved || hasApprovalLabel) {
+                                    processSpotEvent(event);
+                                }
                             }
                         }
                     }
-
+                    // If no parentListingAddresses found, nothing is processed (strict mode)
 
                     // Update state after Batch 2 (now includes orphan filtering)
                     if (spotsMapRef.current.size > 0) {
@@ -836,4 +807,4 @@ export const FAB = React.memo<FABProps>(({
             )}
         </div>
     );
-});
+};

@@ -26,9 +26,13 @@ export const useWakeLock = () => {
         shouldBeLockedRef.current = true; // Mark intent to be locked
         if (noSleepRef.current) {
             try {
-                await noSleepRef.current.enable();
-                setIsLocked(true);
-                console.log('[Parlens] NoSleep Wake Lock acquired (cross-browser)');
+                // Check if already enabled (internal NoSleep property if available, or just rely on try/catch)
+                // NoSleep doesn't expose 'isEnabled' publicly, but re-enabling is generally safe or no-op
+                if (!isLocked) {
+                    await noSleepRef.current.enable();
+                    setIsLocked(true);
+                    console.log('[Parlens] NoSleep Wake Lock acquired (cross-browser)');
+                }
             } catch (err) {
                 console.warn('[Parlens] Failed to acquire NoSleep Wake Lock:', err);
                 setIsLocked(false);

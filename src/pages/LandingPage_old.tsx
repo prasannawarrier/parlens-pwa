@@ -15,7 +15,6 @@ import { getCurrencySymbol } from '../lib/currency';
 import { getSuggestions, parseCoordinate } from '../lib/geo';
 // @ts-ignore
 import Geohash from 'ngeohash';
-import { encryptParkingLog } from '../lib/encryption';
 import { StableLocationTracker, LocationSmoother, PositionAnimator, BearingAnimator } from '../lib/locationSmoothing';
 import { useWakeLock } from '../hooks/useWakeLock';
 import { ListedParkingPage } from './ListedParkingPage';
@@ -46,10 +45,10 @@ const PinStyleMarker = memo(({ bgClass, borderClass, stemClass, icon, iconClass 
 });
 
 // Restored Stable SpotMarkerContent
-const SpotMarkerContent = memo(({ isHistory = false, variant }: { price: number, currency: string, isHistory?: boolean, variant?: 'default' | 'history' | 'area' | 'no-parking' }) => {
+const SpotMarkerContent = memo(({ emoji, isHistory = false, variant }: { price: number, emoji: string, currency: string, isHistory?: boolean, variant?: 'default' | 'history' | 'area' }) => {
     // Determine styling based on variant
     const effectiveVariant = variant || (isHistory ? 'history' : 'default');
-    const isNoParking = effectiveVariant === 'no-parking';
+    const isNoParking = emoji === '🚫';
     const isArea = effectiveVariant === 'area';
     const isHistoryVariant = effectiveVariant === 'history';
 
@@ -180,12 +179,11 @@ UserLocationMarker.displayName = 'UserLocationMarker';
 
 // Cluster Marker Component
 const ClusterMarkerContent = memo(({ type }: {
-    minPrice: number; maxPrice: number; currency: string; type: 'open' | 'history' | 'area' | 'no-parking'
+    minPrice: number; maxPrice: number; currency: string; type: 'open' | 'history' | 'area'
 }) => {
     // Style Mapping for Clusters (Same as Spots)
     const isArea = type === 'area';
     const isHistory = type === 'history';
-    const isNoParking = type === 'no-parking';
 
     let bgClass = 'bg-[#007AFF]'; // Default Open/Listed (Apple Blue)
     let borderClass = 'border-white';
@@ -193,27 +191,18 @@ const ClusterMarkerContent = memo(({ type }: {
     let iconClass = 'text-white font-bold text-sm';
     let icon = <span>P</span>;
 
-    if (isNoParking) {
-        // No Parking Cluster: Red Fill, Red Stem, White Ban Icon
-        bgClass = 'bg-red-500';
-        borderClass = 'border-white';
-        stemClass = 'bg-white';
-        iconClass = 'text-white';
-        icon = <Ban size={16} />;
-    } else if (isArea) {
+    if (isArea) {
         // Parking Area Cluster: White Fill, Black P, Red Border, Red Stem
         bgClass = 'bg-white';
         borderClass = 'border-red-500';
         stemClass = 'bg-red-500';
         iconClass = 'text-black font-bold text-sm';
-        icon = <span>P</span>;
     } else if (isHistory) {
         // Historic Cluster: White Fill, Grey P, Grey Border, Grey Stem
         bgClass = 'bg-white';
         borderClass = 'border-zinc-500';
         stemClass = 'bg-zinc-500';
         iconClass = 'text-zinc-500 font-bold text-sm';
-        icon = <span>P</span>;
     }
 
     return (
@@ -541,10 +530,7 @@ interface LandingPageProps {
 export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initialScannedCode, onScannedCodeConsumed }) => {
     const { pubkey, signEvent, pool } = useAuth();
     const mapRef = useRef<MapRef>(null);
-    const [location, setLocation] = useState<[number, number] | null>(() => {
-        const saved = localStorage.getItem('parlens_last_location');
-        return saved ? JSON.parse(saved) : null;
-    });
+    const [location, setLocation] = useState<[number, number] | null>(null);
     const locationSmoother = useRef(new LocationSmoother());
     // Use BearingAnimator for map rotation to prevent 0/360 flip flickering
     const bearingAnimator = useRef(new BearingAnimator());
@@ -552,69 +538,19 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
     const positionAnimator = useRef(new PositionAnimator());
     const [locationError, setLocationError] = useState<string | null>(null);
 
-    const [status, setStatus] = useState<'idle' | 'search' | 'parked'>(() => {
-        // 1. Check Listed Session (Priority)
-        if (localStorage.getItem('parlens_listed_parking_session')) return 'parked';
-        // 2. Check Regular Session
-        const saved = localStorage.getItem('parlens_session');
-        if (saved) {
-            try {
-                const s = JSON.parse(saved);
-                if (s.status === 'parked' || s.status === 'search') return s.status;
-            } catch { }
-        }
-        return 'idle';
-    });
+    const [status, setStatus] = useState<'idle' | 'search' | 'parked'>('idle');
     const [orientationMode, setOrientationMode] = useState<'fixed' | 'recentre' | 'auto'>('fixed');
     const [pendingAutoMode, setPendingAutoMode] = useState(false); // Immediate visual feedback for button
     const [showHelp, setShowHelp] = useState(false);
     const [showListedParking, setShowListedParking] = useState(false);
-    const [isVerifying, setIsVerifying] = useState(false); // Controlled externally or by handleScannedCode
     // Currency state - removed (logic in FAB)
     const [vehicleType, setVehicleType] = useState<'bicycle' | 'motorcycle' | 'car'>(() => {
         const saved = localStorage.getItem('parlens_vehicle_type');
         return (saved === 'bicycle' || saved === 'motorcycle' || saved === 'car') ? saved : 'car';
     });
-    // Relay Spots (from FAB/Relay) - Source of Truth for "Confirmed" data
-    const [relaySpots, setRelaySpots] = useState<any[]>([]);
-
-    // Local state for user actions (Optimistic Updates)
-    const [localAddedFlags, setLocalAddedFlags] = useState<any[]>([]);
-    const [localRemovedFlagIds, setLocalRemovedFlagIds] = useState<Set<string>>(new Set());
-
-    // Derived openSpots for UI Rendering (Relay + Local)
-    const openSpots = useMemo(() => {
-        // 1. Filter out locally removed spots
-        const filtered = relaySpots.filter(s => !localRemovedFlagIds.has(s.id));
-        // 2. Add locally added flags (if not already present in relay)
-        const combined = [...filtered];
-        localAddedFlags.forEach(localRef => {
-            if (!combined.find(s => s.id === localRef.id)) {
-                combined.push(localRef);
-            }
-        });
-        return combined;
-    }, [relaySpots, localAddedFlags, localRemovedFlagIds]);
+    const [openSpots, setOpenSpots] = useState<any[]>([]);
     const [historySpots, setHistorySpots] = useState<any[]>([]);
-    const [parkLocation, setParkLocation] = useState<[number, number] | null>(() => {
-        // 1. Check Listed Session
-        const listed = localStorage.getItem('parlens_listed_parking_session');
-        if (listed) {
-            try {
-                const s = JSON.parse(listed);
-                if (s.listingLocation) return s.listingLocation;
-            } catch { }
-        }
-        // 2. Check Regular Session
-        const saved = localStorage.getItem('parlens_session');
-        if (saved) {
-            try {
-                const s = JSON.parse(saved);
-                if (s.parkLocation) return s.parkLocation;
-            } catch { }
-        }
-        return null;
-    });
+    const [parkLocation, setParkLocation] = useState<[number, number] | null>(null);
 
     // Listed Parking Session - for overlay display
     const [listedParkingSession, setListedParkingSession] = useState<{
@@ -636,9 +572,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
         const saved = localStorage.getItem('parlens_listed_parking_session');
         return saved ? JSON.parse(saved) : null;
     });
-
-    // Debounced map center for FAB search (prevents excessive API calls during pan/zoom)
-    const [debouncedMapCenter, setDebouncedMapCenter] = useState<[number, number] | null>(null);
     const [showListedDetails, setShowListedDetails] = useState(false);
 
     // State for Marker Popup Bubbles
@@ -707,16 +640,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
     // [x] Fix UI consistency
     //     - [x] Standardize Popup widths
     // [x] Aggregation of "No Parking" flag counts from all users
-    // Aggregate No Parking Flags counts (Kind 1985 & Legacy Kind 31714)
-    // CRITICAL: Use relaySpots (raw data) instead of openSpots (merged with local)
-    // This allows users to see if their flag actually propagated to the relay (count vs marker mismatch)
     useEffect(() => {
-        if (relaySpots.length === 0 && noParkingFlagCounts.size === 0) return;
+        // Only run if we have spots to process
+        if (openSpots.length === 0) return;
 
         const counts = new Map<string, number>();
         let hasFlags = false;
 
-        relaySpots.forEach((spot: any) => {
+        openSpots.forEach((spot: any) => {
             // Count Kind 1985 labels with no-parking label
             if (spot.kind === KINDS.LABEL) {
                 const isNoParkingLabel = spot.tags?.some((t: string[]) => t[0] === 'l' && t[1] === 'no-parking' && t[2] === 'parlens');
@@ -741,12 +672,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             }
         });
 
-        // Only update if we found flags or if we need to clear (implied by relaySpots changing)
+        // Only update if we found flags or if we need to clear (implied by openSpots changing)
         if (hasFlags || noParkingFlagCounts.size > 0) {
             setNoParkingFlagCounts(counts);
-            if (hasFlags) console.log('[Parlens] Aggregated no-parking flags from', counts.size, 'areas (source: relay)');
+            if (hasFlags) console.log('[Parlens] Aggregated no-parking flags from', counts.size, 'areas');
         }
-    }, [relaySpots]);
+    }, [openSpots]);
 
     // Handle scanned code passed from QRScanPage via App.tsx
     useEffect(() => {
@@ -823,7 +754,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
 
     // QR Code Handler for Listed Parking - Session Toggle with Temp Keys
     const handleScannedCode = useCallback(async (code: string) => {
-        setIsVerifying(true);
         console.log('[Parlens] Processing scanned code:', code);
 
         try {
@@ -945,12 +875,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             console.log('[Parlens] Status update published:', signedStatus.id);
 
             // Start parking session - create Kind 31417 with 'parked' status
-            const startTimeSeconds = Math.floor(Date.now() / 1000); // Standardize on Seconds
-            const dTag = `session_${Date.now()}`; // Consistent d-tag format
+            const dTag = `parking - ${Date.now()} `;
             const listingLocation = authData.listingLocation || location;
 
             // Encrypted content with all listing refs
-            const logContentObj = {
+            const logContent = JSON.stringify({
                 spotATag: authData.a,
                 listingATag: authData.listingATag || '', // Parent listing reference (encrypted)
                 location: authData.listingName || '', // Use Listing Name as location for readability
@@ -960,17 +889,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                 spotNumber: authData.spotNumber || '',
                 shortName: authData.shortName || '',
                 tempPubkey,
-                started_at: startTimeSeconds, // Seconds
-                type: authData.spotType || 'car'
-            };
-
-            // Encrypt content for privacy (matches FAB.tsx logic)
-            // Use local temp private key for internal session but public log must be encrypted to USER
-            // Wait, history logs are encrypted to USER (pubkey).
-            // We need to encrypt so USER can read it.
-            const privkeyHex = localStorage.getItem('parlens_privkey');
-            const seckey = privkeyHex ? new Uint8Array(privkeyHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16))) : undefined;
-            const encryptedContent = await encryptParkingLog(logContentObj, pubkey!, seckey);
+                started_at: Date.now()
+            });
 
             const logEvent = {
                 kind: KINDS.PARKING_LOG,
@@ -980,17 +900,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                     ['status', 'parked'],
                     ['client', 'parlens']
                 ],
-                content: encryptedContent
+                content: logContent // TODO: NIP-44 encrypt
             };
             const signedLog = await signEvent(logEvent);
             await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedLog));
 
             // Store session with all details (including rate info for session end)
-            // Store startTime in SECONDS to match restoration logic and timer expectation
             const sessionData = {
                 spotATag: authData.a,
                 dTag,
-                startTime: startTimeSeconds, // Seconds
+                startTime: Date.now(),
                 listingATag: authData.listingATag || '', // Parent listing for Parking Log
                 authorizer: authData.authorizer,
                 tempPubkey,
@@ -1007,18 +926,15 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             setListedParkingSession(sessionData);
 
             // Update UI state - behave like regular parking
-            requestLock(); // Trigger wake lock on user interaction (iOS fix)
             setStatus('parked');
             setParkLocation(listingLocation as [number, number] || null);
-            setSessionStart(startTimeSeconds);
+            setSessionStart(Math.floor(Date.now() / 1000));
 
             console.log('[Parlens] Listed parking started:', signedLog.id);
 
         } catch (e) {
             console.error('Failed to process QR code:', e);
             alert('Failed to process parking. Please try again.');
-        } finally {
-            setIsVerifying(false);
         }
     }, [pubkey, signEvent, pool, location, setStatus]);
 
@@ -1077,7 +993,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedStatus));
 
             // 2. Publish End Log (Kind 31417)
-            const logContentObj = {
+            const logContent = JSON.stringify({
                 spotATag: authData.a,
                 listingATag: session.listingATag || '', // Parent listing reference (encrypted)
                 location: session.listingName || '', // Use Listing Name as location for readability
@@ -1086,34 +1002,24 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                 floor: session.floor || '',
                 spotNumber: session.spotNumber || '',
                 shortName: session.shortName || '',
-                started_at: session.startTime || Math.floor(Date.now() / 1000), // Use stored session start (Seconds)
-                finished_at: Math.floor(Date.now() / 1000), // Seconds
+                ended_at: Date.now(),
                 fee: endSessionCost,
                 note: endSessionNote, // User's personal note for their parking log
-                currency: currency, // Use session/auth currency
-                type: session.spotType || 'car' // Important for filters
-            };
-
-            // Encrypt content for privacy (matches FAB.tsx logic)
-            const privkeyHex = localStorage.getItem('parlens_privkey');
-            const seckey = privkeyHex ? new Uint8Array(privkeyHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16))) : undefined;
-            const encryptedContent = await encryptParkingLog(logContentObj, pubkey!, seckey);
+                currency: 'USD' // TODO: Detect or use listing currency? Default USD for now matching FAB simple logic
+            });
 
             const endLogEvent = {
                 kind: KINDS.PARKING_LOG,
                 created_at: Math.floor(Date.now() / 1000),
                 tags: [
-                    ['d', session.dTag || `session_${Date.now()}`], // Use consistent d-tag format
+                    ['d', session.dTag || `parking - ${Date.now()} `],
                     ['status', 'idle'],
                     ['client', 'parlens']
                 ],
-                content: encryptedContent
+                content: logContent
             };
             const signedEndLog = await signEvent(endLogEvent);
             await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedEndLog));
-
-            // Notify history to update
-            window.dispatchEvent(new Event('parking-log-updated'));
 
             // Clear session
             localStorage.removeItem('parlens_listed_parking_session');
@@ -1131,8 +1037,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             alert('Failed to end session. Please try again.');
         }
     };
-
-
     const [needsRecenter, setNeedsRecenter] = useState(false);
     const [zoomLevel, setZoomLevel] = useState(17);
     const [routeCoords, setRouteCoords] = useState<[number, number][] | null>(null);
@@ -1144,45 +1048,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
 
 
     // Session State (Lifted from FAB)
-    const [sessionStart, setSessionStart] = useState<number | null>(() => {
-        // 1. Check Listed Session (Priority)
-        const listed = localStorage.getItem('parlens_listed_parking_session');
-        if (listed) {
-            try {
-                const s = JSON.parse(listed);
-                if (s.startTime) return s.startTime;
-            } catch { }
-        }
-        // 2. Check Regular Session
-        const saved = localStorage.getItem('parlens_session');
-        if (saved) {
-            try {
-                const s = JSON.parse(saved);
-                if (s.sessionStart) return s.sessionStart;
-            } catch { }
-        }
-        return null;
-    });
+    const [sessionStart, setSessionStart] = useState<number | null>(null);
     const [isMapLoaded, setIsMapLoaded] = useState(false);
 
     // MapLibre view state
-    const [viewState, setViewState] = useState(() => {
-        if (location) {
-            return {
-                longitude: location[1],
-                latitude: location[0],
-                zoom: 17,
-                bearing: 0,
-                pitch: 0
-            };
-        }
-        return {
-            longitude: 77.5946,
-            latitude: 12.9716,
-            zoom: 17,
-            bearing: 0,
-            pitch: 0
-        };
+    const [viewState, setViewState] = useState({
+        longitude: 77.5946,
+        latitude: 12.9716,
+        zoom: 17,
+        bearing: 0,
+        pitch: 0
     });
 
     // Track user interaction
@@ -1230,34 +1105,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
         const timer = setTimeout(fetchCountry, 2000);
         return () => clearTimeout(timer);
     }, [location, countryCode]);
-
-    // Remote Cancellation Handler
-    const handleSpotStatusUpdate = useCallback((_spotATag: string, status: string, _event: any) => {
-        if (status === 'open' || status === 'closed') {
-            console.log('[Parlens] Remote cancellation detected:', status);
-            alert('The listing owner has updated the spot status. Your session continues as a regular parking session.');
-
-            // 1. Persist as regular session to preserve timer
-            if (sessionStart && parkLocation) {
-                localStorage.setItem('parlens_session', JSON.stringify({
-                    status: 'parked',
-                    sessionStart,
-                    parkLocation
-                }));
-            }
-
-            // 2. Clear listed session reference
-            localStorage.removeItem('parlens_listed_parking_session');
-            setListedParkingSession(null);
-
-            // 3. Ensure status remains parked (it should be already, but force it)
-            setStatus('parked');
-
-            // Hide popup if open
-            setShowListedEndPopup(false);
-            setPendingEndSession(null);
-        }
-    }, [setStatus, sessionStart, parkLocation]);
 
     // Handlers for Drop Pin
     const handleDropPin = useCallback(() => {
@@ -1371,7 +1218,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             // Trigger FAB search after map transition
             setTimeout(() => {
                 isTransitioning.current = false;
-                requestLock(); // Trigger wake lock on user interaction (iOS fix)
                 setStatus('search');
             }, 1300);
         }
@@ -1445,29 +1291,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             return;
         }
 
-        // Fallback: Get current position immediately to prevent waiting for watchPosition
-        navigator.geolocation.getCurrentPosition(
-            (position) => {
-                const { latitude, longitude } = position.coords;
-                // Only update if we haven't received a watch update yet
-                if (!initialLocationSet.current) {
-                    // Update tracker but don't force animation yet, let watch handle stream
-                    locationTracker.current.updateLocationWithAccuracy(latitude, longitude, position.coords.accuracy);
-
-                    // Force update location state immediately
-                    setLocation([latitude, longitude]);
-                    setViewState(prev => ({
-                        ...prev,
-                        latitude,
-                        longitude
-                    }));
-                    initialLocationSet.current = true;
-                }
-            },
-            (err) => console.warn('[Parlens] Initial location check failed:', err),
-            { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
-        );
-
         const watchId = navigator.geolocation.watchPosition(
             (position) => {
                 const { latitude, longitude, accuracy } = position.coords;
@@ -1481,9 +1304,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                 // Track speed for UI feedback
                 setUserSpeed(result.speed);
                 userSpeedRef.current = result.speed;
-
-                // Persist last known location for quick resumption
-                localStorage.setItem('parlens_last_location', JSON.stringify([latitude, longitude]));
 
                 // STATIONARY MODE: Use buffered position to prevent jitter
                 // This is critical for accurate parking spot marking
@@ -1727,24 +1547,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
 
     // Session Persistence
     useEffect(() => {
-        // 1. Check for Listed Parking Session (Priority)
-        const savedListed = localStorage.getItem('parlens_listed_parking_session');
-        if (savedListed) {
-            try {
-                const session = JSON.parse(savedListed);
-                console.log('[Parlens] Restoring listed session:', session);
-                if (session.startTime) {
-                    setSessionStart(session.startTime);
-                    if (session.listingLocation) setParkLocation(session.listingLocation);
-                    setStatus('parked');
-                    return; // Stop here, don't restore regular session if listed is active
-                }
-            } catch (e) {
-                console.warn('[Parlens] Failed to restore listed session:', e);
-            }
-        }
-
-        // 2. Check for Regular Session
         const savedSession = localStorage.getItem('parlens_session');
         if (savedSession) {
             try {
@@ -1753,7 +1555,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                     console.log('[Parlens] Restoring parked session:', session);
                     setSessionStart(session.sessionStart);
                     setParkLocation(session.parkLocation);
-                    requestLock(); // Trigger wake lock on user interaction (iOS fix)
                     setStatus('parked');
                 } else if (session.status === 'search') {
                     console.log('[Parlens] Restoring search session');
@@ -1781,17 +1582,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             setSessionStart(null);
         }
     }, [status, sessionStart, parkLocation]);
-
-    // Manage Debounced Map Center
-    useEffect(() => {
-        if (status === 'search') {
-            // Initialize with current viewState to avoid initial delay
-            setDebouncedMapCenter([viewState.latitude, viewState.longitude]);
-        } else {
-            // Clear when not searching to prevent stale data
-            setDebouncedMapCenter(null);
-        }
-    }, [status]); // Only re-run when status changes
 
 
     // Update needsRecenter based on distance from user location
@@ -1887,13 +1677,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             isUserInteracting.current = false;
         }, 1000); // 1-second cooldown after user lets go before auto-tracking resumes
         setZoomLevel(viewState.zoom);
-
-        // NEW: Update debounced center for search
-        // This ensures FAB only gets updated once per move, preventing excessive API calls
-        if (status === 'search') {
-            setDebouncedMapCenter([viewState.latitude, viewState.longitude]);
-        }
-    }, [viewState.zoom, viewState.latitude, viewState.longitude, status]);
+    }, [viewState.zoom]);
 
     // Track Zoom State explicitly (isZooming is unreliable in handleMove)
     const isZoomingRef = useRef(false);
@@ -1946,80 +1730,71 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
         setIsFlaggingNoParking(true);
         try {
             if (isFlagged) {
-                // REMOVE EXISTING FLAG
+                // Remove flag - publish delete event (Kind 5)
                 const existingEventId = userNoParkingFlags.get(geohash);
                 if (existingEventId) {
-                    const event = {
+                    const deleteEvent = {
                         kind: 5,
                         created_at: Math.floor(Date.now() / 1000),
                         tags: [['e', existingEventId]],
-                        content: ''
+                        content: 'Removing no-parking flag'
                     };
-                    const signedEvent = await signEvent(event);
-                    pool.publish(DEFAULT_RELAYS, signedEvent);
+                    const signedDelete = await signEvent(deleteEvent);
+                    await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedDelete));
 
-                    // Update local state immediately
+                    // Update local state (marker display only - stats from relay)
                     setUserNoParkingFlags(prev => {
                         const newMap = new Map(prev);
                         newMap.delete(geohash);
                         return newMap;
                     });
 
-                    // Track local removal to hide from derived openSpots
-                    setLocalRemovedFlagIds(prev => {
-                        const next = new Set(prev);
-                        next.add(existingEventId);
-                        return next;
-                    });
+                    // Remove flag from openSpots so aggregation updates count
+                    setOpenSpots(prev => prev.filter(s => s.id !== existingEventId));
 
-                    console.log('[Parlens] Unflagged no-parking for geohash:', geohash);
+                    // Count will update automatically via openSpots aggregation effect
+
+                    console.log('[Parlens] No-parking flag removed for:', geohash);
                 }
             } else {
-                // ADD NEW FLAG
-                // Use 7-char geohash for precise aggregation
-                // Use 5-char geohash for discovery by FAB query (which scans 5-char neighbors)
-                const geohash5 = geohash.substring(0, 5);
-
+                // Add flag - publish Kind 1985 (NIP-32 Label) for no-parking
                 const flagEvent = {
                     kind: KINDS.LABEL,
                     created_at: Math.floor(Date.now() / 1000),
                     tags: [
                         ['L', 'parlens'],
                         ['l', 'no-parking', 'parlens'],
-                        ['g', geohash], // Precision 7
-                        ['g', geohash5], // Precision 5 (for discovery)
+                        ['g', geohash],
                         ['location', `${lat},${lon}`],
                         ['client', 'parlens']
                     ],
                     content: ''
                 };
                 const signedFlag = await signEvent(flagEvent);
-                pool.publish(DEFAULT_RELAYS, signedFlag);
+                await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedFlag));
 
-                // Update local state immediately
+                // Update local state (marker display only - stats from relay)
                 setUserNoParkingFlags(prev => {
                     const newMap = new Map(prev);
                     newMap.set(geohash, signedFlag.id);
                     return newMap;
                 });
 
-                // Create optimistic spot object for local display
-                const labelSpot = {
+                // Add to openSpots for immediate count aggregation
+                setOpenSpots(prev => [...prev, {
                     id: signedFlag.id,
                     kind: KINDS.LABEL,
                     tags: signedFlag.tags,
-                    lat: lat,
-                    lon: lon,
+                    lat, lon,
                     price: 0,
                     currency: 'INR',
                     created_at: signedFlag.created_at,
-                    pubkey: signedFlag.pubkey
-                };
+                    pubkey
+                }]);
 
-                // Track local addition
-                setLocalAddedFlags(prev => [...prev, labelSpot]);
+                // Count will update automatically via openSpots aggregation effect
 
-                console.log('[Parlens] Flagged no-parking for geohash:', geohash);
+                console.log('[Parlens] No-parking flag added for:', geohash);
             }
         } catch (e) {
             console.error('[Parlens] Failed to toggle no-parking flag:', e);
@@ -2027,7 +1802,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
         } finally {
             setIsFlaggingNoParking(false);
         }
-    }, [pool, signEvent, pubkey, userNoParkingFlags]);
+    }, [pool, signEvent, pubkey, userNoParkingFlags, setOpenSpots]);
 
     // Handle route changes from RouteButton
     const handleRouteChange = useCallback((
@@ -2233,21 +2008,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
         , [listedSpots, zoomLevel]);
 
     // Parking Area Reports: Clustered at 7-digit geohash level (capped)
+    // Parking Area Reports: Clustered at 7-digit geohash level (capped)
     // Separate No Parking markers from regular Parking Area markers to prevent clustering them together
     const { regularAreaSpots, noParkingSpots } = useMemo(() => {
         const regular: typeof areaSpots = [];
         const noParking: typeof areaSpots = [];
 
-        // Debug Log to trace count of flags
-        // console.log('[Parlens] Splitting area spots. User flags count:', userNoParkingFlags.size);
-
         for (const s of areaSpots) {
-            // Use precise location from the spot itself to match handleNoParkingFlag logic
             const geohash = Geohash.encode(s.lat, s.lon, 7);
-
             // Only show 🚫 for spots that THIS USER has flagged
+            // Other users' flags are shown in popup stats, not as emoji change
             const isNoParkingForUser = userNoParkingFlags.has(geohash);
-
             if (isNoParkingForUser) {
                 noParking.push(s);
             } else {
@@ -2324,9 +2095,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
 
     return (
         <div className="fixed inset-0 overflow-hidden bg-gray-50 dark:bg-black transition-colors duration-300">
-            {/* Verifying Overlay - Processing QR & Status */}
-
-
             {/* Loading Overlay - Covers everything until ready */}
             {((!location && !locationError) || !isMapLoaded) && (
                 <div className="absolute inset-0 z-[2000] flex items-center justify-center bg-gray-50 dark:bg-black transition-opacity duration-500">
@@ -2350,16 +2118,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                 </button>
                             </>
                         )}
-                    </div>
-                </div>
-            )}
-
-            {/* Verifying Overlay - Processing QR & Status */}
-            {isVerifying && (
-                <div className="absolute inset-0 z-[2000] flex items-center justify-center bg-gray-50 dark:bg-black transition-opacity duration-500">
-                    <div className="flex flex-col items-center gap-4 animate-in fade-in duration-700 px-8 max-w-sm text-center">
-                        <div className="w-8 h-8 rounded-full border-4 border-green-500/20 border-t-green-500 animate-spin" />
-                        <p className="text-sm font-semibold text-zinc-400 dark:text-white/40 tracking-tight">Verifying...</p>
                     </div>
                 </div>
             )}
@@ -2519,35 +2277,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                             // Hide oneway arrows
                             const layers = map.getStyle().layers;
                             layers?.forEach(layer => {
-                                // 1. Hide oneway arrows
                                 if (layer.id.includes('oneway') || layer.id.includes('arrow') || layer.id.includes('direction')) {
                                     map.setLayoutProperty(layer.id, 'visibility', 'none');
-                                }
-
-                                // 2. Hide administrative boundaries ("dotted lines")
-                                if (layer.id.includes('admin') || layer.id.includes('boundary')) {
-                                    map.setLayoutProperty(layer.id, 'visibility', 'none');
-                                }
-
-                                // 3. Hide road labels or house numbers that look like "Cxxx" or add clutter
-                                // Targeting common keys for house numbers or minor service road codes
-                                if (layer.id.includes('housenum') || layer.id.includes('road_label')) {
-                                    // For road labels, we want to keep major roads but might want to hide minor ones if possible.
-                                    // But "Cxxx" usually comes from specific road refs. 
-                                    // Let's hide specific dashed/service road labels if detectable, or just filter out house numbers which are often noisy codes.
-                                    if (layer.id.includes('housenum')) {
-                                        map.setLayoutProperty(layer.id, 'visibility', 'none');
-                                    }
-                                }
-
-                                // 4. Remove Italics from fonts
-                                const textFont = map.getLayoutProperty(layer.id, 'text-font');
-                                if (textFont && Array.isArray(textFont)) {
-                                    const newFont = textFont.map(font => font.replace('Italic', 'Regular'));
-                                    // Only update if changed
-                                    if (newFont.join(',') !== textFont.join(',')) {
-                                        map.setLayoutProperty(layer.id, 'text-font', newFont);
-                                    }
                                 }
                             });
 
@@ -2624,12 +2355,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                 longitude={item.lon}
                                 latitude={item.lat}
                                 anchor="bottom"
-                                style={{
-                                    willChange: 'transform',
-                                    zIndex: mapRef.current?.project([item.lon, item.lat]).y
-                                        ? Math.floor(mapRef.current.project([item.lon, item.lat]).y)
-                                        : undefined
-                                }}
+                                style={{ willChange: 'transform' }}
                                 onClick={(e) => {
                                     e.originalEvent.stopPropagation();
                                     setParkingSearchPopupOpen(false);
@@ -2663,6 +2389,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                     <SpotMarkerContent
                                         price={item.price}
                                         currency={item.currency}
+                                        emoji="🅿️"
                                         variant="default"
                                     />
                                 )}
@@ -2679,12 +2406,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                 longitude={item.lon}
                                 latitude={item.lat}
                                 anchor="bottom"
-                                style={{
-                                    willChange: 'transform',
-                                    zIndex: mapRef.current?.project([item.lon, item.lat]).y
-                                        ? Math.floor(mapRef.current.project([item.lon, item.lat]).y)
-                                        : undefined
-                                }}
+                                style={{ willChange: 'transform' }}
                                 onClick={(e) => {
                                     e.originalEvent.stopPropagation();
                                     setParkingSearchPopupOpen(false);
@@ -2718,6 +2440,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                     <SpotMarkerContent
                                         price={item.price}
                                         currency={item.currency}
+                                        emoji="🅿️"
                                         variant="area"
                                     />
                                 )}
@@ -2734,12 +2457,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                 longitude={item.lon}
                                 latitude={item.lat}
                                 anchor="bottom"
-                                style={{
-                                    willChange: 'transform',
-                                    zIndex: mapRef.current?.project([item.lon, item.lat]).y
-                                        ? Math.floor(mapRef.current.project([item.lon, item.lat]).y)
-                                        : undefined
-                                }}
+                                style={{ willChange: 'transform' }}
                                 onClick={(e) => {
                                     e.originalEvent.stopPropagation();
                                     setParkingSearchPopupOpen(false);
@@ -2767,13 +2485,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                         minPrice={item.minPrice}
                                         maxPrice={item.maxPrice}
                                         currency={item.currency}
-                                        type="no-parking"
+                                        type="area"
                                     />
                                 ) : (
                                     <SpotMarkerContent
                                         price={item.price}
                                         currency={item.currency}
-                                        variant="no-parking"
+                                        emoji="🚫"
+                                        variant="area"
                                     />
                                 )}
                             </Marker>
@@ -3024,6 +2743,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                     <SpotMarkerContent
                                         price={item.price}
                                         currency={item.currency}
+                                        emoji="🅟"
                                         isHistory={true}
                                     />
                                 )}
@@ -3425,28 +3145,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                         </div>
                     )}
                     {status === 'parked' && (
-                        <button
-                            onClick={() => {
-                                if (parkLocation && mapRef.current) {
-                                    isTransitioning.current = true;
-                                    mapRef.current.flyTo({
-                                        center: [parkLocation[1], parkLocation[0]],
-                                        zoom: 17,
-                                        duration: 1000,
-                                        essential: true
-                                    });
-                                    // Reset transition flag
-                                    mapRef.current.once('moveend', () => {
-                                        isTransitioning.current = false;
-                                        setOrientationMode('fixed'); // Lock to fixed to prevent drift
-                                    });
-                                }
-                            }}
-                            className="bg-white dark:bg-zinc-800 shadow-lg rounded-full px-4 py-2 flex items-center gap-2 border border-black/5 dark:border-white/10 animate-in fade-in zoom-in slide-in-from-top-4 pointer-events-auto active:scale-95 transition-transform"
-                        >
+                        <div className="bg-white dark:bg-zinc-800 shadow-lg rounded-full px-4 py-2 flex items-center gap-2 border border-black/5 dark:border-white/10 animate-in fade-in zoom-in slide-in-from-top-4 pointer-events-auto">
                             <div className="w-4 h-4 rounded-full bg-green-500 shadow-md" />
                             <span className="text-sm font-medium text-zinc-900 dark:text-white">Session Active</span>
-                        </button>
+                        </div>
                     )}
 
                     {/* Search for Parking Bubble - IDLE state (permanent) */}
@@ -3781,17 +3483,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                     <FAB
                         status={status}
                         setStatus={setStatus}
-                        searchLocation={parkingSearchMarker ? [parkingSearchMarker.lat, parkingSearchMarker.lon] : (status === 'search' ? (debouncedMapCenter || [viewState.latitude, viewState.longitude]) : location)}
+                        searchLocation={parkingSearchMarker ? [parkingSearchMarker.lat, parkingSearchMarker.lon] : (status === 'search' ? [viewState.latitude, viewState.longitude] : location)}
                         userLocation={location}
                         vehicleType={vehicleType}
-                        setOpenSpots={setRelaySpots}
+                        setOpenSpots={setOpenSpots}
                         parkLocation={parkLocation}
                         setParkLocation={setParkLocation}
                         sessionStart={sessionStart}
                         setSessionStart={setSessionStart}
                         listedParkingSession={listedParkingSession}
-                        onQRScan={onRequestScan}
-                        onSpotStatusUpdate={handleSpotStatusUpdate}
+                        onQRScan={() => onRequestScan?.()}
                     />
                 </div>
             </div>
@@ -3816,7 +3517,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                         // Clear parking search when route is created (pinned marker stays)
                         if (status === 'search') {
                             setStatus('idle');
-                            setRelaySpots([]);
+                            setOpenSpots([]);
                         }
                     }}
                 />
@@ -3848,7 +3549,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                     <span className="text-3xl font-bold">?</span>
                                 </div>
                                 <h2 className="text-2xl font-bold text-zinc-900 dark:text-white">How to use Parlens</h2>
-                                <p className="text-sm text-zinc-500 dark:text-zinc-400">Decentralised Parking Management</p>
+                                <p className="text-sm text-zinc-500 dark:text-zinc-400">Decentralized Route & Parking Management</p>
                             </div>
 
 
@@ -3899,70 +3600,50 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                 </div>
                             </div>
 
-                            <div className="space-y-4 text-sm text-zinc-600 dark:text-white/80 leading-relaxed pt-4 border-t border-black/5 dark:border-white/10">
-                                {/* Seekers */}
-                                <div>
-                                    <h4 className="font-bold text-zinc-900 dark:text-white text-base mb-4">Parking Seekers</h4>
-                                    <p className="mb-4">
-                                        <strong className="text-zinc-900 dark:text-white block mb-1">1. Select Vehicle Type</strong>
-                                        Use the vertical toggle to switch between Bicycle 🚲, Motorcycle 🏍️, or Car 🚗. Your vehicle type determines what parking spots you see on the map.
+                            <div className="space-y-6 text-sm text-zinc-600 dark:text-white/80 leading-relaxed pt-4 border-t border-black/5 dark:border-white/10">
+                                <p>
+                                    <strong className="text-zinc-900 dark:text-white block mb-1">1. Select vehicle type</strong>
+                                    Use the vertical toggle on the bottom-left to switch between Bicycle 🚲, Motorcycle 🏍️, or Car 🚗.
+                                </p>
+
+                                <p>
+                                    <strong className="text-zinc-900 dark:text-white block mb-1">2. Plan your route (optional)</strong>
+                                    Tap the route button to add waypoints and create a route. If the system generated route(s) between your start and end points are not to your liking, add additional waypoints in locations you would prefer travelling through. Click the location button to re-centre and turn on follow-me or navigation mode for route tracking.
+                                </p>
+
+                                <p>
+                                    <strong className="text-zinc-900 dark:text-white block mb-1">3. Find and log parking</strong>
+                                    Click the main button once to see open spots in listed parking spaces and open spots reported by others live or within the last 5 minutes. For standard parking: Click again to mark your location. When leaving, click once more to end the session, log the fee and report the spot. For listed parking: Click the QR code scanner button below the vehicle type selector. Scan the QR code at the parking location to start the session. When leaving, scan it again to end the session and log the fee. Use the profile button to see your parking history.
+                                </p>
+
+                                <p>
+                                    <strong className="text-zinc-900 dark:text-white block mb-1">4. Create and manage a listed parking (optional)</strong>
+                                    Users who oversee one or more parking spots can create a listed parking to simplify spot and lot management. Click the parking services button (‽) at the bottom left-hand corner of the screen, and click the '+' button to create a listing. Provide the relevant details requested in the form to create an online listing that matches your real-world space. Listed parkings can be public (open to all users) or private (open to select users and only publish to select relays). Once created you can see your listings as viewed by other users in the public or private listing page. You should use the my listing page to manage your listing(s). Larger listings may take longer to create. You may manually refresh the page using the button provided next to the search bar if automatic updates are not returned fast enough.
+                                </p>
+
+                                <p>
+                                    <strong className="text-zinc-900 dark:text-white block mb-1">5. Create your own mirror (optional)</strong>
+                                    <a
+                                        href="https://github.com/prasannawarrier/parlens-pwa/blob/main/MIRROR_CREATION.md"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-blue-500 dark:text-blue-400 underline"
+                                    >
+                                        Follow these steps
+                                    </a> to create your own mirror of the Parlens app to distribute the bandwidth load while sharing with your friends.
+                                </p>
+
+                                <p>
+                                    <strong className="text-zinc-900 dark:text-white block mb-1">6. User privacy</strong>
+                                    Parlens does not collect or share any user data. Your log and route data is encrypted by your keys, only accessible by you and stored on relays of your preference. Open spot broadcasts and listed parking log updates use temporary identifiers to prevent your permanent public key from being shared.
+                                </p>
+
+                                {/* Bottom tip */}
+                                <div className="p-3 rounded-xl bg-amber-500/10 dark:bg-amber-500/5 border border-amber-500/20 mt-6">
+                                    <p className="text-xs text-amber-700 dark:text-amber-400/80 leading-relaxed">
+                                        <span className="font-bold">Tip: </span>
+                                        Use Parlens over your cellular internet connection to prevent personal IP address(es) from being associated with your data.
                                     </p>
-
-                                    <p className="mb-4">
-                                        <strong className="text-zinc-900 dark:text-white block mb-1">2. Find Parking</strong>
-                                        Click the blue search button to find parking around you or plan ahead by searching for parking near your destination by clicking the search for parking bubble at the top of your screen.
-                                    </p>
-
-                                    <p className="mb-4">
-                                        <strong className="text-zinc-900 dark:text-white block mb-1">3. Mark Your Spot</strong>
-                                        Once you find a spot, click the amber parking location button to mark your parked location and start your session. Click the session active bubble centre the map your parking marker at any time during the session.
-                                    </p>
-
-                                    <p className="mb-4">
-                                        <strong className="text-zinc-900 dark:text-white block mb-1">4. Log Your Session</strong>
-                                        When you’re ready to leave, click the green vehicle button to remove the marker, report the fees and log the session in your parking history.
-                                    </p>
-
-                                    <p>
-                                        <strong className="text-zinc-900 dark:text-white block mb-1">5. Share Parking Reports (Optional)</strong>
-                                        Anonymously report parking details to help other users know where to find parking; and build more parking features in the future. The opt-in switch is available in the parking areas section on the profile page.
-                                    </p>
-                                </div>
-
-                                {/* Providers */}
-                                <div className="mt-8 pt-4">
-                                    <h4 className="font-bold text-zinc-900 dark:text-white text-base mb-4">Parking Service Providers</h4>
-
-                                    <p className="mb-4">
-                                        <strong className="text-zinc-900 dark:text-white block mb-1">1. Listed Parking</strong>
-                                        Users who oversee one or more parking spots can create a listing to simplify spot discovery and management. Click the parking services button (‽) and select listed parking.
-                                        <br /><br />
-                                        Click the ‘+’ button to create a listing and provide the details as requested in the form to create one or more online spots to match your real world location.
-                                    </p>
-
-                                    <p>
-                                        <strong className="text-zinc-900 dark:text-white block mb-1">2. Valet Parking</strong>
-                                        Users who park for others can enable valet mode to manage multiple parking sessions at the same time. Click the parking services button (‽) and select valet parking to get started.
-                                        <br /><br />
-                                        Click the ‘+’ button to create a new valet session. Ask your clients to scan the QR code using the Parlens app to see the parking location and let you know when they’re ready to leave.
-                                    </p>
-                                </div>
-
-                                {/* Privacy & License - Static Headers */}
-                                <div className="mt-6 pt-4 space-y-6">
-                                    <div>
-                                        <h4 className="font-bold text-zinc-900 dark:text-white text-base mb-2">User Privacy</h4>
-                                        <p className="mb-4">
-                                            Parlens does not collect or share any personal data. Parking history and saved routes are encrypted by your keys and only accessible by you. If you ever feel like your privacy is compromised, delete your account, abandon your keys and create a new account.
-                                        </p>
-                                    </div>
-
-                                    <div>
-                                        <h4 className="font-bold text-zinc-900 dark:text-white text-base mb-2">License</h4>
-                                        <p>
-                                            This project is licensed under the GNU General Public License v3.0.
-                                        </p>
-                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -4171,7 +3852,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
 
                         <div className="flex items-center gap-4">
                             <div className="flex items-center gap-3 bg-zinc-100 dark:bg-white/5 px-5 py-4 rounded-[1.5rem] border border-black/5 dark:border-white/5">
-                                <span className="text-2xl font-bold text-blue-500">{(pendingEndSession?.session?.currency || listedParkingSession?.currency) === 'INR' ? '₹' : (pendingEndSession?.session?.currency || listedParkingSession?.currency) === 'EUR' ? '€' : (pendingEndSession?.session?.currency || listedParkingSession?.currency) === 'GBP' ? '£' : '$'}</span>
+                                <span className="text-2xl font-bold text-blue-500">{listedParkingSession?.currency === 'INR' ? '₹' : listedParkingSession?.currency === 'EUR' ? '€' : listedParkingSession?.currency === 'GBP' ? '£' : '$'}</span>
                                 <input
                                     type="number"
                                     value={endSessionCost}
@@ -4180,7 +3861,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                     className="w-20 bg-transparent text-4xl font-black text-center text-zinc-900 dark:text-white focus:outline-none placeholder:text-zinc-300 dark:placeholder:text-white/10 appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]"
                                     min="0"
                                 />
-                                <span className="text-sm font-bold text-zinc-400 dark:text-white/20">{(pendingEndSession?.session?.currency || listedParkingSession?.currency) || 'USD'}</span>
+                                <span className="text-sm font-bold text-zinc-400 dark:text-white/20">{listedParkingSession?.currency || 'USD'}</span>
                             </div>
 
                             <div className="flex flex-col gap-1.5">
