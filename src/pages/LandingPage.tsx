@@ -854,6 +854,19 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             if (isEndingSession) {
                 // Set pending session for Popup Modal
                 const session = JSON.parse(existingSession!);
+
+                // Auto-calculate cost based on duration
+                // Defaults to 0 if rate is missing
+                let estimatedCost = 0;
+                if (session.startTime && session.hourlyRate) {
+                    const durationSeconds = Math.floor(Date.now() / 1000) - session.startTime;
+                    const hours = Math.max(0, durationSeconds / 3600); // Prevent negative
+                    // Simple calculation: rate * hours, rounded up to nearest integer for display simplicity
+                    // TODO: Implement more complex rate rules (min time, increments) if needed
+                    estimatedCost = Math.ceil(hours * Number(session.hourlyRate));
+                }
+                setEndSessionCost(String(estimatedCost));
+
                 setPendingEndSession({
                     authData,
                     session,
@@ -3393,7 +3406,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                             }}
                             className="bg-white dark:bg-zinc-800 shadow-lg rounded-full px-4 py-2 flex items-center gap-2 border border-black/5 dark:border-white/10 animate-in fade-in zoom-in slide-in-from-top-4 pointer-events-auto active:scale-95 transition-transform"
                         >
-                            <div className="w-4 h-4 rounded-full bg-green-500 shadow-md animate-pulse" />
+                            <div className="w-4 h-4 rounded-full bg-green-500 shadow-md" />
                             <span className="text-sm font-medium text-zinc-900 dark:text-white">Session Active</span>
                         </button>
                     )}
