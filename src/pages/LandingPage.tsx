@@ -15,6 +15,7 @@ import { getCurrencySymbol } from '../lib/currency';
 import { getSuggestions, parseCoordinate } from '../lib/geo';
 // @ts-ignore
 import Geohash from 'ngeohash';
+import { encryptParkingLog } from '../lib/encryption';
 import { StableLocationTracker, LocationSmoother, PositionAnimator, BearingAnimator } from '../lib/locationSmoothing';
 import { useWakeLock } from '../hooks/useWakeLock';
 import { ListedParkingPage } from './ListedParkingPage';
@@ -1034,7 +1035,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedStatus));
 
             // 2. Publish End Log (Kind 31417)
-            const logContent = JSON.stringify({
+            const logContentObj = {
                 spotATag: authData.a,
                 listingATag: session.listingATag || '', // Parent listing reference (encrypted)
                 location: session.listingName || '', // Use Listing Name as location for readability
@@ -1043,21 +1044,28 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                 floor: session.floor || '',
                 spotNumber: session.spotNumber || '',
                 shortName: session.shortName || '',
-                ended_at: Date.now(),
+                started_at: sessionStart || Date.now(), // Use actual session start
+                finished_at: Date.now(), // Standard field name
                 fee: endSessionCost,
                 note: endSessionNote, // User's personal note for their parking log
-                currency: 'USD' // TODO: Detect or use listing currency? Default USD for now matching FAB simple logic
-            });
+                currency: 'USD', // TODO: Detect or use listing currency? Default USD for now matching FAB simple logic
+                type: session.spotType || 'car' // Important for filters
+            };
+
+            // Encrypt content for privacy (matches FAB.tsx logic)
+            const privkeyHex = localStorage.getItem('parlens_privkey');
+            const seckey = privkeyHex ? new Uint8Array(privkeyHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16))) : undefined;
+            const encryptedContent = await encryptParkingLog(logContentObj, pubkey!, seckey);
 
             const endLogEvent = {
                 kind: KINDS.PARKING_LOG,
                 created_at: Math.floor(Date.now() / 1000),
                 tags: [
-                    ['d', session.dTag || `parking - ${Date.now()} `],
+                    ['d', session.dTag || `session_${Date.now()}`], // Use consistent d-tag format
                     ['status', 'idle'],
                     ['client', 'parlens']
                 ],
-                content: logContent
+                content: encryptedContent
             };
             const signedEndLog = await signEvent(endLogEvent);
             await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedEndLog));
