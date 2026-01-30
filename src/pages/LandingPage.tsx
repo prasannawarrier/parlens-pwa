@@ -915,11 +915,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             console.log('[Parlens] Status update published:', signedStatus.id);
 
             // Start parking session - create Kind 31417 with 'parked' status
-            const dTag = `parking - ${Date.now()} `;
+            const startTimeSeconds = Math.floor(Date.now() / 1000); // Standardize on Seconds
+            const dTag = `session_${Date.now()}`; // Consistent d-tag format
             const listingLocation = authData.listingLocation || location;
 
             // Encrypted content with all listing refs
-            const logContent = JSON.stringify({
+            const logContentObj = {
                 spotATag: authData.a,
                 listingATag: authData.listingATag || '', // Parent listing reference (encrypted)
                 location: authData.listingName || '', // Use Listing Name as location for readability
@@ -929,8 +930,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                 spotNumber: authData.spotNumber || '',
                 shortName: authData.shortName || '',
                 tempPubkey,
-                started_at: Date.now()
-            });
+                started_at: startTimeSeconds, // Seconds
+                type: authData.spotType || 'car'
+            };
+
+            // Encrypt content for privacy (matches FAB.tsx logic)
+            // Use local temp private key for internal session but public log must be encrypted to USER
+            // Wait, history logs are encrypted to USER (pubkey).
+            // We need to encrypt so USER can read it.
+            const privkeyHex = localStorage.getItem('parlens_privkey');
+            const seckey = privkeyHex ? new Uint8Array(privkeyHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16))) : undefined;
+            const encryptedContent = await encryptParkingLog(logContentObj, pubkey!, seckey);
 
             const logEvent = {
                 kind: KINDS.PARKING_LOG,
@@ -940,16 +950,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                     ['status', 'parked'],
                     ['client', 'parlens']
                 ],
-                content: logContent // TODO: NIP-44 encrypt
+                content: encryptedContent
             };
             const signedLog = await signEvent(logEvent);
             await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedLog));
 
             // Store session with all details (including rate info for session end)
+            // Store startTime in SECONDS to match restoration logic and timer expectation
             const sessionData = {
                 spotATag: authData.a,
                 dTag,
-                startTime: Date.now(),
+                startTime: startTimeSeconds, // Seconds
                 listingATag: authData.listingATag || '', // Parent listing for Parking Log
                 authorizer: authData.authorizer,
                 tempPubkey,
@@ -968,7 +979,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             // Update UI state - behave like regular parking
             setStatus('parked');
             setParkLocation(listingLocation as [number, number] || null);
-            setSessionStart(Math.floor(Date.now() / 1000));
+            setSessionStart(startTimeSeconds);
 
             console.log('[Parlens] Listed parking started:', signedLog.id);
 
@@ -1044,11 +1055,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                 floor: session.floor || '',
                 spotNumber: session.spotNumber || '',
                 shortName: session.shortName || '',
-                started_at: sessionStart || Date.now(), // Use actual session start
-                finished_at: Date.now(), // Standard field name
+                started_at: session.startTime || Math.floor(Date.now() / 1000), // Use stored session start (Seconds)
+                finished_at: Math.floor(Date.now() / 1000), // Seconds
                 fee: endSessionCost,
                 note: endSessionNote, // User's personal note for their parking log
-                currency: 'USD', // TODO: Detect or use listing currency? Default USD for now matching FAB simple logic
+                currency: currency, // Use session/auth currency
                 type: session.spotType || 'car' // Important for filters
             };
 
@@ -1106,12 +1117,23 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
     const [isMapLoaded, setIsMapLoaded] = useState(false);
 
     // MapLibre view state
-    const [viewState, setViewState] = useState({
-        longitude: 77.5946,
-        latitude: 12.9716,
-        zoom: 17,
-        bearing: 0,
-        pitch: 0
+    const [viewState, setViewState] = useState(() => {
+        if (location) {
+            return {
+                longitude: location[1],
+                latitude: location[0],
+                zoom: 17,
+                bearing: 0,
+                pitch: 0
+            };
+        }
+        return {
+            longitude: 77.5946,
+            latitude: 12.9716,
+            zoom: 17,
+            bearing: 0,
+            pitch: 0
+        };
     });
 
     // Track user interaction
@@ -1372,6 +1394,29 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             setLocationError('Geolocation is not supported by your browser');
             return;
         }
+
+        // Fallback: Get current position immediately to prevent waiting for watchPosition
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                const { latitude, longitude } = position.coords;
+                // Only update if we haven't received a watch update yet
+                if (!initialLocationSet.current) {
+                    // Update tracker but don't force animation yet, let watch handle stream
+                    locationTracker.current.updateLocationWithAccuracy(latitude, longitude, position.coords.accuracy);
+
+                    // Force update location state immediately
+                    setLocation([latitude, longitude]);
+                    setViewState(prev => ({
+                        ...prev,
+                        latitude,
+                        longitude
+                    }));
+                    initialLocationSet.current = true;
+                }
+            },
+            (err) => console.warn('[Parlens] Initial location check failed:', err),
+            { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+        );
 
         const watchId = navigator.geolocation.watchPosition(
             (position) => {
