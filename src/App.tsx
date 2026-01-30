@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useAuth } from './contexts/AuthContext';
 import { LandingPage } from './pages/LandingPage';
 import { QRScanPage } from './pages/QRScanPage';
-import { Shield, UserPlus, Key, ChevronDown, ChevronRight } from 'lucide-react';
+import { Shield, UserPlus, Key, ChevronRight, ChevronDown } from 'lucide-react';
 import { nip19 } from 'nostr-tools';
 
 const Login: React.FC = () => {
@@ -88,8 +88,8 @@ const Login: React.FC = () => {
             className="mx-auto h-24 w-24 rounded-[22%] shadow-2xl shadow-[#007AFF]/20"
           />
           <h1 className="text-5xl font-extrabold tracking-tighter text-zinc-900 dark:text-white">Parlens</h1>
-          {/* UPDATED: User requested "Decentralized Route & Parking Management" */}
-          <p className="text-sm font-medium text-zinc-500 dark:text-white/40 tracking-tight">Decentralized Route & Parking Management</p>
+          {/* UPDATED: User requested "Decentralised Parking Management" */}
+          <p className="text-sm font-medium text-zinc-500 dark:text-white/40 tracking-tight">Decentralised Parking Management</p>
         </div>
 
         <div className="space-y-4">
@@ -131,6 +131,9 @@ const Login: React.FC = () => {
                 className="w-full h-16 rounded-3xl bg-white dark:bg-zinc-900 border border-black/5 dark:border-white/10 px-6 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#007AFF] placeholder:text-zinc-400 dark:placeholder:text-white/20 shadow-sm dark:shadow-none"
                 autoFocus
               />
+              <p className="text-xs text-zinc-400 dark:text-white/30 text-left leading-relaxed mt-2 pl-2">
+                Your username can be any combination of letters, numbers or special characters and doesn’t have to be unique.
+              </p>
               <div className="flex gap-3">
                 <button
                   onClick={() => setView('landing')}
@@ -155,7 +158,7 @@ const Login: React.FC = () => {
               </div>
 
               <div className="space-y-4">
-                <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-white/30 ml-2">Keys</h4>
+                {/* Header Removed */}
                 <div className="space-y-0.5 rounded-[2rem] overflow-hidden bg-white dark:bg-white/[0.03] border border-black/5 dark:border-white/10 shadow-sm dark:shadow-none">
                   <div
                     className="p-5 flex items-center justify-between transition-colors cursor-pointer active:bg-black/5 dark:active:bg-white/10"
@@ -189,8 +192,8 @@ const Login: React.FC = () => {
                     <ChevronRight size={18} className="text-zinc-400 dark:text-white/20" />
                   </div>
                 </div>
-                <p className="text-xs text-zinc-400 dark:text-white/30 mt-2 ml-2 leading-relaxed text-center">
-                  ⚠️ Store your npub and nsec securely. These are your account access keys and cannot be recovered if lost.
+                <p className="text-xs text-zinc-400 dark:text-white/30 mt-2 ml-2 leading-relaxed text-left">
+                  Your keys manage your identity on Nostr. Npub is your unique public identifier. It is used to link your data to your account. Nsec is the password that proves your ownership of the account. It validates and encrypts your data.
                 </p>
               </div>
 
@@ -201,52 +204,70 @@ const Login: React.FC = () => {
                   <p className="text-sm text-zinc-500 dark:text-white/60">Follow these steps to get the most out of Parlens.</p>
                 </div>
 
-                {/* Add to Homescreen - Removed as per user request (redundant) */}
-
+                {/* New Parking Seekers Section */}
                 <div className="space-y-4 text-sm text-zinc-600 dark:text-white/60 leading-relaxed">
-                  <p>
-                    <strong className="text-zinc-900 dark:text-white block mb-1">1. Select vehicle type</strong>
-                    Use the vertical toggle on the bottom-left to switch between Bicycle 🚲, Motorcycle 🏍️, or Car 🚗.
-                  </p>
-
-                  <p>
-                    <strong className="text-zinc-900 dark:text-white block mb-1">2. Plan your route (optional)</strong>
-                    Tap the route button to add waypoints and create a route. If the system generated route(s) between your start and end points are not to your liking, add additional waypoints in locations you would prefer travelling through. Click the location button to re-centre and turn on follow-me or navigation mode for route tracking.
-                  </p>
-
-                  <p>
-                    <strong className="text-zinc-900 dark:text-white block mb-1">3. Find and log parking</strong>
-                    Click the main button once to see open spots in listed parking spaces and open spots reported by others live or within the last 5 minutes. For standard parking: Click again to mark your location. When leaving, click once more to end the session, log the fee and report the spot. For listed parking: Click the QR code scanner button below the vehicle type selector. Scan the QR code at the parking location to start the session. When leaving, scan it again to end the session and log the fee. Use the profile button to see your parking history.
-                  </p>
-
-                  <p>
-                    <strong className="text-zinc-900 dark:text-white block mb-1">4. Create and manage a listed parking (optional)</strong>
-                    Users who oversee one or more parking spots can create a listed parking to simplify spot and lot management. Click the parking services button (‽) at the bottom left-hand corner of the screen, and click the '+' button to create a listing. Provide the relevant details requested in the form to create an online listing that matches your real-world space. Listed parkings can be public (open to all users) or private (open to select users and only publish to select relays). Once created you can see your listings as viewed by other users in the public or private listing page. You should use the my listing page to manage your listing(s). Larger listings may take longer to create. You may manually refresh the page using the button provided next to the search bar if automatic updates are not returned fast enough.
-                  </p>
-
-                  <p>
-                    <strong className="text-zinc-900 dark:text-white block mb-1">5. Create your own mirror (optional)</strong>
-                    <a
-                      href="https://github.com/prasannawarrier/parlens-pwa/blob/main/MIRROR_CREATION.md"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 dark:text-blue-400 underline"
-                    >
-                      Follow these steps
-                    </a> to create your own mirror of the Parlens app to distribute the bandwidth load while sharing with your friends.
-                  </p>
-
-                  <p>
-                    <strong className="text-zinc-900 dark:text-white block mb-1">6. User privacy</strong>
-                    Parlens does not collect or share any user data. Your log and route data is encrypted by your keys, only accessible by you and stored on relays of your preference. Open spot broadcasts and listed parking log updates use temporary identifiers to prevent your permanent public key from being shared.
-                  </p>
-
-                  {/* Tip */}
-                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 mt-4">
-                    <p className="text-xs text-amber-700 dark:text-amber-500/90 leading-relaxed">
-                      <span className="font-bold">Tip: </span>
-                      Use Parlens over your cellular internet connection to prevent personal IP address(es) from being associated with your data.
+                  <div>
+                    <h4 className="font-bold text-zinc-900 dark:text-white text-base mb-4">Parking Seekers</h4>
+                    <p className="mb-4">
+                      <strong className="text-zinc-900 dark:text-white block mb-1">1. Select Vehicle Type</strong>
+                      Use the vertical toggle to switch between Bicycle 🚲, Motorcycle 🏍️, or Car 🚗. Your vehicle type determines what parking spots you see on the map.
                     </p>
+
+                    <p className="mb-4">
+                      <strong className="text-zinc-900 dark:text-white block mb-1">2. Find Parking</strong>
+                      Click the blue search button to find parking around you or plan ahead by searching for parking near your destination by clicking the search for parking bubble at the top of your screen.
+                    </p>
+
+                    <p className="mb-4">
+                      <strong className="text-zinc-900 dark:text-white block mb-1">3. Mark Your Spot</strong>
+                      Once you find a spot, click the amber parking location button to mark your parked location and start your session. Click the session active bubble centre the map your parking marker at any time during the session.
+                    </p>
+
+                    <p className="mb-4">
+                      <strong className="text-zinc-900 dark:text-white block mb-1">4. Log Your Session</strong>
+                      When you’re ready to leave, click the green vehicle button to remove the marker, report the fees and log the session in your parking history.
+                    </p>
+
+                    <p>
+                      <strong className="text-zinc-900 dark:text-white block mb-1">5. Share Parking Reports (Optional)</strong>
+                      Anonymously report parking details to help other users know where to find parking; and build more parking features in the future. The opt-in switch is available in the parking areas section on the profile page.
+                    </p>
+                  </div>
+
+                  {/* Providers Section */}
+                  <div className="mt-8 pt-4">
+                    <h4 className="font-bold text-zinc-900 dark:text-white text-base mb-4">Parking Service Providers</h4>
+
+                    <p className="mb-4">
+                      <strong className="text-zinc-900 dark:text-white block mb-1">1. Listed Parking</strong>
+                      Users who oversee one or more parking spots can create a listing to simplify spot discovery and management. Click the parking services button (‽) and select listed parking.
+                      <br /><br />
+                      Click the ‘+’ button to create a listing and provide the details as requested in the form to create one or more online spots to match your real world location.
+                    </p>
+
+                    <p>
+                      <strong className="text-zinc-900 dark:text-white block mb-1">2. Valet Parking</strong>
+                      Users who park for others can enable valet mode to manage multiple parking sessions at the same time. Click the parking services button (‽) and select valet parking to get started.
+                      <br /><br />
+                      Click the ‘+’ button to create a new valet session. Ask your clients to scan the QR code using the Parlens app to see the parking location and let you know when they’re ready to leave.
+                    </p>
+                  </div>
+
+                  {/* Privacy & License - Static Headers */}
+                  <div className="mt-6 pt-4 space-y-6">
+                    <div>
+                      <h4 className="font-bold text-zinc-900 dark:text-white text-base mb-2">User Privacy</h4>
+                      <p className="mb-4">
+                        Parlens does not collect or share any personal data. Parking history and saved routes are encrypted by your keys and only accessible by you. If you ever feel like your privacy is compromised, delete your account, abandon your keys and create a new account.
+                      </p>
+                    </div>
+
+                    <div>
+                      <h4 className="font-bold text-zinc-900 dark:text-white text-base mb-2">License</h4>
+                      <p>
+                        This project is licensed under the GNU General Public License v3.0.
+                      </p>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -345,9 +366,10 @@ const Login: React.FC = () => {
 };
 
 const App: React.FC = () => {
-  const { pubkey } = useAuth();
+  const { pubkey, refreshConnections } = useAuth();
   const [currentPage, setCurrentPage] = useState<'home' | 'scan'>('home');
   const [pendingScanCode, setPendingScanCode] = useState<string | null>(null);
+  const [isProcessingScan, setIsProcessingScan] = useState(false);
 
   // Global visibility change handler for iOS PWA background suspension
   React.useEffect(() => {
@@ -390,15 +412,46 @@ const App: React.FC = () => {
     return <Login />;
   }
 
+  // Processing Overlay (during relay refresh after scan)
+  if (isProcessingScan) {
+    return (
+      <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-zinc-900 text-white animate-in fade-in duration-300">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 rounded-full border-4 border-white/20 border-t-blue-500 animate-spin" />
+          <p className="text-lg font-bold tracking-tight">Verifying...</p>
+        </div>
+      </div>
+    );
+  }
+
   // QR Scan Page
   if (currentPage === 'scan') {
     return (
       <QRScanPage
-        onCancel={() => setCurrentPage('home')}
-        onScan={(code) => {
-          setPendingScanCode(code);
+        onCancel={() => {
+          refreshConnections();
           setCurrentPage('home');
         }}
+        onScan={async (code) => {
+          // 1. Show processing state immediately (stops camera, unmounts scanner)
+          setIsProcessingScan(true);
+
+          // 2. Refresh connections and WAIT for them to be healthy
+          // This ensures LandingPage gets a fresh, connected pool
+          try {
+            await refreshConnections();
+          } catch (e) {
+            console.warn('Connection refresh failed, proceeding anyway:', e);
+          }
+
+          // 3. Set code and switch to home
+          setPendingScanCode(code);
+          setCurrentPage('home');
+
+          // 4. Hide processing state
+          setIsProcessingScan(false);
+        }}
+        isProcessing={isProcessingScan}
       />
     );
   }

@@ -553,7 +553,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
     const [pendingAutoMode, setPendingAutoMode] = useState(false); // Immediate visual feedback for button
     const [showHelp, setShowHelp] = useState(false);
     const [showListedParking, setShowListedParking] = useState(false);
-    const [isVerifying, setIsVerifying] = useState(!!initialScannedCode);
     // Currency state - removed (logic in FAB)
     const [vehicleType, setVehicleType] = useState<'bicycle' | 'motorcycle' | 'car'>(() => {
         const saved = localStorage.getItem('parlens_vehicle_type');
@@ -599,12 +598,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
         hourlyRate?: number;
         currency?: string;
     } | null>(() => {
-        const saved = localStorage.getItem('parlens_active_listed_session');
+        const saved = localStorage.getItem('parlens_listed_parking_session');
         return saved ? JSON.parse(saved) : null;
     });
-
-    // Debounced map center for FAB search (prevents excessive API calls during pan/zoom)
-    const [debouncedMapCenter, setDebouncedMapCenter] = useState<[number, number] | null>(null);
     const [showListedDetails, setShowListedDetails] = useState(false);
 
     // State for Marker Popup Bubbles
@@ -789,7 +785,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
 
     // QR Code Handler for Listed Parking - Session Toggle with Temp Keys
     const handleScannedCode = useCallback(async (code: string) => {
-        setIsVerifying(true);
         console.log('[Parlens] Processing scanned code:', code);
 
         try {
@@ -971,8 +966,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
         } catch (e) {
             console.error('Failed to process QR code:', e);
             alert('Failed to process parking. Please try again.');
-        } finally {
-            setIsVerifying(false);
         }
     }, [pubkey, signEvent, pool, location, setStatus]);
 
@@ -1075,22 +1068,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             alert('Failed to end session. Please try again.');
         }
     };
-
-    // Remote Cancellation Handler
-    const handleSpotStatusUpdate = useCallback((spotATag: string, status: string, event: any) => {
-        if (status === 'open' || status === 'closed') {
-            console.log('[Parlens] Remote cancellation detected:', status);
-            alert('The listing owner has updated the spot status. Your session has been ended.');
-            localStorage.removeItem('parlens_listed_parking_session');
-            setListedParkingSession(null);
-            setStatus('idle');
-            setParkLocation(null);
-            setSessionStart(null);
-            setShowListedEndPopup(false);
-            setPendingEndSession(null);
-            setEndSessionCost('0');
-        }
-    }, [setStatus]);
     const [needsRecenter, setNeedsRecenter] = useState(false);
     const [zoomLevel, setZoomLevel] = useState(17);
     const [routeCoords, setRouteCoords] = useState<[number, number][] | null>(null);
@@ -1637,17 +1614,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
         }
     }, [status, sessionStart, parkLocation]);
 
-    // Manage Debounced Map Center
-    useEffect(() => {
-        if (status === 'search') {
-            // Initialize with current viewState to avoid initial delay
-            setDebouncedMapCenter([viewState.latitude, viewState.longitude]);
-        } else {
-            // Clear when not searching to prevent stale data
-            setDebouncedMapCenter(null);
-        }
-    }, [status]); // Only re-run when status changes
-
 
     // Update needsRecenter based on distance from user location
     useEffect(() => {
@@ -1742,13 +1708,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             isUserInteracting.current = false;
         }, 1000); // 1-second cooldown after user lets go before auto-tracking resumes
         setZoomLevel(viewState.zoom);
-
-        // NEW: Update debounced center for search
-        // This ensures FAB only gets updated once per move, preventing excessive API calls
-        if (status === 'search') {
-            setDebouncedMapCenter([viewState.latitude, viewState.longitude]);
-        }
-    }, [viewState.zoom, viewState.latitude, viewState.longitude, status]);
+    }, [viewState.zoom]);
 
     // Track Zoom State explicitly (isZooming is unreliable in handleMove)
     const isZoomingRef = useRef(false);
@@ -2179,16 +2139,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
 
     return (
         <div className="fixed inset-0 overflow-hidden bg-gray-50 dark:bg-black transition-colors duration-300">
-            {/* Verifying Overlay - Processing QR & Status */}
-            {isVerifying && (
-                <div className="absolute inset-0 z-[2000] flex items-center justify-center bg-gray-50 dark:bg-black transition-opacity duration-500">
-                    <div className="flex flex-col items-center gap-4 animate-in fade-in duration-700 px-8 max-w-sm text-center">
-                        <div className="w-8 h-8 rounded-full border-4 border-green-500/20 border-t-green-500 animate-spin" />
-                        <p className="text-sm font-semibold text-zinc-400 dark:text-white/40 tracking-tight">Verifying...</p>
-                    </div>
-                </div>
-            )}
-
             {/* Loading Overlay - Covers everything until ready */}
             {((!location && !locationError) || !isMapLoaded) && (
                 <div className="absolute inset-0 z-[2000] flex items-center justify-center bg-gray-50 dark:bg-black transition-opacity duration-500">
@@ -2371,35 +2321,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                             // Hide oneway arrows
                             const layers = map.getStyle().layers;
                             layers?.forEach(layer => {
-                                // 1. Hide oneway arrows
                                 if (layer.id.includes('oneway') || layer.id.includes('arrow') || layer.id.includes('direction')) {
                                     map.setLayoutProperty(layer.id, 'visibility', 'none');
-                                }
-
-                                // 2. Hide administrative boundaries ("dotted lines")
-                                if (layer.id.includes('admin') || layer.id.includes('boundary')) {
-                                    map.setLayoutProperty(layer.id, 'visibility', 'none');
-                                }
-
-                                // 3. Hide road labels or house numbers that look like "Cxxx" or add clutter
-                                // Targeting common keys for house numbers or minor service road codes
-                                if (layer.id.includes('housenum') || layer.id.includes('road_label')) {
-                                    // For road labels, we want to keep major roads but might want to hide minor ones if possible.
-                                    // But "Cxxx" usually comes from specific road refs. 
-                                    // Let's hide specific dashed/service road labels if detectable, or just filter out house numbers which are often noisy codes.
-                                    if (layer.id.includes('housenum')) {
-                                        map.setLayoutProperty(layer.id, 'visibility', 'none');
-                                    }
-                                }
-
-                                // 4. Remove Italics from fonts
-                                const textFont = map.getLayoutProperty(layer.id, 'text-font');
-                                if (textFont && Array.isArray(textFont)) {
-                                    const newFont = textFont.map(font => font.replace('Italic', 'Regular'));
-                                    // Only update if changed
-                                    if (newFont.join(',') !== textFont.join(',')) {
-                                        map.setLayoutProperty(layer.id, 'text-font', newFont);
-                                    }
                                 }
                             });
 
@@ -2476,12 +2399,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                 longitude={item.lon}
                                 latitude={item.lat}
                                 anchor="bottom"
-                                style={{
-                                    willChange: 'transform',
-                                    zIndex: mapRef.current?.project([item.lon, item.lat]).y
-                                        ? Math.floor(mapRef.current.project([item.lon, item.lat]).y)
-                                        : undefined
-                                }}
+                                style={{ willChange: 'transform' }}
                                 onClick={(e) => {
                                     e.originalEvent.stopPropagation();
                                     setParkingSearchPopupOpen(false);
@@ -2531,12 +2449,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                 longitude={item.lon}
                                 latitude={item.lat}
                                 anchor="bottom"
-                                style={{
-                                    willChange: 'transform',
-                                    zIndex: mapRef.current?.project([item.lon, item.lat]).y
-                                        ? Math.floor(mapRef.current.project([item.lon, item.lat]).y)
-                                        : undefined
-                                }}
+                                style={{ willChange: 'transform' }}
                                 onClick={(e) => {
                                     e.originalEvent.stopPropagation();
                                     setParkingSearchPopupOpen(false);
@@ -2586,12 +2499,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                 longitude={item.lon}
                                 latitude={item.lat}
                                 anchor="bottom"
-                                style={{
-                                    willChange: 'transform',
-                                    zIndex: mapRef.current?.project([item.lon, item.lat]).y
-                                        ? Math.floor(mapRef.current.project([item.lon, item.lat]).y)
-                                        : undefined
-                                }}
+                                style={{ willChange: 'transform' }}
                                 onClick={(e) => {
                                     e.originalEvent.stopPropagation();
                                     setParkingSearchPopupOpen(false);
@@ -3615,7 +3523,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                     <FAB
                         status={status}
                         setStatus={setStatus}
-                        searchLocation={parkingSearchMarker ? [parkingSearchMarker.lat, parkingSearchMarker.lon] : (status === 'search' ? (debouncedMapCenter || [viewState.latitude, viewState.longitude]) : location)}
+                        searchLocation={parkingSearchMarker ? [parkingSearchMarker.lat, parkingSearchMarker.lon] : (status === 'search' ? [viewState.latitude, viewState.longitude] : location)}
                         userLocation={location}
                         vehicleType={vehicleType}
                         setOpenSpots={setRelaySpots}
@@ -3624,8 +3532,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                         sessionStart={sessionStart}
                         setSessionStart={setSessionStart}
                         listedParkingSession={listedParkingSession}
-                        onQRScan={onRequestScan}
-                        onSpotStatusUpdate={handleSpotStatusUpdate}
+                        onQRScan={() => onRequestScan?.()}
                     />
                 </div>
             </div>
@@ -4005,7 +3912,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
 
                         <div className="flex items-center gap-4">
                             <div className="flex items-center gap-3 bg-zinc-100 dark:bg-white/5 px-5 py-4 rounded-[1.5rem] border border-black/5 dark:border-white/5">
-                                <span className="text-2xl font-bold text-blue-500">{(pendingEndSession?.session?.currency || listedParkingSession?.currency) === 'INR' ? '₹' : (pendingEndSession?.session?.currency || listedParkingSession?.currency) === 'EUR' ? '€' : (pendingEndSession?.session?.currency || listedParkingSession?.currency) === 'GBP' ? '£' : '$'}</span>
+                                <span className="text-2xl font-bold text-blue-500">{listedParkingSession?.currency === 'INR' ? '₹' : listedParkingSession?.currency === 'EUR' ? '€' : listedParkingSession?.currency === 'GBP' ? '£' : '$'}</span>
                                 <input
                                     type="number"
                                     value={endSessionCost}
@@ -4014,7 +3921,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                     className="w-20 bg-transparent text-4xl font-black text-center text-zinc-900 dark:text-white focus:outline-none placeholder:text-zinc-300 dark:placeholder:text-white/10 appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]"
                                     min="0"
                                 />
-                                <span className="text-sm font-bold text-zinc-400 dark:text-white/20">{(pendingEndSession?.session?.currency || listedParkingSession?.currency) || 'USD'}</span>
+                                <span className="text-sm font-bold text-zinc-400 dark:text-white/20">{listedParkingSession?.currency || 'USD'}</span>
                             </div>
 
                             <div className="flex flex-col gap-1.5">

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Key, X, Shield, ChevronRight, MapPin, Clock, User, Trash2, Plus, Radio, Pencil, Check, EyeOff, Share2, QrCode, ArrowLeft, RefreshCw } from 'lucide-react';
+import { Key, X, Shield, ChevronRight, MapPin, Clock, User, Trash2, Plus, Radio, Pencil, Check, EyeOff, Share2, QrCode, ArrowLeft, RefreshCw, AlertTriangle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { relayHealthMonitor, type RelayHealth } from '../lib/relayHealth';
 import { useParkingLogs } from '../hooks/useParkingLogs';
@@ -16,10 +16,11 @@ interface ProfileButtonProps {
 }
 
 export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, onOpenChange, onHelpClick }) => {
-    const { pubkey, logout, pool, signEvent, refreshConnections } = useAuth();
+    const { pubkey, logout, deleteAccount, pool, signEvent, refreshConnections } = useAuth();
     const { logs, markDeleted } = useParkingLogs();
     const [isOpen, setIsOpen] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [showNpubQr, setShowNpubQr] = useState(false);
     const [editingUsername, setEditingUsername] = useState(false);
     const [editedName, setEditedName] = useState('');
@@ -81,7 +82,7 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
     });
     const [parkingAreaTimeFilter, setParkingAreaTimeFilter] = useState<'today' | 'week' | 'month' | 'year' | 'all'>(() => {
         const saved = localStorage.getItem('parlens_parking_area_filter');
-        return (saved as any) || 'week';
+        return (saved as any) || 'all';
     });
     const [shareParkingAreaReports, setShareParkingAreaReports] = useState(() => {
         const saved = localStorage.getItem('parlens_share_parking_areas');
@@ -372,6 +373,41 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                         </div>
                     )}
 
+                    {/* Delete Account Confirmation Modal */}
+                    {showDeleteConfirm && (
+                        <div className="fixed inset-0 z-[3000] flex items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in" onClick={() => setShowDeleteConfirm(false)}>
+                            <div className="w-[90%] max-w-sm bg-white dark:bg-[#1c1c1e] rounded-2xl p-6 space-y-4 border border-black/5 dark:border-white/10 shadow-2xl animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+                                <div className="flex items-center gap-3 text-red-500">
+                                    <AlertTriangle size={24} />
+                                    <h3 className="text-lg font-bold">Delete Account?</h3>
+                                </div>
+                                <p className="text-zinc-600 dark:text-white/70 text-sm leading-relaxed">
+                                    This action is permanent and cannot be undone.
+                                </p>
+                                <div className="flex gap-3 pt-2">
+                                    <button
+                                        onClick={() => setShowDeleteConfirm(false)}
+                                        className="flex-1 py-3 rounded-xl bg-zinc-100 dark:bg-white/10 text-zinc-900 dark:text-white font-bold"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        onClick={async () => {
+                                            setShowDeleteConfirm(false);
+                                            setIsDeleting(true);
+                                            await deleteAccount();
+                                            setIsDeleting(false);
+                                            setIsOpen(false);
+                                        }}
+                                        className="flex-1 py-3 rounded-xl bg-red-500 text-white font-bold shadow-lg shadow-red-500/20"
+                                    >
+                                        Delete
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     <div className="relative z-10 w-full max-w-md bg-white dark:bg-[#1c1c1e] rounded-[2rem] shadow-2xl p-6 flex flex-col gap-6 animate-in slide-in-from-bottom-10 duration-300 h-[calc(100vh-1.5rem)] overflow-y-auto no-scrollbar border border-black/5 dark:border-white/5 transition-colors">
 
                         {/* Header - Username with QR */}
@@ -444,7 +480,7 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                                                     alert('Failed to update username');
                                                 }
                                             }}
-                                            className="flex-1 py-2.5 rounded-xl bg-blue-500 text-white font-medium active:scale-95 transition-transform"
+                                            className="flex-1 py-2.5 rounded-xl bg-[#007AFF] text-white font-medium active:scale-95 transition-transform"
                                         >
                                             Confirm
                                         </button>
@@ -471,7 +507,7 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                                     }}
                                     className="text-xs text-zinc-500 dark:text-zinc-400 font-mono break-all text-center px-4 active:text-zinc-900 dark:active:text-white transition-colors"
                                 >
-                                    {profile?.npub?.slice(0, 20)}...{profile?.npub?.slice(-8)}
+                                    {profile?.npub}
                                 </button>
                                 {/* Edit Username Button */}
                                 <button
@@ -940,10 +976,22 @@ export const ProfileButton: React.FC<ProfileButtonProps> = ({ setHistorySpots, o
                                 </div>
 
                                 <button
-                                    onClick={() => { logout(); setIsOpen(false); }}
-                                    className="w-full py-5 rounded-[2rem] bg-zinc-100 dark:bg-zinc-800 text-red-500 font-bold tracking-wide border border-black/5 dark:border-white/5 transition-all active:scale-95 text-center mt-4"
+                                    onClick={() => {
+                                        if (confirm('Are you sure you want to logout?')) {
+                                            logout();
+                                            setIsOpen(false);
+                                        }
+                                    }}
+                                    className="w-full py-4 rounded-[1.5rem] bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 font-bold tracking-wide border border-black/5 dark:border-white/5 transition-all active:scale-95 text-center mt-4"
                                 >
                                     Logout
+                                </button>
+
+                                <button
+                                    onClick={() => setShowDeleteConfirm(true)}
+                                    className="w-full py-4 rounded-[1.5rem] text-red-500 font-bold tracking-wide transition-all active:scale-95 text-center active:bg-red-500/5"
+                                >
+                                    Delete Account
                                 </button>
                             </>
                         )}

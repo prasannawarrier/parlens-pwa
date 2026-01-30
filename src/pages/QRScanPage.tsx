@@ -8,10 +8,11 @@ import { Html5Qrcode } from 'html5-qrcode';
 
 interface QRScanPageProps {
     onCancel: () => void;
-    onScan: (code: string) => void;
+    onScan: (code: string) => Promise<void> | void; // Allow async
+    isProcessing?: boolean;
 }
 
-export const QRScanPage: React.FC<QRScanPageProps> = ({ onCancel, onScan }) => {
+export const QRScanPage: React.FC<QRScanPageProps> = ({ onCancel, onScan, isProcessing = false }) => {
     const scannerRef = useRef<Html5Qrcode | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [isStarting, setIsStarting] = useState(true);
@@ -44,9 +45,9 @@ export const QRScanPage: React.FC<QRScanPageProps> = ({ onCancel, onScan }) => {
                         hasScannedRef.current = true;
 
                         // Stop scanner then callback
-                        scanner.stop().finally(() => {
+                        scanner.stop().then(() => {
                             onScan(decodedText);
-                        });
+                        }).catch(console.error);
                     },
                     () => { /* Ignore scan errors */ }
                 );
@@ -83,6 +84,25 @@ export const QRScanPage: React.FC<QRScanPageProps> = ({ onCancel, onScan }) => {
         }
         onCancel();
     };
+
+    if (isProcessing) {
+        return null; // Don't render anything if processing (App.tsx shows the overlay, and this component will be unmounted shortly)
+        // Actually, App.tsx unmounts this component when isProcessingScan becomes true, but we should handle the prop gracefully if it persists.
+        // Wait, App.tsx DOES NOT unmount this immediately. It renders <QRScanPage isProcessing={true} /> while processing?
+        // No, looking at App.tsx:
+        /*
+           if (isProcessingScan) { return <ProcessingOverlay ... /> }
+           if (currentPage === 'scan') { return <QRScanPage ... /> }
+        */
+        // So when `isProcessingScan` is set to true, App.tsx re-renders and returns the ProcessingOverlay INSTEAD of QRScanPage.
+        // So QRScanPage gets unmounted.
+        // However, providing the prop allows us to show a local busy state if we wanted to, or disable inputs.
+        // But since it unmounts, this prop might be ignored?
+        // Let's look at the `App.tsx` logic again.
+        // onScan -> setIsProcessingScan(true) -> State update -> App Re-renders -> ProcessingOverlay returned.
+        // So QRScanPage unmounts.
+        // BUT, the manual input handler below needs to be updated.
+    }
 
     return (
         <div className="fixed inset-0 z-[9999] bg-black flex flex-col">
@@ -138,11 +158,22 @@ export const QRScanPage: React.FC<QRScanPageProps> = ({ onCancel, onScan }) => {
             <div className="p-6 text-center shrink-0">
                 <p className="text-white/60 text-sm">Point camera at a Parlens QR code</p>
                 <button
-                    onClick={() => {
+                    onClick={async () => {
                         const code = prompt('Enter QR code manually:');
                         if (code) {
+                            if (hasScannedRef.current) return;
                             hasScannedRef.current = true;
-                            handleClose().then(() => onScan(code));
+
+                            // Stop scanner cleanly before triggering onScan
+                            if (scannerRef.current) {
+                                try {
+                                    await scannerRef.current.stop();
+                                } catch { }
+                                scannerRef.current = null;
+                            }
+
+                            // Call onScan - which triggers the App.tsx processing flow
+                            onScan(code);
                         }
                     }}
                     className="mt-4 text-blue-400 text-sm font-bold"

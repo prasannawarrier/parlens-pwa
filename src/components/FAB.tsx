@@ -21,9 +21,11 @@ interface FABProps {
     setSessionStart: (time: number | null) => void;
     listedParkingSession?: any; // Active listed parking session
     onQRScan?: () => void; // Trigger QR scanner
+    onSpotStatusUpdate?: (spotId: string, status: string, event: any) => void;
 }
 
-export const FAB: React.FC<FABProps> = ({
+// Memoized to prevent re-renders on map drag (LandingPage viewState updates)
+export const FAB = React.memo<FABProps>(({
     status,
     setStatus,
     searchLocation,
@@ -35,7 +37,8 @@ export const FAB: React.FC<FABProps> = ({
     sessionStart,
     setSessionStart,
     listedParkingSession,
-    onQRScan
+    onQRScan,
+    onSpotStatusUpdate
 }) => {
     const { pubkey, pool, signEvent } = useAuth();
     const [showCostPopup, setShowCostPopup] = useState(false);
@@ -212,6 +215,11 @@ export const FAB: React.FC<FABProps> = ({
                         const aTag = event.tags.find((t: string[]) => t[0] === 'a')?.[1];
                         if (aTag) uniqueKey = aTag;
 
+                        // Trigger callback for Listed Session Cancellation (if active spot changes status)
+                        if (onSpotStatusUpdate && listedParkingSession && listedParkingSession.spotATag === uniqueKey) {
+                            onSpotStatusUpdate(uniqueKey, statusTag?.[1] || 'unknown', event);
+                        }
+
                         if (statusTag?.[1] !== 'open') {
                             if (spotsMapRef.current.has(uniqueKey)) {
                                 spotsMapRef.current.delete(uniqueKey);
@@ -299,7 +307,7 @@ export const FAB: React.FC<FABProps> = ({
 
                 // === BATCH 1: Parking Area Indicators (Kind 31714) ===
                 try {
-                    const areaTimeFilter = localStorage.getItem('parlens_parking_area_filter') || 'week';
+                    const areaTimeFilter = localStorage.getItem('parlens_parking_area_filter') || 'all';
                     let areaSince = now - 604800; // Default: 7 days
                     if (areaTimeFilter === 'today') areaSince = now - 86400;
                     else if (areaTimeFilter === 'month') areaSince = now - 2592000;
@@ -807,4 +815,4 @@ export const FAB: React.FC<FABProps> = ({
             )}
         </div>
     );
-};
+});

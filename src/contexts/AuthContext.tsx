@@ -11,6 +11,7 @@ interface AuthContextType {
     pubkey: string | null;
     login: (method: 'extension' | 'nsec' | 'bunker' | 'create', value?: string, username?: string) => Promise<void>;
     logout: () => void;
+    deleteAccount: () => Promise<void>;
     pool: SimplePool;
     signEvent: (event: any) => Promise<any>;
     refreshConnections: () => Promise<void>;
@@ -135,6 +136,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         localStorage.removeItem('parlens_privkey');
     };
 
+    const deleteAccount = async () => {
+        if (!pubkey) return;
+
+        // 1. Publish Tombstone Metadata (Kind 0)
+        try {
+            const event = {
+                kind: 0,
+                created_at: Math.floor(Date.now() / 1000),
+                tags: [],
+                content: JSON.stringify({
+                    name: 'Deleted User',
+                    about: 'This account has been deleted by the user.',
+                    picture: '',
+                    deleted: true
+                })
+            };
+            const signedEvent = await signEvent(event);
+            await Promise.allSettled(pool.publish(DEFAULT_RELAYS, signedEvent));
+        } catch (e) {
+            console.error('Failed to publish deletion metadata:', e);
+            // Continue with local deletion even if network fails
+        }
+
+        // 2. Clear Local Data & Logout
+        logout();
+    };
+
     const signEvent = async (event: any) => {
         const privkeyHex = localStorage.getItem('parlens_privkey');
         if (privkeyHex) {
@@ -150,7 +178,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     return (
-        <AuthContext.Provider value={{ pubkey, login, logout, pool, signEvent, refreshConnections }}>
+        <AuthContext.Provider value={{ pubkey, login, logout, deleteAccount, pool, signEvent, refreshConnections }}>
             {children}
         </AuthContext.Provider>
     );
