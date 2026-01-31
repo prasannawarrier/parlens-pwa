@@ -99,30 +99,40 @@ export interface SavedRoute {
 // Info Tooltip Component (click-based for mobile)
 const InfoTooltip: React.FC<{ text: string }> = ({ text }) => {
     const [show, setShow] = useState(false);
+
+    const handleClose = (e: React.MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setShow(false);
+    };
+
     return (
-        <span className="inline-flex items-center align-middle ml-1">
+        <span className="inline-flex items-center ml-1" style={{ verticalAlign: 'middle' }}>
             <button
                 type="button"
                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShow(true); }}
                 className="appearance-none border-0 bg-transparent p-0 m-0 cursor-pointer inline-flex items-center"
+                style={{ lineHeight: 0 }}
             >
-                <Info size={10} className="text-zinc-400" />
+                <Info size={11} className="text-zinc-400" />
             </button>
             {show && (
                 <div
                     className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4"
-                    onClick={() => setShow(false)}
+                    onClick={handleClose}
                 >
                     <div
-                        className="relative max-w-xs w-full p-4 bg-zinc-800 text-white text-sm rounded-xl shadow-2xl"
+                        className="relative max-w-xs w-full p-5 bg-zinc-800 rounded-2xl shadow-2xl"
                         onClick={(e) => e.stopPropagation()}
                     >
-                        <p className="pr-6">{text}</p>
+                        <p className="text-white text-sm font-normal normal-case leading-relaxed m-0 pr-4">{text}</p>
                         <button
                             type="button"
-                            className="absolute top-2 right-2 w-6 h-6 bg-zinc-700 hover:bg-zinc-600 rounded-full flex items-center justify-center text-zinc-300 hover:text-white"
-                            onClick={() => setShow(false)}
-                        >×</button>
+                            className="absolute top-3 right-3 w-7 h-7 bg-transparent hover:bg-white/10 rounded-full flex items-center justify-center transition-colors"
+                            onClick={handleClose}
+                        >
+                            <X size={18} className="text-zinc-400 hover:text-white" />
+                        </button>
                     </div>
                 </div>
             )}
