@@ -2551,7 +2551,7 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
                 {step === 1 ? (
                     <div className="space-y-4">
                         <div className="space-y-1">
-                            <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Listing Name (25 chars max)</label>
+                            <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Listing Name<InfoTooltip text="Maximum 25 characters" /></label>
                             <input
                                 className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400"
                                 placeholder="560038 Public Parking"
@@ -2593,8 +2593,8 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
                         <div className="space-y-1">
                             <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Access Type<InfoTooltip text="Public listings require approval before they are visible to users. You must begin using Parlens QR authentication to manage spots in your parking to qualify for approval. Approval status is communicated via a 'pending' or 'approved' tag on the listing card in the 'My Listings' page." /></label>
                             <div className="grid grid-cols-2 gap-2">
-                                <button onClick={() => setFormData({ ...formData, listing_type: 'public' })} className={`p-3 rounded-xl font-bold transition-colors ${formData.listing_type === 'public' ? 'bg-green-500 text-white' : 'bg-zinc-100 text-zinc-600 dark:bg-white/5 dark:text-white'}`}>Public</button>
                                 <button onClick={() => setFormData({ ...formData, listing_type: 'private' })} className={`p-3 rounded-xl font-bold transition-colors ${formData.listing_type === 'private' ? 'bg-purple-500 text-white' : 'bg-zinc-100 text-zinc-600 dark:bg-white/5 dark:text-white'}`}>Private</button>
+                                <button onClick={() => setFormData({ ...formData, listing_type: 'public' })} className={`p-3 rounded-xl font-bold transition-colors ${formData.listing_type === 'public' ? 'bg-green-500 text-white' : 'bg-zinc-100 text-zinc-600 dark:bg-white/5 dark:text-white'}`}>Public</button>
                             </div>
                         </div>
 
