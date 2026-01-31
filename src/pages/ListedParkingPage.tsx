@@ -4,7 +4,7 @@
  * Refined based on user feedback (Style, Form, Features)
  */
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { MapPin, Plus, Trash2, X, Check, Copy, Pencil, ChevronRight, LocateFixed, Users, ArrowLeft, Search, RotateCw, EyeOff, Ban, MoreVertical, Star } from 'lucide-react';
+import { MapPin, Plus, Trash2, X, Check, Copy, Pencil, ChevronRight, LocateFixed, Users, ArrowLeft, Search, RotateCw, EyeOff, Ban, MoreVertical, Star, Info } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { KINDS, DEFAULT_RELAYS, APPROVER_PUBKEY } from '../lib/nostr';
 import { getSuggestions, type NominatimResult, calculateDistance, encodeGeohash } from '../lib/geo';
@@ -37,7 +37,6 @@ export interface ListedParkingMetadata {
     local_area?: string;
     city?: string;
     zipcode?: string;
-    website?: string;
     created_at?: number;
     originalEvent?: any;
 }
@@ -96,6 +95,29 @@ export interface SavedRoute {
     decryptedContent: RouteLogContent;
     created_at: number;
 }
+
+// Info Tooltip Component (click-based for mobile)
+const InfoTooltip: React.FC<{ text: string }> = ({ text }) => {
+    const [show, setShow] = useState(false);
+    return (
+        <span className="relative inline-block ml-1">
+            <Info
+                size={14}
+                className="text-zinc-400 cursor-pointer hover:text-blue-500 inline-block align-middle"
+                onClick={() => setShow(!show)}
+            />
+            {show && (
+                <div className="absolute left-6 top-0 z-50 w-64 p-3 bg-zinc-800 text-white text-xs rounded-lg shadow-lg">
+                    {text}
+                    <button
+                        className="absolute top-1 right-1 text-zinc-400 hover:text-white"
+                        onClick={(e) => { e.stopPropagation(); setShow(false); }}
+                    >×</button>
+                </div>
+            )}
+        </span>
+    );
+};
 
 export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, currentLocation, countryCode, onPickLocation, pickedLocation }) => {
     const { pubkey, pool, signEvent } = useAuth();
@@ -732,7 +754,6 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                     local_area: getTagValue('local_area'),
                     city: getTagValue('city'),
                     zipcode: getTagValue('zipcode'),
-                    website: getTagValue('r') || event.content,
                     created_at: event.created_at,
                     originalEvent: event
                 };
@@ -1064,7 +1085,6 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                             local_area: getTagValue('local_area'),
                             city: getTagValue('city'),
                             zipcode: getTagValue('zipcode'),
-                            website: getTagValue('r') || event.content,
                             created_at: event.created_at,
                             originalEvent: event
                         };
@@ -1941,16 +1961,6 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                                                 style={{ animation: 'menuFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards', transformOrigin: 'top right' }}
                                                                                 onClick={(e) => e.stopPropagation()}
                                                                             >
-                                                                                {listing.website && (
-                                                                                    <a
-                                                                                        href={listing.website.startsWith('http') ? listing.website : `https://${listing.website}`}
-                                                                                        target="_blank" rel="noopener noreferrer"
-                                                                                        onClick={(e) => { e.stopPropagation(); setShowHideMenu(null); }}
-                                                                                        className="w-full px-4 py-3 text-left text-sm text-zinc-700 dark:text-white hover:bg-zinc-100 dark:hover:bg-zinc-700 flex items-center gap-2 border-b border-black/5 dark:border-white/10"
-                                                                                    >
-                                                                                        <div className="w-4 h-4 flex items-center justify-center">🌐</div> Visit Website
-                                                                                    </a>
-                                                                                )}
                                                                                 <button
                                                                                     onClick={(e) => { e.stopPropagation(); hideListing(listing.id, listing.listing_name); }}
                                                                                     className="w-full px-4 py-3 text-left text-sm text-zinc-700 dark:text-white hover:bg-zinc-100 dark:hover:bg-zinc-700 flex items-center gap-2"
@@ -2435,7 +2445,6 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
                 ['listing_type', formData.listing_type],
                 ['qr_type', formData.qr_type],
                 ['client', 'parlens'],
-                ...(formData.website ? [['r', formData.website]] : []),
                 ...parseList(formData.owners).map(p => ['p', p, 'admin']),
                 ...parseList(formData.managers).map(p => ['p', p, 'write']),
                 ...parseList(formData.members).map(p => ['p', p, 'read']),
@@ -2543,23 +2552,14 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
                             <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Listing Name (25 chars max)</label>
                             <input
                                 className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400"
+                                placeholder="560038 Public Parking"
                                 value={formData.listing_name}
                                 maxLength={25}
                                 onChange={e => setFormData({ ...formData, listing_name: e.target.value })}
                             />
                         </div>
                         <div className="space-y-1">
-                            <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Business Website</label>
-                            <input
-                                className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400"
-                                placeholder="https://example.com"
-                                value={formData.website}
-                                onChange={e => setFormData({ ...formData, website: e.target.value })}
-                            />
-                        </div>
-
-                        <div className="space-y-1">
-                            <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Location</label>
+                            <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Location<InfoTooltip text="If you are listing an individual spot, mark location as the centre of the spot. If you are listing multiple street parking spots, mark mid points between junctions and create multiple listings as required to manage spots. If you are listing a lot, mark the street entrance of the lot." /></label>
                             <div className="flex gap-2">
                                 <input className="flex-1 min-w-0 p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400" placeholder="lat, lon" value={formData.location} onChange={e => setFormData({ ...formData, location: e.target.value })} />
                                 <button onClick={currentLocation ? () => setFormData({ ...formData, location: `${currentLocation[0].toFixed(6)}, ${currentLocation[1].toFixed(6)}` }) : undefined} className="shrink-0 p-3 bg-blue-500/10 text-blue-500 rounded-xl"><LocateFixed size={20} /></button>
@@ -2589,18 +2589,20 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
                         </div>
 
                         <div className="space-y-1">
-                            <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Access Type</label>
+                            <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Access Type<InfoTooltip text="Public listings require approval before they are visible to users. You must begin using Parlens QR authentication to manage spots in your parking to qualify for approval. Approval status is communicated via a 'pending' or 'approved' tag on the listing card in the 'My Listings' page." /></label>
                             <div className="grid grid-cols-2 gap-2">
                                 <button onClick={() => setFormData({ ...formData, listing_type: 'public' })} className={`p-3 rounded-xl font-bold transition-colors ${formData.listing_type === 'public' ? 'bg-green-500 text-white' : 'bg-zinc-100 text-zinc-600 dark:bg-white/5 dark:text-white'}`}>Public</button>
                                 <button onClick={() => setFormData({ ...formData, listing_type: 'private' })} className={`p-3 rounded-xl font-bold transition-colors ${formData.listing_type === 'private' ? 'bg-purple-500 text-white' : 'bg-zinc-100 text-zinc-600 dark:bg-white/5 dark:text-white'}`}>Private</button>
                             </div>
                         </div>
 
-                        <div className="p-4 bg-zinc-50 dark:bg-white/5 rounded-2xl space-y-2">
-                            <div className="text-xs font-bold uppercase text-zinc-400">QR Code Type</div>
-                            <div className="flex gap-4">
-                                <label className="flex items-center gap-2 text-zinc-900 dark:text-white font-medium text-sm"><input type="radio" checked={formData.qr_type === 'static'} onChange={() => setFormData({ ...formData, qr_type: 'static' })} /> Static (Standard)</label>
-                                <label className="flex items-center gap-2 text-zinc-900 dark:text-white font-medium text-sm"><input type="radio" checked={formData.qr_type === 'dynamic'} onChange={() => setFormData({ ...formData, qr_type: 'dynamic' })} /> Dynamic (Rotating)</label>
+                        <div className="space-y-1">
+                            <label className="text-xs font-bold uppercase text-zinc-400 ml-1">QR Code Type<InfoTooltip text="QR codes enable users to update spot statuses through one time authentication. Static QR codes remain the same after each parking session and are ideal for self-managed lots, like visitor parking in an apartment or an office parking lot, where user trust is high. Dynamic QR codes are updated after each log status update and are ideal for large lots that are open to the public. Dynamic QRs prevent users from taking a photograph of the QR to update spot status at a later time." /></label>
+                            <div className="p-4 bg-zinc-50 dark:bg-white/5 rounded-2xl">
+                                <div className="flex gap-4">
+                                    <label className="flex items-center gap-2 text-zinc-900 dark:text-white font-medium text-sm"><input type="radio" checked={formData.qr_type === 'static'} onChange={() => setFormData({ ...formData, qr_type: 'static' })} /> Static</label>
+                                    <label className="flex items-center gap-2 text-zinc-900 dark:text-white font-medium text-sm"><input type="radio" checked={formData.qr_type === 'dynamic'} onChange={() => setFormData({ ...formData, qr_type: 'dynamic' })} /> Dynamic</label>
+                                </div>
                             </div>
                         </div>
 
@@ -2612,7 +2614,7 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
                                     {renderNpubChips(formData.members)}
                                 </div>
                                 <div className="space-y-1">
-                                    <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Relays</label>
+                                    <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Relays<InfoTooltip text="Events related to this listing will only be published in the specified relays, if no relays are specified events are published to users' preferred relays. Please ensure all members, managers and owners are subscribed to the respective relays, if specified." /></label>
                                     <input className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400" placeholder="URLs (comma separated)" value={formData.relays} onChange={e => setFormData({ ...formData, relays: e.target.value })} />
                                 </div>
                             </>
@@ -2728,7 +2730,7 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
                                             <input type="number" className="w-full p-1 bg-white dark:bg-white/5 rounded text-zinc-900 dark:text-white border border-zinc-200 dark:border-white/10" placeholder="0" value={newFloor.counts[type as keyof typeof newFloor.counts] || ''} onChange={(e) => setNewFloor(prev => ({ ...prev, counts: { ...prev.counts, [type]: parseInt(e.target.value) || 0 } }))} />
                                         </div>
                                         <div className="flex-1">
-                                            <label className="text-[10px] font-bold uppercase text-zinc-400">Rate</label>
+                                            <label className="text-[10px] font-bold uppercase text-zinc-400">Hourly Rate</label>
                                             <input type="number" className="w-full p-1 bg-white dark:bg-white/5 rounded text-zinc-900 dark:text-white border border-zinc-200 dark:border-white/10" placeholder="0" value={newFloor.rates[type as keyof typeof newFloor.rates] || ''} onChange={(e) => setNewFloor(prev => ({ ...prev, rates: { ...prev.rates, [type]: parseFloat(e.target.value) || 0 } }))} />
                                         </div>
                                     </div>
