@@ -100,24 +100,33 @@ export interface SavedRoute {
 const InfoTooltip: React.FC<{ text: string }> = ({ text }) => {
     const [show, setShow] = useState(false);
     return (
-        <>
-            <Info
-                size={12}
-                className="text-zinc-400 cursor-pointer ml-1 inline align-text-top"
-                onClick={(e) => { e.stopPropagation(); setShow(true); }}
-            />
+        <span className="inline-flex items-center align-middle ml-1">
+            <button
+                type="button"
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShow(true); }}
+                className="appearance-none border-0 bg-transparent p-0 m-0 cursor-pointer inline-flex items-center"
+            >
+                <Info size={10} className="text-zinc-400" />
+            </button>
             {show && (
-                <div className="fixed inset-0 z-[5000] bg-black/50 flex items-center justify-center p-6" onClick={() => setShow(false)}>
-                    <div className="relative max-w-sm w-full p-4 bg-zinc-800 text-white text-sm rounded-xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
-                        {text}
+                <div
+                    className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4"
+                    onClick={() => setShow(false)}
+                >
+                    <div
+                        className="relative max-w-xs w-full p-4 bg-zinc-800 text-white text-sm rounded-xl shadow-2xl"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <p className="pr-6">{text}</p>
                         <button
+                            type="button"
                             className="absolute top-2 right-2 w-6 h-6 bg-zinc-700 hover:bg-zinc-600 rounded-full flex items-center justify-center text-zinc-300 hover:text-white"
                             onClick={() => setShow(false)}
                         >×</button>
                     </div>
                 </div>
             )}
-        </>
+        </span>
     );
 };
 
