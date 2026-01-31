@@ -158,7 +158,7 @@ export const FAB = React.memo<FABProps>(({
                 setOpenSpots(Array.from(aggregated.values()));
             }
 
-            const processSpotEvent = (event: any, shouldUpdateState = false) => {
+            const processSpotEvent = (event: any, shouldUpdateState = false, enrichedData?: { listing_name?: string }) => {
                 try {
                     const currentTime = Math.floor(Date.now() / 1000);
 
@@ -237,7 +237,7 @@ export const FAB = React.memo<FABProps>(({
                         spotType = typeTag?.[1] || 'car';
                         price = rateTag ? (Number(rateTag[1]) || 0) : 0;
                         spotCurrency = currencyTag?.[1] || 'USD';
-                        listingName = listingNameTag?.[1];
+                        listingName = listingNameTag?.[1] || enrichedData?.listing_name;
 
                         // if (spotType !== vehicleType) return; // Removed to allow all types in state, LandingPage filters them
 
@@ -454,11 +454,22 @@ export const FAB = React.memo<FABProps>(({
                             authors: Array.from(authors)
                         } as any);
 
-                        // Create set of valid listing addresses found
+                        // Create set of valid listing addresses found and lookup map for names
                         const validAddresses = new Set<string>();
+                        const listingNamesByATag = new Map<string, string>();
+
                         validListingsMap.forEach((e: any) => {
                             const d = e.tags.find((t: string[]) => t[0] === 'd')?.[1]?.trim();
-                            if (d) validAddresses.add(`${KINDS.LISTED_PARKING_METADATA}:${e.pubkey}:${d}`);
+                            if (d) {
+                                const aTag = `${KINDS.LISTED_PARKING_METADATA}:${e.pubkey}:${d}`;
+                                validAddresses.add(aTag);
+
+                                // Extract name for UI enrichment
+                                const name = e.tags.find((t: string[]) => t[0] === 'name')?.[1] ||
+                                    e.tags.find((t: string[]) => t[0] === 'title')?.[1] ||
+                                    e.tags.find((t: string[]) => t[0] === 'summary')?.[1];
+                                if (name) listingNamesByATag.set(aTag, name);
+                            }
                         });
 
 
@@ -500,7 +511,8 @@ export const FAB = React.memo<FABProps>(({
 
                                 console.log("[Parlens] Approval Check:", { rootATag, listingPubkey, APPROVER_PUBKEY, isAutoApproved, hasApprovalLabel });
                                 if (isAutoApproved || hasApprovalLabel) {
-                                    processSpotEvent(event);
+                                    const enriched = { listing_name: listingNamesByATag.get(rootATag) };
+                                    processSpotEvent(event, false, enriched);
                                 }
                             }
                         }
