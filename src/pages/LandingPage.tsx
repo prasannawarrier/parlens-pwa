@@ -230,7 +230,7 @@ ClusterMarkerContent.displayName = 'ClusterMarkerContent';
 
 // Marker Popup Component for both Area and Listed markers
 const MarkerPopup = memo(({ type, items, onClose, isPinned, onTogglePin, onCreateRoute, onFlagNoParking, isFlaggedByUser, noParkingFlagCount, isFlagging }: {
-    type: 'area' | 'listed' | 'history';
+    type: 'area' | 'listed' | 'history' | 'listed-session';
     items: any[];
     onClose: () => void;
     isPinned?: boolean;
@@ -250,6 +250,31 @@ const MarkerPopup = memo(({ type, items, onClose, isPinned, onTogglePin, onCreat
             <X size={14} />
         </button>
     );
+
+    if (type === 'listed-session') {
+        const session = items[0];
+        return (
+            <div className={containerClasses} onClick={e => e.stopPropagation()}>
+                <CloseButton />
+                <div className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
+                    Listed Session
+                </div>
+                <div className="space-y-1">
+                    <div className="font-bold text-base text-zinc-900 dark:text-white leading-tight">
+                        {session.listingName || 'Parking Spot'}
+                    </div>
+                    <div className="text-sm font-bold text-blue-500">
+                        {session.shortName || `#${session.spotNumber}`}
+                    </div>
+                    {session.floor && (
+                        <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                            {session.floor}
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
+    }
 
     if (type === 'history') {
         // History Stats - sum timesParked from deduplicated spots
@@ -639,11 +664,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
 
     // Debounced map center for FAB search (prevents excessive API calls during pan/zoom)
     const [debouncedMapCenter, setDebouncedMapCenter] = useState<[number, number] | null>(null);
-    const [showListedDetails, setShowListedDetails] = useState(false);
+    // const [showListedDetails, setShowListedDetails] = useState(false); // Removed in v1.7.15
 
     // State for Marker Popup Bubbles
     const [selectedMarkerPopup, setSelectedMarkerPopup] = useState<{
-        type: 'area' | 'listed' | 'history';
+        type: 'area' | 'listed' | 'history' | 'listed-session';
         lat: number;
         lon: number;
         items: any[];
@@ -3056,7 +3081,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                             onClick={(e) => {
                                 e.originalEvent.stopPropagation();
                                 setParkingSearchPopupOpen(false);
-                                setShowListedDetails(true);
+                                setSelectedMarkerPopup({
+                                    type: 'listed-session',
+                                    lat: (listedParkingSession.listingLocation || parkLocation!)[0],
+                                    lon: (listedParkingSession.listingLocation || parkLocation!)[1],
+                                    items: [listedParkingSession]
+                                });
                             }}
                             style={{ zIndex: 20 }} // Above parked marker
                         >
@@ -3354,43 +3384,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                         </Marker>
                     )}
 
-                    {/* Listed Parking Details Modal */}
-                    {showListedDetails && listedParkingSession && (
-                        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setShowListedDetails(false)}>
-                            <div className="bg-white dark:bg-[#1c1c1e] w-full max-w-sm rounded-[2rem] shadow-2xl p-6 space-y-6 relative border border-black/5 dark:border-white/10" onClick={e => e.stopPropagation()}>
-                                <button
-                                    onClick={() => setShowListedDetails(false)}
-                                    className="absolute top-4 right-4 p-2 rounded-full text-zinc-400 hover:text-zinc-600 dark:text-white/40 dark:hover:text-white/60"
-                                >
-                                    <X size={24} />
-                                </button>
 
-                                <div className="text-center space-y-1">
-                                    <div className="text-xs font-bold uppercase text-zinc-400 tracking-wider">Listed Session</div>
-                                    <h2 className="text-2xl font-bold dark:text-white leading-tight">
-                                        {listedParkingSession.listingName || 'Parking Spot'}
-                                    </h2>
-                                    <div className="text-lg text-blue-500 font-bold">
-                                        {listedParkingSession.shortName || `#${listedParkingSession.spotNumber}`}
-                                    </div>
-                                    {listedParkingSession.floor && (
-                                        <div className="text-sm text-zinc-500 dark:text-zinc-400">
-                                            {listedParkingSession.floor}
-                                        </div>
-                                    )}
-                                </div>
-
-
-
-                                <button
-                                    onClick={() => setShowListedDetails(false)}
-                                    className="w-full py-4 bg-zinc-100 dark:bg-white/10 text-zinc-900 dark:text-white font-bold rounded-2xl"
-                                >
-                                    Close
-                                </button>
-                            </div>
-                        </div>
-                    )}
 
                     {/* User location marker - Unified for ALL modes for smooth transitions */}
                     {location && orientationMode !== 'auto' && (
