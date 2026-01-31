@@ -3925,7 +3925,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
 
                                     <p>
                                         <strong className="text-zinc-900 dark:text-white block mb-1">5. Share Parking Reports (Optional)</strong>
-                                        Anonymously report parking details to help other users know where to find parking; and build more parking features in the future. The opt-in switch is available in the parking areas section on the profile page.
+                                        Anonymously report parking details to help other users know where to find parking. The opt-in switch for this feature is available in the parking areas section on the profile page. Once opted-in, you may opt-out at any time.
                                     </p>
                                 </div>
 
