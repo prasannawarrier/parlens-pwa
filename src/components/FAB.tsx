@@ -491,6 +491,7 @@ export const FAB = React.memo<FABProps>(({
                                 const isAutoApproved = listingPubkey === APPROVER_PUBKEY;
                                 const hasApprovalLabel = approvedListingATagsRef.current.has(rootATag);
 
+                                console.log("[Parlens] Approval Check:", { rootATag, listingPubkey, APPROVER_PUBKEY, isAutoApproved, hasApprovalLabel });
                                 if (isAutoApproved || hasApprovalLabel) {
                                     processSpotEvent(event);
                                 }
