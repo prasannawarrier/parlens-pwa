@@ -21,7 +21,7 @@ import { useWakeLock } from '../hooks/useWakeLock';
 import { ListedParkingPage } from './ListedParkingPage';
 import { useAuth } from '../contexts/AuthContext';
 import { KINDS, DEFAULT_RELAYS } from '../lib/nostr';
-import { QRCodeSVG } from 'qrcode.react';
+
 
 // Free vector tile styles - using simpler styles that match better
 const MAP_STYLES = {
@@ -3366,7 +3366,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                 </button>
 
                                 <div className="text-center space-y-1">
-                                    <div className="text-xs font-bold uppercase text-zinc-400 tracking-wider">Active Session</div>
+                                    <div className="text-xs font-bold uppercase text-zinc-400 tracking-wider">Listed Session</div>
                                     <h2 className="text-2xl font-bold dark:text-white leading-tight">
                                         {listedParkingSession.listingName || 'Parking Spot'}
                                     </h2>
@@ -3380,23 +3380,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                     )}
                                 </div>
 
-                                {/* QR Display */}
-                                <div className="space-y-4">
-                                    <div className="p-6 bg-zinc-50 dark:bg-white/5 rounded-3xl flex justify-center border border-black/5 dark:border-white/5">
-                                        {/* Real QR Code for Session */}
-                                        <QRCodeSVG
-                                            value={JSON.stringify({
-                                                a: listedParkingSession.spotATag,
-                                                authorizer: listedParkingSession.authorizer
-                                            })}
-                                            size={180}
-                                            level="M"
-                                            bgColor="transparent"
-                                            fgColor="currentColor"
-                                            className="text-black dark:text-white"
-                                        />
-                                    </div>
-                                </div>
+
 
                                 <button
                                     onClick={() => setShowListedDetails(false)}
