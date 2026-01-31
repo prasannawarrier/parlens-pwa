@@ -100,22 +100,24 @@ export interface SavedRoute {
 const InfoTooltip: React.FC<{ text: string }> = ({ text }) => {
     const [show, setShow] = useState(false);
     return (
-        <span className="relative inline-block ml-1">
+        <>
             <Info
-                size={14}
-                className="text-zinc-400 cursor-pointer hover:text-blue-500 inline-block align-middle"
-                onClick={() => setShow(!show)}
+                size={12}
+                className="text-zinc-400 cursor-pointer ml-1 inline align-text-top"
+                onClick={(e) => { e.stopPropagation(); setShow(true); }}
             />
             {show && (
-                <div className="absolute left-6 top-0 z-50 w-64 p-3 bg-zinc-800 text-white text-xs rounded-lg shadow-lg">
-                    {text}
-                    <button
-                        className="absolute top-1 right-1 text-zinc-400 hover:text-white"
-                        onClick={(e) => { e.stopPropagation(); setShow(false); }}
-                    >×</button>
+                <div className="fixed inset-0 z-[5000] bg-black/50 flex items-center justify-center p-6" onClick={() => setShow(false)}>
+                    <div className="relative max-w-sm w-full p-4 bg-zinc-800 text-white text-sm rounded-xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
+                        {text}
+                        <button
+                            className="absolute top-2 right-2 w-6 h-6 bg-zinc-700 hover:bg-zinc-600 rounded-full flex items-center justify-center text-zinc-300 hover:text-white"
+                            onClick={() => setShow(false)}
+                        >×</button>
+                    </div>
                 </div>
             )}
-        </span>
+        </>
     );
 };
 
@@ -2289,7 +2291,7 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
         city: editing?.city || '',
         zipcode: editing?.zipcode || '',
         country: editing?.country || '',
-        listing_type: editing?.listing_type || 'public',
+        listing_type: editing?.listing_type || 'private',
         qr_type: editing?.qr_type || 'static',
         owners: editing?.owners?.join(', ') || '',
         managers: editing?.managers?.join(', ') || '',
@@ -2570,21 +2572,21 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
                         <div className="grid grid-cols-2 gap-2">
                             <div className="space-y-1">
                                 <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Local Area</label>
-                                <input className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400" placeholder="e.g. Indiranagar" value={formData.local_area} onChange={e => setFormData({ ...formData, local_area: e.target.value })} />
+                                <input className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400" placeholder="Indiranagar" value={formData.local_area} onChange={e => setFormData({ ...formData, local_area: e.target.value })} />
                             </div>
                             <div className="space-y-1">
                                 <label className="text-xs font-bold uppercase text-zinc-400 ml-1">City</label>
-                                <input className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400" placeholder="e.g. Bangalore" value={formData.city} onChange={e => setFormData({ ...formData, city: e.target.value })} />
+                                <input className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400" placeholder="Bangalore" value={formData.city} onChange={e => setFormData({ ...formData, city: e.target.value })} />
                             </div>
                         </div>
                         <div className="grid grid-cols-2 gap-2">
                             <div className="space-y-1">
                                 <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Zipcode</label>
-                                <input className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400" placeholder="e.g. 560038" value={formData.zipcode} onChange={e => setFormData({ ...formData, zipcode: e.target.value })} />
+                                <input className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400" placeholder="560038" value={formData.zipcode} onChange={e => setFormData({ ...formData, zipcode: e.target.value })} />
                             </div>
                             <div className="space-y-1">
                                 <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Country</label>
-                                <input className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400" placeholder="e.g. India" value={formData.country} onChange={e => setFormData({ ...formData, country: e.target.value })} />
+                                <input className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400" placeholder="India" value={formData.country} onChange={e => setFormData({ ...formData, country: e.target.value })} />
                             </div>
                         </div>
 
@@ -2623,12 +2625,12 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
                         <div className="space-y-2">
                             <div className="space-y-1">
                                 <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Owners</label>
-                                <input className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400" placeholder="Additional Pubkeys" value={formData.owners} onChange={e => setFormData({ ...formData, owners: e.target.value })} />
+                                <input className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400" placeholder="Pubkeys (comma separated)" value={formData.owners} onChange={e => setFormData({ ...formData, owners: e.target.value })} />
                                 {renderNpubChips(formData.owners)}
                             </div>
                             <div className="space-y-1">
                                 <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Managers</label>
-                                <input className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400" placeholder="Pubkeys" value={formData.managers} onChange={e => setFormData({ ...formData, managers: e.target.value })} />
+                                <input className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400" placeholder="Pubkeys (comma separated)" value={formData.managers} onChange={e => setFormData({ ...formData, managers: e.target.value })} />
                                 {renderNpubChips(formData.managers)}
                             </div>
                         </div>
