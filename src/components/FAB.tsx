@@ -247,6 +247,11 @@ export const FAB = React.memo<FABProps>(({
                             return;
                         }
 
+                        // Preserve existing listing name if new event doesn't have it (prevent overwrite by status updates)
+                        if (!listingName && existing?.listing_name) {
+                            listingName = existing.listing_name;
+                        }
+
                         // Update Map
                         const spot = {
                             id: event.id,
