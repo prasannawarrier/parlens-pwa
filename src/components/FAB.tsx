@@ -475,7 +475,12 @@ export const FAB = React.memo<FABProps>(({
                                 const aTag = event.tags.find((t: string[]) => t[0] === 'a')?.[1]?.trim();
                                 if (aTag) approvedListingATagsRef.current.add(aTag);
                             }
-                            console.log('[Parlens] Found', approvedListingATagsRef.current.size, 'approved listings from approver');
+                            console.log("[Parlens] Found", approvedListingATagsRef.current.size, "approved listings from approver");
+                            console.log("[Parlens] DEBUG: parentListingAddresses.size=", parentListingAddresses.size);
+                            console.log("[Parlens] DEBUG: validAddresses.size=", validAddresses.size);
+                            console.log("[Parlens] DEBUG: latestBySpot.size=", latestBySpot.size);
+                            console.log("[Parlens] DEBUG: Sample validAddresses:", Array.from(validAddresses).slice(0, 3));
+                            console.log("[Parlens] DEBUG: Sample parentListingAddresses:", Array.from(parentListingAddresses).slice(0, 3));
                         } catch (e) {
                             console.error('[Parlens] Failed to fetch approval labels:', e);
                         }
