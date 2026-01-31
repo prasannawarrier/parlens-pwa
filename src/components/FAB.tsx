@@ -440,7 +440,7 @@ export const FAB = React.memo<FABProps>(({
                         const authors = new Set<string>();
                         uniqueAddresses.forEach(a => {
                             const p = a.split(':');
-                            if (p.length === 3) {
+                            if (p.length === 3 && p[1] && p[1] !== "undefined" && p[2] && p[2] !== "undefined") {
                                 authors.add(p[1]);
                                 dTags.add(p[2]);
                             }
