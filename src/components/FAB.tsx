@@ -194,7 +194,7 @@ export const FAB = React.memo<FABProps>(({
                     }
 
                     if (event.kind === KINDS.LISTED_SPOT_LOG) {
-                        const rootATag = event.tags.find((t: string[]) => t[0] === 'a' && t[3] === 'root')?.[1];
+                        const rootATag = event.tags.find((t: string[]) => t[0] === 'a' && t[3] === 'root')?.[1]?.trim();
                         if (rootATag) {
                             const parts = rootATag.split(':');
                             if (parts.length === 3) {
@@ -411,7 +411,10 @@ export const FAB = React.memo<FABProps>(({
 
                         // Get root a-tag pointing to parent Listing (has 'root' marker at position 3)
                         // Format: ['a', '31147:pubkey:d_tag', '', 'root']
-                        const rootATag = event.tags.find((t: string[]) => t[0] === 'a' && t[3] === 'root')?.[1];
+                        const rootATag = event.tags.find((t: string[]) => t[0] === 'a' && t[3] === 'root')?.[1]?.trim();
+
+                        // DEBUG LOG
+
                         if (rootATag) {
                             const parts = rootATag.split(':');
                             if (parts.length === 3) {
@@ -424,6 +427,7 @@ export const FAB = React.memo<FABProps>(({
                             latestBySpot.set(aTag, event);
                         }
                     }
+
 
                     // Batch verify parent existence (Kind 31147 Listed Parking Metadata)
                     // If the parent Listing (31147) is deleted, the Spot Log (1714) is an orphan.
@@ -480,7 +484,7 @@ export const FAB = React.memo<FABProps>(({
                         // Filter Process loop - only add valid (non-orphaned) AND approved spots
                         // Events without root a-tags (legacy) are skipped
                         for (const event of latestBySpot.values()) {
-                            const rootATag = event.tags.find((t: string[]) => t[0] === 'a' && t[3] === 'root')?.[1];
+                            const rootATag = event.tags.find((t: string[]) => t[0] === 'a' && t[3] === 'root')?.[1]?.trim();
                             if (rootATag && validAddresses.has(rootATag)) {
                                 // Check if listing is approved (from APPROVER or has approval label)
                                 const listingPubkey = rootATag.split(':')[1];

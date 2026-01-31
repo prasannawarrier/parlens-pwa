@@ -899,7 +899,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             const spotParts = authData.a.split(':');
             const spotD = spotParts[2] || '';
             const listingD = spotD.replace(/-spot-\d+$/, '');
-            const listingATag = `${KINDS.LISTED_PARKING_METADATA}:${spotParts[1]}:${listingD} `;
+            const listingATag = `${KINDS.LISTED_PARKING_METADATA}:${spotParts[1]}:${listingD}`;
             // Start Session Logic (unchanged)
             const tags = [
                 ['a', authData.a],
@@ -915,7 +915,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             // Use listingLocation from authData or session, or current location as fallback if starting
             const loc = authData.listingLocation || null;
             if (loc) {
-                tags.push(['location', `${loc[0]},${loc[1]} `]);
+                tags.push(['location', `${loc[0]},${loc[1]}`]);
                 try {
                     const g = Geohash.encode(loc[0], loc[1], 5); // 5-char for search compatibility
                     tags.push(['g', g]);
@@ -1035,7 +1035,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
             const spotParts = authData.a.split(':');
             const spotD = spotParts[2] || '';
             const listingD = spotD.replace(/-spot-\d+$/, '');
-            const listingATag = `${KINDS.LISTED_PARKING_METADATA}:${spotParts[1]}:${listingD} `;
+            const listingATag = `${KINDS.LISTED_PARKING_METADATA}:${spotParts[1]}:${listingD}`;
             const tags = [
                 ['a', authData.a],
                 ['a', listingATag, '', 'root'],
@@ -1048,7 +1048,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
 
             const loc = authData.listingLocation || session.listingLocation;
             if (loc) {
-                tags.push(['location', `${loc[0]},${loc[1]} `]);
+                tags.push(['location', `${loc[0]},${loc[1]}`]);
                 try {
                     const g = Geohash.encode(loc[0], loc[1], 5); // 5-char for search compatibility
                     tags.push(['g', g]);
