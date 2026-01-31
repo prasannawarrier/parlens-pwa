@@ -2610,7 +2610,7 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
                         </div>
 
                         <div className="space-y-1">
-                            <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Access Type<InfoTooltip text="Public listings require approval before they are visible to users. You must begin using Parlens QR authentication to manage spots in your parking to qualify for approval. Approval status is communicated via a 'pending' or 'approved' tag on the listing card in the 'My Listings' page." /></label>
+                            <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Access Type<InfoTooltip text="Public listings require approval before they are visible to users. You must begin using Parlens QR authentication to manage spots in your parking to qualify for approval. Use the drop down filter in the My Listings page to view public listings by approval status." /></label>
                             <div className="grid grid-cols-2 gap-2">
                                 <button onClick={() => setFormData({ ...formData, listing_type: 'private' })} className={`p-3 rounded-xl font-bold transition-colors ${formData.listing_type === 'private' ? 'bg-purple-500 text-white' : 'bg-zinc-100 text-zinc-600 dark:bg-white/5 dark:text-white'}`}>Private</button>
                                 <button onClick={() => setFormData({ ...formData, listing_type: 'public' })} className={`p-3 rounded-xl font-bold transition-colors ${formData.listing_type === 'public' ? 'bg-green-500 text-white' : 'bg-zinc-100 text-zinc-600 dark:bg-white/5 dark:text-white'}`}>Public</button>
