@@ -3092,13 +3092,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                             }}
                             style={{ zIndex: 20 }} // Above parked marker
                         >
-                            <div className="flex flex-col items-center">
-                                {/* Bubble */}
-                                <div className="bg-[#34C759] p-2 rounded-full shadow-xl border-2 border-white cursor-pointer">
-                                    <QrCode size={16} className="text-white" />
-                                </div>
-                                <div className="w-0.5 h-3 bg-white"></div>
-                            </div>
+                            <PinStyleMarker
+                                bgClass="bg-[#34C759]"
+                                borderClass="border-white"
+                                stemClass="bg-white"
+                                icon={<QrCode size={16} />}
+                                iconClass="text-white"
+                            />
                         </Marker>
                     )}
 
