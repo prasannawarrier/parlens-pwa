@@ -2988,7 +2988,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                                 longitude={item.lon}
                                 latitude={item.lat}
                                 anchor="bottom"
-                                style={{ willChange: 'transform' }}
+                                style={{
+                                    willChange: 'transform',
+                                    zIndex: mapRef.current?.project([item.lon, item.lat]).y
+                                        ? Math.floor(mapRef.current.project([item.lon, item.lat]).y)
+                                        : undefined
+                                }}
                                 onClick={(e) => {
                                     e.originalEvent.stopPropagation();
                                     setParkingSearchPopupOpen(false);
@@ -3072,7 +3077,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                             longitude={p.lon}
                             latitude={p.lat}
                             anchor="bottom"
-                            style={{ zIndex: 90 }} // Below search marker (100)
+                            style={{
+                                zIndex: mapRef.current?.project([p.lon, p.lat]).y
+                                    ? Math.floor(mapRef.current.project([p.lon, p.lat]).y)
+                                    : undefined
+                            }}
                             onClick={(e) => {
                                 e.originalEvent.stopPropagation();
                                 setParkingSearchMarker({
