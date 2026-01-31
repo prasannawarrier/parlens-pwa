@@ -97,7 +97,7 @@ export interface SavedRoute {
 }
 
 // Info Tooltip Component (click-based for mobile)
-const InfoTooltip: React.FC<{ text: string }> = ({ text }) => {
+const InfoTooltip: React.FC<{ text: string; title?: string }> = ({ text, title }) => {
     const [show, setShow] = useState(false);
 
     const handleClose = (e: React.MouseEvent) => {
@@ -125,6 +125,7 @@ const InfoTooltip: React.FC<{ text: string }> = ({ text }) => {
                         className="relative max-w-xs w-full p-5 bg-zinc-800 rounded-2xl shadow-2xl"
                         onClick={(e) => e.stopPropagation()}
                     >
+                        {title && <h3 className="text-white text-base font-bold mb-2 pr-6">{title}</h3>}
                         <p className="text-white text-sm font-normal normal-case leading-relaxed m-0 pr-4">{text}</p>
                         <button
                             type="button"
@@ -2579,7 +2580,7 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
                 {step === 1 ? (
                     <div className="space-y-4">
                         <div className="space-y-1">
-                            <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Listing Name<InfoTooltip text="Maximum 25 characters" /></label>
+                            <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Listing Name<InfoTooltip title="Listing Name" text="Maximum 25 characters" /></label>
                             <input
                                 className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400"
                                 placeholder="560038 Public Parking"
@@ -2589,7 +2590,7 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
                             />
                         </div>
                         <div className="space-y-1">
-                            <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Location<InfoTooltip text="If you are listing an individual spot, mark location as the centre of the spot. If you are listing multiple street parking spots, mark mid points between junctions and create multiple listings as required to manage spots. If you are listing a lot, mark the street entrance of the lot." /></label>
+                            <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Location<InfoTooltip title="Location" text="If you are listing an individual spot, mark location as the centre of the spot. If you are listing multiple street parking spots, mark mid points between junctions and create multiple listings as required to manage spots. If you are listing a lot, mark the street entrance of the lot." /></label>
                             <div className="flex gap-2">
                                 <input className="flex-1 min-w-0 p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400" placeholder="lat, lon" value={formData.location} onChange={e => setFormData({ ...formData, location: e.target.value })} />
                                 <button onClick={currentLocation ? () => setFormData({ ...formData, location: `${currentLocation[0].toFixed(6)}, ${currentLocation[1].toFixed(6)}` }) : undefined} className="shrink-0 p-3 bg-blue-500/10 text-blue-500 rounded-xl"><LocateFixed size={20} /></button>
@@ -2619,7 +2620,7 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
                         </div>
 
                         <div className="space-y-1">
-                            <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Access Type<InfoTooltip text="Public listings require approval before they are visible to users. You must begin using Parlens QR authentication to manage spots in your parking to qualify for approval. Use the drop down filter in the My Listings page to view public listings by approval status." /></label>
+                            <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Access Type<InfoTooltip title="Access Type" text="Public listings require approval before they are visible to users. You must begin using Parlens QR authentication to manage spots in your parking to qualify for approval. Use the drop down filter in the My Listings page to view public listings by approval status." /></label>
                             <div className="grid grid-cols-2 gap-2">
                                 <button onClick={() => setFormData({ ...formData, listing_type: 'private' })} className={`p-3 rounded-xl font-bold transition-colors ${formData.listing_type === 'private' ? 'bg-purple-500 text-white' : 'bg-zinc-100 text-zinc-600 dark:bg-white/5 dark:text-white'}`}>Private</button>
                                 <button onClick={() => setFormData({ ...formData, listing_type: 'public' })} className={`p-3 rounded-xl font-bold transition-colors ${formData.listing_type === 'public' ? 'bg-green-500 text-white' : 'bg-zinc-100 text-zinc-600 dark:bg-white/5 dark:text-white'}`}>Public</button>
@@ -2627,7 +2628,7 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
                         </div>
 
                         <div className="space-y-1">
-                            <label className="text-xs font-bold uppercase text-zinc-400 ml-1">QR Code Type<InfoTooltip text="QR codes enable users to update spot statuses through one time authentication. Static QR codes remain the same after each parking session and are ideal for self-managed lots, like visitor parking in an apartment or an office parking lot, where user trust is high. Dynamic QR codes are updated after each log status update and are ideal for large lots that are open to the public. Dynamic QRs prevent users from taking a photograph of the QR to update spot status at a later time." /></label>
+                            <label className="text-xs font-bold uppercase text-zinc-400 ml-1">QR Code Type<InfoTooltip title="QR Code Type" text="QR codes enable users to update spot statuses through one time authentication. Static QR codes remain the same after each parking session and are ideal for self-managed lots, like visitor parking in an apartment or an office parking lot, where user trust is high. Dynamic QR codes are updated after each log status update and are ideal for large lots that are open to the public. Dynamic QRs prevent users from taking a photograph of the QR to update spot status at a later time." /></label>
                             <div className="p-4 bg-zinc-50 dark:bg-white/5 rounded-2xl">
                                 <div className="flex gap-4">
                                     <label className="flex items-center gap-2 text-zinc-900 dark:text-white font-medium text-sm"><input type="radio" checked={formData.qr_type === 'static'} onChange={() => setFormData({ ...formData, qr_type: 'static' })} /> Static</label>
@@ -2644,7 +2645,7 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
                                     {renderNpubChips(formData.members)}
                                 </div>
                                 <div className="space-y-1">
-                                    <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Relays<InfoTooltip text="Events related to this listing will only be published in the specified relays, if no relays are specified events are published to users' preferred relays. Please ensure all members, managers and owners are subscribed to the respective relays, if specified." /></label>
+                                    <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Relays<InfoTooltip title="Relays" text="Events related to this listing will only be published in the specified relays, if no relays are specified events are published to users' preferred relays. Please ensure all members, managers and owners are subscribed to the respective relays, if specified." /></label>
                                     <input className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400" placeholder="URLs (comma separated)" value={formData.relays} onChange={e => setFormData({ ...formData, relays: e.target.value })} />
                                 </div>
                             </>
