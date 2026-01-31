@@ -3247,7 +3247,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                             longitude={selectedMarkerPopup.lon}
                             latitude={selectedMarkerPopup.lat}
                             anchor="bottom"
-                            offset={selectedMarkerPopup.type === 'listed-session' ? [0, -32] : [0, -48]}
+                            offset={[0, -48]}
                             style={{ zIndex: 1000 }}
                         >
                             <div className="relative">
