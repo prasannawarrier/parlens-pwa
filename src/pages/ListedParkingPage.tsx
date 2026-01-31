@@ -125,7 +125,7 @@ const InfoTooltip: React.FC<{ text: string; title?: string }> = ({ text, title }
                         className="relative max-w-xs w-full p-5 bg-zinc-800 rounded-2xl shadow-2xl"
                         onClick={(e) => e.stopPropagation()}
                     >
-                        {title && <h3 className="text-white text-base font-bold mb-2 pr-6">{title}</h3>}
+                        {title && <h3 className="text-xs font-bold uppercase text-zinc-400 mb-2 pr-6">{title}</h3>}
                         <p className="text-white text-sm font-normal normal-case leading-relaxed m-0 pr-4">{text}</p>
                         <button
                             type="button"
