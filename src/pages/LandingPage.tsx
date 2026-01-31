@@ -261,7 +261,7 @@ const MarkerPopup = memo(({ type, items, onClose, isPinned, onTogglePin, onCreat
                 </div>
                 <div className="flex items-center justify-between gap-2">
                     <div className="font-bold text-xs text-zinc-900 dark:text-white truncate flex-1">
-                        {session.listing_name || 'Parking Spot'}
+                        {session.listing_name || session.listingName || 'Parking Spot'}
                     </div>
                     <div className="flex items-center gap-1.5 whitespace-nowrap">
                         {session.floor && (
@@ -1021,7 +1021,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                 listingATag: authData.listingATag || '', // Parent listing for Parking Log
                 authorizer: authData.authorizer,
                 tempPubkey,
-                listingName: authData.listingName || '',
+                listing_name: authData.listingName || '',
                 floor: authData.floor || '', // Floor name
                 spotNumber: authData.spotNumber || '',
                 shortName: authData.shortName || '',
