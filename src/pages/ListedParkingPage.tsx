@@ -128,10 +128,10 @@ const InfoTooltip: React.FC<{ text: string }> = ({ text }) => {
                         <p className="text-white text-sm font-normal normal-case leading-relaxed m-0 pr-4">{text}</p>
                         <button
                             type="button"
-                            className="absolute top-3 right-3 w-7 h-7 bg-transparent hover:bg-white/10 rounded-full flex items-center justify-center transition-colors"
+                            className="absolute top-3 right-3 w-7 h-7 bg-zinc-700 rounded-full flex items-center justify-center"
                             onClick={handleClose}
                         >
-                            <X size={18} className="text-zinc-400 hover:text-white" />
+                            <X size={18} className="text-white" />
                         </button>
                     </div>
                 </div>
