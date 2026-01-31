@@ -2653,12 +2653,12 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
 
                         <div className="space-y-2">
                             <div className="space-y-1">
-                                <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Owners</label>
+                                <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Owners<InfoTooltip title="Owners" text="Owners can edit all listing or spot details and manage access." /></label>
                                 <input className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400" placeholder="Pubkeys (comma separated)" value={formData.owners} onChange={e => setFormData({ ...formData, owners: e.target.value })} />
                                 {renderNpubChips(formData.owners)}
                             </div>
                             <div className="space-y-1">
-                                <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Managers</label>
+                                <label className="text-xs font-bold uppercase text-zinc-400 ml-1">Managers<InfoTooltip title="Managers" text="Managers can edit spot status logs." /></label>
                                 <input className="w-full p-3 bg-zinc-100 dark:bg-white/5 rounded-xl text-zinc-900 dark:text-white placeholder:text-zinc-400" placeholder="Pubkeys (comma separated)" value={formData.managers} onChange={e => setFormData({ ...formData, managers: e.target.value })} />
                                 {renderNpubChips(formData.managers)}
                             </div>
