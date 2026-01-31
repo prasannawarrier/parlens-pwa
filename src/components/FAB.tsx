@@ -409,13 +409,9 @@ export const FAB = React.memo<FABProps>(({
                         const aTag = event.tags.find((t: string[]) => t[0] === 'a')?.[1];
                         if (!aTag) continue;
 
-                        // Get root a-tag pointing to parent Listing (has 'root' marker at position 3 OR points to Kind 31147)
-                        let rootATag = event.tags.find((t: string[]) => t[0] === 'a' && t[3] === 'root')?.[1];
-                        if (!rootATag) {
-                            // Fallback for missing 'root' marker
-                            rootATag = event.tags.find((t: string[]) => t[0] === 'a' && t[1]?.startsWith(`${KINDS.LISTED_PARKING_METADATA}:`))?.[1];
-                        }
-
+                        // Get root a-tag pointing to parent Listing (has 'root' marker at position 3)
+                        // Format: ['a', '31147:pubkey:d_tag', '', 'root']
+                        const rootATag = event.tags.find((t: string[]) => t[0] === 'a' && t[3] === 'root')?.[1];
                         if (rootATag) {
                             const parts = rootATag.split(':');
                             if (parts.length === 3) {
@@ -433,45 +429,31 @@ export const FAB = React.memo<FABProps>(({
                     // If the parent Listing (31147) is deleted, the Spot Log (1714) is an orphan.
                     // Batch verify parent existence (Kind 31147 Listed Parking Metadata)
                     // If the parent Listing (31147) is deleted, the Spot Log (1714) is an orphan.
-
-                    // Initialize defaults (safe even if validation query is skipped)
-                    // Initialize defaults (safe even if validation query is skipped)
-                    const validAddresses = new Set<string>();
-                    approvedListingATagsRef.current = new Set(); // Clear previous approvals
-                    let isValidationSuccessful = false; // Flag to track if we can trust the 'validAddresses' set
-
                     if (parentListingAddresses.size > 0) {
-                        try {
-                            const uniqueAddresses = Array.from(parentListingAddresses);
+                        const uniqueAddresses = Array.from(parentListingAddresses);
 
-                            const dTags = new Set<string>();
-                            const authors = new Set<string>();
-                            uniqueAddresses.forEach(a => {
-                                const p = a.split(':');
-                                if (p.length === 3) {
-                                    authors.add(p[1]);
-                                    dTags.add(p[2]);
-                                }
-                            });
+                        const dTags = new Set<string>();
+                        const authors = new Set<string>();
+                        uniqueAddresses.forEach(a => {
+                            const p = a.split(':');
+                            if (p.length === 3) {
+                                authors.add(p[1]);
+                                dTags.add(p[2]);
+                            }
+                        });
 
-                            const validListingsMap = await pool.querySync(DEFAULT_RELAYS, {
-                                kinds: [KINDS.LISTED_PARKING_METADATA], // 31147
-                                '#d': Array.from(dTags),
-                                authors: Array.from(authors)
-                            } as any);
+                        const validListingsMap = await pool.querySync(DEFAULT_RELAYS, {
+                            kinds: [KINDS.LISTED_PARKING_METADATA], // 31147
+                            '#d': Array.from(dTags),
+                            authors: Array.from(authors)
+                        } as any);
 
-                            // Create set of valid listing addresses found
-                            validListingsMap.forEach((e: any) => {
-                                const d = e.tags.find((t: string[]) => t[0] === 'd')?.[1];
-                                if (d) validAddresses.add(`${KINDS.LISTED_PARKING_METADATA}:${e.pubkey}:${d}`);
-                            });
-
-                            isValidationSuccessful = true; // Mark validation as successful (we contacted relays)
-
-                        } catch (e) {
-                            console.error('[Parlens] Failed to validate parent listings:', e);
-                            // isValidationSuccessful remains false -> Fail Open (Show all)
-                        }
+                        // Create set of valid listing addresses found
+                        const validAddresses = new Set<string>();
+                        validListingsMap.forEach((e: any) => {
+                            const d = e.tags.find((t: string[]) => t[0] === 'd')?.[1];
+                            if (d) validAddresses.add(`${KINDS.LISTED_PARKING_METADATA}:${e.pubkey}:${d}`);
+                        });
 
 
                         // === APPROVAL FILTER ===
@@ -484,6 +466,7 @@ export const FAB = React.memo<FABProps>(({
                             } as any);
 
                             // Build set of approved listing a-tags
+                            approvedListingATagsRef.current = new Set();
                             for (const event of approvalEvents) {
                                 const aTag = event.tags.find((t: string[]) => t[0] === 'a')?.[1];
                                 if (aTag) approvedListingATagsRef.current.add(aTag);
@@ -494,35 +477,18 @@ export const FAB = React.memo<FABProps>(({
                         }
                     }
 
-                    // Filter Process loop - MOVED OUTSIDE the validation block
-                    // This ensures spots are processed even if parent metadata query was skipped or failed
-                    // (Strict Orphan Validation Removed)
+                    // Filter Process loop - only add valid (non-orphaned) AND approved spots
+                    // Events without root a-tags (legacy) are skipped
                     for (const event of latestBySpot.values()) {
-                        // Robust 'root' marker check:
-                        // 1. Standard NIP-10 root marker
-                        // 2. Fallback: Any 'a' tag pointing to a Listed Parking Metadata event (Kind 31147)
-                        let rootATag = event.tags.find((t: string[]) => t[0] === 'a' && t[3] === 'root')?.[1];
-                        if (!rootATag) {
-                            // Fallback for clients/events that missed the 'root' marker
-                            rootATag = event.tags.find((t: string[]) => t[0] === 'a' && t[1]?.startsWith(`${KINDS.LISTED_PARKING_METADATA}:`))?.[1];
-                        }
+                        const rootATag = event.tags.find((t: string[]) => t[0] === 'a' && t[3] === 'root')?.[1];
+                        if (rootATag && validAddresses.has(rootATag)) {
+                            // Check if listing is approved (from APPROVER or has approval label)
+                            const listingPubkey = rootATag.split(':')[1];
+                            const isAutoApproved = listingPubkey === APPROVER_PUBKEY;
+                            const hasApprovalLabel = approvedListingATagsRef.current.has(rootATag);
 
-                        if (rootATag) {
-                            // Check if listing is approved OR owner
-                            // CONDITIONAL VALIDATION:
-                            // 1. If validation succeeded -> Strict Check (validAddresses.has)
-                            // 2. If validation failed (network) -> Fail Open (allow all)
-                            const isValid = !isValidationSuccessful || validAddresses.has(rootATag);
-
-                            if (isValid) {
-                                const listingPubkey = rootATag.split(':')[1];
-                                const isAutoApproved = listingPubkey === APPROVER_PUBKEY;
-                                const hasApprovalLabel = approvedListingATagsRef.current.has(rootATag);
-                                const isOwner = listingPubkey === pubkey;
-
-                                if (isAutoApproved || hasApprovalLabel || isOwner) {
-                                    processSpotEvent(event);
-                                }
+                            if (isAutoApproved || hasApprovalLabel) {
+                                processSpotEvent(event);
                             }
                         }
                     }
