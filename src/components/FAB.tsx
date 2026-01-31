@@ -212,7 +212,7 @@ export const FAB = React.memo<FABProps>(({
 
                         // Determine Unique Key (Spot A-Tag)
                         let uniqueKey = event.id;
-                        const aTag = event.tags.find((t: string[]) => t[0] === 'a')?.[1];
+                        const aTag = event.tags.find((t: string[]) => t[0] === 'a')?.[1]?.trim();
                         if (aTag) uniqueKey = aTag;
 
                         // Trigger callback for Listed Session Cancellation (if active spot changes status)
@@ -406,7 +406,7 @@ export const FAB = React.memo<FABProps>(({
                     const parentListingAddresses = new Set<string>();
 
                     for (const event of spotStatusEvents) {
-                        const aTag = event.tags.find((t: string[]) => t[0] === 'a')?.[1];
+                        const aTag = event.tags.find((t: string[]) => t[0] === 'a')?.[1]?.trim();
                         if (!aTag) continue;
 
                         // Get root a-tag pointing to parent Listing (has 'root' marker at position 3)
@@ -455,7 +455,7 @@ export const FAB = React.memo<FABProps>(({
                         // Create set of valid listing addresses found
                         const validAddresses = new Set<string>();
                         validListingsMap.forEach((e: any) => {
-                            const d = e.tags.find((t: string[]) => t[0] === 'd')?.[1];
+                            const d = e.tags.find((t: string[]) => t[0] === 'd')?.[1]?.trim();
                             if (d) validAddresses.add(`${KINDS.LISTED_PARKING_METADATA}:${e.pubkey}:${d}`);
                         });
 
@@ -472,7 +472,7 @@ export const FAB = React.memo<FABProps>(({
                             // Build set of approved listing a-tags
                             approvedListingATagsRef.current = new Set();
                             for (const event of approvalEvents) {
-                                const aTag = event.tags.find((t: string[]) => t[0] === 'a')?.[1];
+                                const aTag = event.tags.find((t: string[]) => t[0] === 'a')?.[1]?.trim();
                                 if (aTag) approvedListingATagsRef.current.add(aTag);
                             }
                             console.log('[Parlens] Found', approvedListingATagsRef.current.size, 'approved listings from approver');
