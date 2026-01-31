@@ -261,7 +261,7 @@ const MarkerPopup = memo(({ type, items, onClose, isPinned, onTogglePin, onCreat
                 </div>
                 <div className="flex items-center justify-between gap-2">
                     <div className="font-bold text-xs text-zinc-900 dark:text-white truncate flex-1">
-                        {session.listingName || 'Parking Spot'}
+                        {session.listing_name || 'Parking Spot'}
                     </div>
                     <div className="flex items-center gap-1.5 whitespace-nowrap">
                         {session.floor && (
