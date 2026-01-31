@@ -1951,7 +1951,7 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                             >
                                                                 <Users size={16} />
                                                             </button>
-                                                            {activeTab === 'my' && (listing.owners.includes(pubkey!) || listing.managers.includes(pubkey!)) ? (
+                                                            {activeTab === 'my' && listing.owners.includes(pubkey!) ? (
                                                                 <>
                                                                     <button onClick={(e) => { e.stopPropagation(); setEditingListing(listing); setShowCreateForm(true); }} style={{ WebkitTapHighlightColor: 'transparent' }} className="p-1.5 text-zinc-400 flex items-center justify-center">
                                                                         <Pencil size={16} />
@@ -1960,6 +1960,9 @@ export const ListedParkingPage: React.FC<ListedParkingPageProps> = ({ onClose, c
                                                                         <Trash2 size={16} />
                                                                     </button>
                                                                 </>
+                                                            ) : activeTab === 'my' && listing.managers.includes(pubkey!) ? (
+                                                                // Managers get no list-level actions (only spot grid updates)
+                                                                null
                                                             ) : (
                                                                 <div className="relative flex items-center">
                                                                     <button
@@ -2474,7 +2477,13 @@ const CreateListingModal: React.FC<any> = ({ editing, onClose, onCreated, curren
             content: ''
         };
 
-        if (!metadata.tags.find(t => t[0] === 'p' && t[1] === pubkey && t[2] === 'admin')) {
+
+        // Safety Check: Only self-promote to 'admin' if creating new or already an owner.
+        // Managers editing (if they somehow access this) should NOT become owners.
+        const isCreator = !editing;
+        const isAlreadyOwner = editing && editing.owners.includes(pubkey || '');
+
+        if ((isCreator || isAlreadyOwner) && !metadata.tags.find(t => t[0] === 'p' && t[1] === pubkey && t[2] === 'admin')) {
             metadata.tags.push(['p', pubkey, 'admin']);
         }
 
