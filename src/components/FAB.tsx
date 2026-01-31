@@ -475,20 +475,21 @@ export const FAB = React.memo<FABProps>(({
                         } catch (e) {
                             console.error('[Parlens] Failed to fetch approval labels:', e);
                         }
-                    }
 
-                    // Filter Process loop - only add valid (non-orphaned) AND approved spots
-                    // Events without root a-tags (legacy) are skipped
-                    for (const event of latestBySpot.values()) {
-                        const rootATag = event.tags.find((t: string[]) => t[0] === 'a' && t[3] === 'root')?.[1];
-                        if (rootATag && validAddresses.has(rootATag)) {
-                            // Check if listing is approved (from APPROVER or has approval label)
-                            const listingPubkey = rootATag.split(':')[1];
-                            const isAutoApproved = listingPubkey === APPROVER_PUBKEY;
-                            const hasApprovalLabel = approvedListingATagsRef.current.has(rootATag);
 
-                            if (isAutoApproved || hasApprovalLabel) {
-                                processSpotEvent(event);
+                        // Filter Process loop - only add valid (non-orphaned) AND approved spots
+                        // Events without root a-tags (legacy) are skipped
+                        for (const event of latestBySpot.values()) {
+                            const rootATag = event.tags.find((t: string[]) => t[0] === 'a' && t[3] === 'root')?.[1];
+                            if (rootATag && validAddresses.has(rootATag)) {
+                                // Check if listing is approved (from APPROVER or has approval label)
+                                const listingPubkey = rootATag.split(':')[1];
+                                const isAutoApproved = listingPubkey === APPROVER_PUBKEY;
+                                const hasApprovalLabel = approvedListingATagsRef.current.has(rootATag);
+
+                                if (isAutoApproved || hasApprovalLabel) {
+                                    processSpotEvent(event);
+                                }
                             }
                         }
                     }
