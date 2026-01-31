@@ -3910,12 +3910,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
 
                                     <p className="mb-4">
                                         <strong className="text-zinc-900 dark:text-white block mb-1">2. Find Parking</strong>
-                                        Click the blue search button to find parking around you or plan ahead by searching for parking near your destination by clicking the search for parking bubble at the top of your screen.
+                                        Click the blue search button to find parking around you or plan ahead by searching for parking near your destination. Click the search for parking bubble at the top of your screen to find parking near your destination and click the blue search button when you are nearby to refresh parking results in real-time.
                                     </p>
 
                                     <p className="mb-4">
                                         <strong className="text-zinc-900 dark:text-white block mb-1">3. Mark Your Spot</strong>
-                                        Once you find a spot, click the amber parking location button to mark your parked location and start your session. Click the session active bubble centre the map your parking marker at any time during the session.
+                                        Once you find a spot, click the amber parking location button to mark your parked location and start your session. Click the session active bubble to centre the map on your parking marker at any time during the session.
                                     </p>
 
                                     <p className="mb-4">
