@@ -259,18 +259,20 @@ const MarkerPopup = memo(({ type, items, onClose, isPinned, onTogglePin, onCreat
                 <div className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
                     Listed Session
                 </div>
-                <div className="space-y-1">
-                    <div className="font-bold text-base text-zinc-900 dark:text-white leading-tight">
+                <div className="flex items-center justify-between gap-2">
+                    <div className="font-bold text-xs text-zinc-900 dark:text-white truncate flex-1">
                         {session.listingName || 'Parking Spot'}
                     </div>
-                    <div className="text-sm font-bold text-blue-500">
-                        {session.shortName || `#${session.spotNumber}`}
-                    </div>
-                    {session.floor && (
-                        <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                            {session.floor}
+                    <div className="flex items-center gap-1.5 whitespace-nowrap">
+                        {session.floor && (
+                            <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                                {session.floor}
+                            </div>
+                        )}
+                        <div className="text-xs font-bold text-blue-500">
+                            {session.shortName || `#${session.spotNumber}`}
                         </div>
-                    )}
+                    </div>
                 </div>
             </div>
         );
@@ -3092,7 +3094,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onRequestScan, initial
                         >
                             <div className="flex flex-col items-center">
                                 {/* Bubble */}
-                                <div className="bg-[#34C759] p-2 rounded-full shadow-xl border-2 border-white cursor-pointer hover:scale-110 transition-transform">
+                                <div className="bg-[#34C759] p-2 rounded-full shadow-xl border-2 border-white cursor-pointer">
                                     <QrCode size={16} className="text-white" />
                                 </div>
                                 <div className="w-0.5 h-3 bg-white"></div>
