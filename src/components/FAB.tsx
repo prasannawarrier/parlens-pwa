@@ -446,6 +446,8 @@ export const FAB = React.memo<FABProps>(({
                             }
                         });
 
+                        console.log("[Parlens] DEBUG: dTags=", Array.from(dTags));
+                        console.log("[Parlens] DEBUG: authors=", Array.from(authors));
                         const validListingsMap = await pool.querySync(DEFAULT_RELAYS, {
                             kinds: [KINDS.LISTED_PARKING_METADATA], // 31147
                             '#d': Array.from(dTags),
